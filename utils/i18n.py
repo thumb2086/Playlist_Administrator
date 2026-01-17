@@ -1,7 +1,7 @@
 class I18N:
     translations = {
         'zh-TW': {
-            'app_title': "Spotube 歌單管理員",
+            'app_title': "歌單管理員",
             'step_1_title': "步驟 1: 管理 Spotify 歌單連結",
             'add_url_btn': "新增 Spotify 連結",
             'remove_url_btn': "移除選取項目",
@@ -99,7 +99,7 @@ class I18N:
             'stats_no_change': "無變動",
         },
         'en': {
-            'app_title': "Spotube Playlist Manager",
+            'app_title': "Playlist Manager",
             'step_1_title': "Step 1: Manage Spotify Playlist URLs",
             'add_url_btn': "Add Spotify URL",
             'remove_url_btn': "Remove Selected",

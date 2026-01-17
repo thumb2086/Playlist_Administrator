@@ -46,6 +46,7 @@ def get_playlist_name(sp_url):
     except: pass
     return None
 
+def scrape_via_spotify_embed(config, stats, log_func):
     from utils.i18n import _
     target_urls = config.get('spotify_urls', [])
     if not target_urls:

@@ -25,12 +25,12 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "SpotubeManager" --add-data "core;core" --add-data "gui;gui" --add-data "utils;utils" main.py
+        pyinstaller --noconfirm --onefile --windowed --name "PlaylistManager" --add-data "core;core" --add-data "gui;gui" --add-data "utils;utils" main.py
 
     - name: Create Release
       id: create_release
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/SpotubeManager.exe
+        files: dist/PlaylistManager.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,31 +1,31 @@
 # Spotube Playlist Manager (GUI)
 
-這是一個自動化工具，幫助你整理音樂庫，並匯出成方便放入 USB 的歌單資料夾。
-**新版介面 (GUI)，操作更直覺！**
+An automation tool to organize your music library and export it into USB-ready playlist folders.
+**Now with a GUI for a more intuitive experience!**
 
-## 安裝
+## Installation
 
-1.  開啟終端機，執行 `pip install -r requirements.txt`。
-2.  確認電腦已安裝 `ffmpeg`。
+1.  Open your terminal and run `pip install -r requirements.txt`.
+2.  Ensure `ffmpeg` is installed on your system.
 
-## 如何使用
+## How to Use
 
-執行 `python main.py`，視窗開啟後：
+Run `python main.py`. Once the window opens:
 
-**步驟 1：管理歌單 (Manage URLs)**
-*   **新增歌單**：去 [Chosic Spotify Analyzer](https://www.chosic.com/spotify-playlist-analyzer/) 分析你想下載的 Spotify 歌單，然後複製網址 (有 `?plid=...` 的那個) 貼上，按 "Add URL"。
-*   **手動歌單**：你也可以直接在 `Playlists` 資料夾放入文字檔 (`.txt`)，一行一首歌名。
+**Step 1: Manage URLs**
+*   **Add Playlists**: Use [Chosic Spotify Analyzer](https://www.chosic.com/spotify-playlist-analyzer/) to analyze the Spotify playlist you want to download. Copy the URL (the one with `?plid=...`) and paste it, then click "Add URL".
+*   **Manual Playlists**: You can also manually place text files (`.txt`) into the `Playlists` folder, with one song title per line.
 
-**步驟 2：開始下載 (Actions)**
-*   點擊 **[Update All]**：程式會自動抓取歌單內容，並去 YouTube 下載缺少的歌曲。
-    *   (程式會智慧比對，不會重複下載已經有的歌)
-    *   (支援斷點續傳，下次開這按一下就好)
+**Step 2: Actions**
+*   Click **[Update All (Download & Sync)]**: The program will automatically fetch playlist content and download any missing songs from YouTube.
+    *   (Smart matching prevents redownloading existing songs)
+    *   (Supports resuming; just click the button again next time)
 
-**步驟 3：匯出成品**
-*   點擊 **[Export to USB]**：把你整理好的歌，複製到 `USB_Export` 資料夾。
-*   完成後會自動開啟資料夾，你直接拉到 USB 隨身碟即可。
+**Step 3: Exporting**
+*   Click **[Export to USB]**: Copies your organized songs into the `USB_Export` folder.
+*   The folder will open automatically once finished. You can then simply drag the contents to your USB drive.
 
-## 資料夾說明
-*   `Library/`: **[總倉庫]** 下載下來的 MP3 都在這，不要刪。
-*   `Playlists/`: **[歌單]** 存放歌單資訊的檔案。
-*   `USB_Export/`: **[成品]** 每次匯出前會清空，只放你這次要的歌。
+## Folder Structure
+*   `Library/`: **[Master Repository]** All downloaded MP3s are stored here. Do not delete them.
+*   `Playlists/`: **[Playlists]** Contains information about your playlists.
+*   `USB_Export/`: **[Output]** This folder is cleared before each export and contains only the songs selected for the current export.

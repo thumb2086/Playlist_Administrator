@@ -105,8 +105,11 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
             try:
                 check_stop()
                 info = ydl.extract_info(f"ytsearch1:{search_query}", download=True)
-                if 'entries' in info:
+                if 'entries' in info and info['entries']:
                     info = info['entries'][0]
+                elif 'entries' in info:
+                    log_func(_('dl_fail', "No search results found."))
+                    return None
 
             except TaskAbortedException:
                 raise 
@@ -114,6 +117,14 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                 error_msg = str(e).lower()
                 if "premieres in" in error_msg:
                     log_func(_('skip_premiere'))
+                elif "416" in error_msg:
+                    log_func(_('dl_fail', "HTTP 416: Corrupted partial file detected. Clearing and retrying next time."))
+                    # Try to delete .part file if it exists
+                    try:
+                        part_file = ydl.prepare_filename(info) + ".part" if 'info' in locals() else None
+                        if part_file and os.path.exists(part_file):
+                            os.remove(part_file)
+                    except: pass
                 else:
                     log_func(_('dl_fail', e))
                 return None
