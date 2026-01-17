@@ -54,7 +54,7 @@ def find_song_in_library(song_name, file_list):
     
     return None
 
-def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None):
+def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None):
     from core.spotify import scrape_via_spotify_embed
     from core.downloader import download_song
     
@@ -147,6 +147,9 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 audio_files_cache.append(res)
                 successful_downloads += 1
                 
+                if post_download_callback:
+                    post_download_callback()
+
                 if successful_downloads % 10 == 0:
                     log_func(_('dl_rest', successful_downloads))
                     time.sleep(15)

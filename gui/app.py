@@ -404,7 +404,11 @@ class PlaylistApp:
         try:
             update_library_logic(
                 self.config, stats, self.log, self.update_progress,
-                post_scrape_callback=lambda: self.root.after(0, self.refresh_url_list)
+                post_scrape_callback=lambda: self.root.after(0, self.refresh_url_list),
+                post_download_callback=lambda: (
+                    self.root.after(0, self.refresh_url_list),
+                    self.root.after(0, self.update_stats_ui)
+                )
             )
             
             if not self.stop_event.is_set():
