@@ -16,12 +16,21 @@ class UpdateStats:
 def parse_playlist(file_path):
     songs = []
     if os.path.exists(file_path):
+        import re
+        def clean_line(text):
+            # Aggressively clean "E" prefix if followed by Uppercase (Explicit tag artifact)
+            # e.g. "EYosebe" -> "Yosebe"
+            # Since m3u lines are "Artist - Title", we only target the start
+            return re.sub(r'^E(?=[A-Z])', '', text)
+
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith('#'):
                     continue
-                songs.append(line)
+                # Clean the line before adding
+                cleaned_line = clean_line(line)
+                songs.append(cleaned_line)
     return songs
 
 def find_song_in_library(song_name, file_list):
@@ -86,13 +95,14 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
 
     # PHASE 1: Identify Missing Songs & Renaming
     log_func(_('analyzing_missing', len(files)))
-    songs_to_download = []
+    songs_to_download = [] # List of {'name': s, 'playlist': pl}
     
     for pl_file in files:
         if stats and stats.stop_event and stats.stop_event.is_set():
              log_func(_('task_stopped'))
              return
 
+        pl_name = os.path.splitext(os.path.basename(pl_file))[0]
         songs = parse_playlist(pl_file)
         for song_name in songs:
              if stats and stats.stop_event and stats.stop_event.is_set():
@@ -117,8 +127,9 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                         except Exception as e:
                             log_func(_('rename_fail', e))
              else:
-                 if song_name not in songs_to_download:
-                     songs_to_download.append(song_name)
+                 # Check if already in list to avoid duplicates across diff playlists
+                 if not any(d['name'] == song_name for d in songs_to_download):
+                     songs_to_download.append({'name': song_name, 'playlist': pl_name})
 
     total_missing = len(songs_to_download)
     log_func(_('stats_complete', total_missing))
@@ -131,7 +142,11 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         current_dl = 0
         successful_downloads = 0  
         
-        for song_name in songs_to_download:
+        for item in songs_to_download:
+            song_name = item['name']
+            pl_name = item['playlist']
+            remaining = total_missing - (current_dl + 1)
+            
             if stats and stats.stop_event and stats.stop_event.is_set():
                  log_func(_('task_stopped'))
                  return
@@ -139,7 +154,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             if hasattr(stats, 'pause_event') and stats.pause_event:
                  stats.pause_event.wait()
                  
-            log_func(_('dl_progress', current_dl+1, total_missing, song_name))
+            log_func(_('dl_progress', current_dl+1, total_missing, remaining, pl_name, song_name))
             
             res = download_song(song_name, library_path, audio_format, log_func, audio_files_cache, stats)
             if res and os.path.exists(res):
@@ -148,7 +163,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 successful_downloads += 1
                 
                 if post_download_callback:
-                    post_download_callback()
+                    post_download_callback(audio_files_cache)
 
                 if successful_downloads % 10 == 0:
                     log_func(_('dl_rest', successful_downloads))
@@ -158,7 +173,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             if progress_func: progress_func(current_dl, total_missing)
             
             if current_dl < total_missing:  
-                delay = random.uniform(1, 3)
+                delay = random.uniform(3, 8)
                 time.sleep(delay)
     else:
         log_func(_('lib_up_to_date'))
@@ -166,14 +181,15 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
 
     log_func(_('update_complete'))
 
-def get_playlist_completeness_report(playlists, library_path):
+def get_playlist_completeness_report(playlists, library_path, audio_files_cache=None):
     """Returns a dict {pl_file: (is_complete, missing_count, total_count)}"""
     report = {}
     
-    # scan once
-    search_pattern = os.path.join(library_path, "**", "*")
-    all_files = glob.glob(search_pattern, recursive=True)
-    audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
+    if audio_files_cache is None:
+        # scan once
+        search_pattern = os.path.join(library_path, "**", "*")
+        all_files = glob.glob(search_pattern, recursive=True)
+        audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
 
     for pl_file in playlists:
         songs = parse_playlist(pl_file)
@@ -239,7 +255,7 @@ def export_usb_logic(config, selected_playlists, log_func):
     else:
         log_func(_('open_dir_error', abs_export_path))
 
-def get_detailed_stats(config):
+def get_detailed_stats(config, audio_files=None):
     """
     Returns a dictionary with:
     - total_songs: count of unique files in library
@@ -254,9 +270,10 @@ def get_detailed_stats(config):
     playlists_path = config['playlists_path']
     
     # 1. Library Stats
-    search_pattern = os.path.join(library_path, "**", "*")
-    all_files = [f for f in glob.glob(search_pattern, recursive=True) if os.path.isfile(f)]
-    audio_files = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
+    if audio_files is None:
+        search_pattern = os.path.join(library_path, "**", "*")
+        all_files = [f for f in glob.glob(search_pattern, recursive=True) if os.path.isfile(f)]
+        audio_files = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
     
     total_songs = len(audio_files)
     total_size_bytes = sum(os.path.getsize(f) for f in audio_files)

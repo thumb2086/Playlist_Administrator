@@ -124,12 +124,19 @@ def scrape_via_spotify_embed(config, stats, log_func):
                                       (entity.get('tracks') and entity.get('tracks').get('items'))
                          
                          if track_list:
+                             import re
+                             def clean_artist_name(name):
+                                 # Remove "E" prefix if followed by Uppercase (Explicit tag artifact)
+                                 # e.g. "EYosebe" -> "Yosebe"
+                                 if not name: return name
+                                 return re.sub(r'^E(?=[A-Z])', '', name)
+
                              for item in track_list:
                                  track = item.get('track', item)
                                  name = track.get('name')
                                  artists = track.get('artists', [])
                                  if name and artists:
-                                     artist_name = artists[0].get('name')
+                                     artist_name = clean_artist_name(artists[0].get('name'))
                                      tracks.append(f"{artist_name} - {name}")
                  except Exception as e:
                      log_func(_('json_error', e))
@@ -138,11 +145,23 @@ def scrape_via_spotify_embed(config, stats, log_func):
                  rows = soup.find_all("li", class_=lambda x: x and "TracklistRow_trackListRow" in x)
                  if rows:
                      log_func(_('html_fallback', len(rows)))
+                     import re
+                     def clean_html_text(text):
+                         # Aggressively clean "E" prefix which often appears in HTML scraping
+                         if not text: return text
+                         return re.sub(r'^E(?=[A-Z])', '', text)
+
                      for row in rows:
                          t_tag = row.find("h3", class_=lambda x: x and "TracklistRow_title" in x)
                          a_tag = row.find("h4", class_=lambda x: x and "TracklistRow_subtitle" in x)
+                         
                          if t_tag and a_tag:
-                             tracks.append(f"{a_tag.get_text(strip=True)} - {t_tag.get_text(strip=True)}")
+                             # Try to get direct text if possible, but get_text is safer for coverage
+                             artist_text = a_tag.get_text(strip=True)
+                             title_text = t_tag.get_text(strip=True)
+                             
+                             artist_clean = clean_html_text(artist_text)
+                             tracks.append(f"{artist_clean} - {title_text}")
 
             if tracks:
                 # Save name to config mapping

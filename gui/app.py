@@ -169,7 +169,7 @@ class PlaylistApp:
         self.stats_frame.config(text=_('stats_title'))
         self.log_frame.config(text=_('log_title'))
 
-    def refresh_url_list(self):
+    def refresh_url_list(self, audio_cache=None):
         self.url_listbox.delete(0, tk.END)
         url_names = self.config.get('url_names', {})
         last_updated = self.config.get('last_updated', {})
@@ -191,7 +191,7 @@ class PlaylistApp:
                 pl_files.append(pl_file)
         
         # Batch check completeness
-        report = get_playlist_completeness_report(pl_files, library_path)
+        report = get_playlist_completeness_report(pl_files, library_path, audio_files_cache=audio_cache)
 
         for url in urls:
             name = url_names.get(url, url)
@@ -229,10 +229,10 @@ class PlaylistApp:
         self.update_stats_ui()
         self.log(_('reset_done'))
 
-    def update_stats_ui(self):
+    def update_stats_ui(self, audio_cache=None):
         def _bg_update():
             try:
-                stats = get_detailed_stats(self.config)
+                stats = get_detailed_stats(self.config, audio_files=audio_cache)
                 
                 total_songs = stats['total_songs']
                 total_size_mb = stats['total_size_mb']
@@ -405,9 +405,9 @@ class PlaylistApp:
             update_library_logic(
                 self.config, stats, self.log, self.update_progress,
                 post_scrape_callback=lambda: self.root.after(0, self.refresh_url_list),
-                post_download_callback=lambda: (
-                    self.root.after(0, self.refresh_url_list),
-                    self.root.after(0, self.update_stats_ui)
+                post_download_callback=lambda cache: (
+                    self.root.after(0, lambda: self.refresh_url_list(cache)),
+                    self.root.after(0, lambda: self.update_stats_ui(cache))
                 )
             )
             

@@ -1,8 +1,13 @@
 import os
+import re
 import yt_dlp
-import time
 from utils.helpers import sanitize_filename
 from core.library import find_song_in_library
+
+def strip_ansi(text):
+    """Removes ANSI escape sequences from strings"""
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
 
 class YdlLogger:
     def __init__(self, log_func, stats=None):
@@ -14,27 +19,24 @@ class YdlLogger:
             raise TaskAbortedException("Task aborted by user")
     def debug(self, msg):
         self.check_stop()
-        if "Extracting URL" in msg or "Downloading" in msg:
-             # self.log_func(f"[ydl] {msg}") 
-             pass
     def warning(self, msg):
         from utils.i18n import _
         self.check_stop()
-        # Filter out noisy YouTube technical warnings
         if "formats have been skipped" in msg or "SABR streaming" in msg:
             return
         if "does not support cookies" in msg:
             return
-        self.log_func(_('ytdlp_warn', msg))
+        self.log_func(_('ytdlp_warn', strip_ansi(msg)))
     def error(self, msg):
         from utils.i18n import _
         self.check_stop()
-        if "not a bot" in msg or "sign in to confirm" in msg:
+        clean_msg = strip_ansi(msg)
+        if "not a bot" in clean_msg or "sign in to confirm" in clean_msg:
              self.log_func(_('bot_detect'))
-        elif "Task aborted by user" in msg:
+        elif "Task aborted by user" in clean_msg:
              pass 
         else:
-             self.log_func(_('dl_fail', msg))
+             self.log_func(_('dl_fail', clean_msg))
 
 class TaskAbortedException(Exception):
     pass
@@ -59,92 +61,113 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
     clean_name = sanitize_filename(song_name)
     out_template = os.path.join(library_path, f"{clean_name}.%(ext)s")
 
-    search_query = song_name.replace(',', ' ').replace('\xa0', ' ').strip()
-    search_query = ' '.join(search_query.split()) # Normalize whitespace
+    # Generate search candidates
+    candidates = []
+    # 1. Base clean query
+    base_query = song_name.replace(',', ' ').replace('\xa0', ' ').strip()
+    base_query = ' '.join(base_query.split())
+    candidates.append(base_query)
     
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': out_template,
-        'quiet': True,
-        'no_warnings': True, 
-        'logger': YdlLogger(log_func, stats),
-        'nocheckcertificate': True,
-        'extractor_args': {
-            'youtube': {
-                'remote_components': 'ejs:github',
-            }
-        },
-        'progress_hooks': [progress_hook],
-    }
+    # 2. Replace dash with space
+    if ' - ' in base_query:
+        c2 = base_query.replace(' - ', ' ')
+        if c2 not in candidates: candidates.append(c2)
+        
+    # 3. Title only (Last resort)
+    if ' - ' in song_name: # Use original name to find split
+        parts = song_name.rsplit(' - ', 1)
+        if len(parts) > 1:
+            c3 = parts[1].strip()
+            # Clean it too
+            c3 = c3.replace(',', ' ').replace('\xa0', ' ').strip()
+            c3 = ' '.join(c3.split())
+            if c3 and c3 not in candidates:
+                candidates.append(c3)
+
+    from utils.i18n import _
     
-    # Check for cookies.txt
-    script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    cookies_path = os.path.join(script_dir, 'cookies.txt')
-    if os.path.exists(cookies_path):
-         from utils.i18n import _
-         ydl_opts['cookiefile'] = cookies_path
-         log_func(_('cookie_hint'))
-
-    if audio_format == 'flac':
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'flac',
-        }, {'key': 'FFmpegMetadata'}]
-    else:
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }, {'key': 'FFmpegMetadata'}]
-
-    try:
-        from utils.i18n import _
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            log_func(_('searching', search_query))
-            
+    for idx, current_query in enumerate(candidates):
+        is_last_candidate = (idx == len(candidates) - 1)
+        
+        max_retries = 2
+        for attempt in range(max_retries):
             try:
-                check_stop()
-                info = ydl.extract_info(f"ytsearch1:{search_query}", download=True)
-                if 'entries' in info and info['entries']:
-                    info = info['entries'][0]
-                elif 'entries' in info:
-                    log_func(_('dl_fail', "No search results found."))
-                    return None
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    if attempt == 0:
+                        if idx == 0:
+                            log_func(_('searching', current_query))
+                        else:
+                            log_func(f"⚠️ {_('dl_fail', 'No results')}. Retrying with: {current_query}...")
+                    
+                    check_stop()
+                    # Use 'detailed' to catch 416 better? No, standard is fine.
+                    try:
+                        info = ydl.extract_info(f"ytsearch1:{current_query}", download=True)
+                    except yt_dlp.utils.DownloadError as de:
+                         # Re-raise if it's 416 or other critical errors to be caught below
+                         raise de
+                    except Exception as e:
+                         # Fallback for generic
+                         raise e
+
+                    if 'entries' in info and info['entries']:
+                        info = info['entries'][0]
+                    elif 'entries' in info:
+                        # Empty entries = No results
+                        # Break inner retry loop to try next candidate
+                        break 
+                    else:
+                        pass
+
+                    filename = ydl.prepare_filename(info)
+                    base, ext = os.path.splitext(filename)
+                    final_path = base + "." + audio_format
+                    
+                    if os.path.exists(final_path):
+                        log_func(f" -> {os.path.basename(final_path)}")
+                        return final_path
+                    
+                    if os.path.exists(filename):
+                        log_func(f" -> {os.path.basename(filename)}")
+                        return filename
+                    
+                    return final_path
 
             except TaskAbortedException:
-                raise 
+                return None
             except Exception as e:
-                error_msg = str(e).lower()
+                error_msg = strip_ansi(str(e)).lower()
                 if "premieres in" in error_msg:
                     log_func(_('skip_premiere'))
+                    return None
                 elif "416" in error_msg:
-                    log_func(_('dl_fail', "HTTP 416: Corrupted partial file detected. Clearing and retrying next time."))
-                    # Try to delete .part file if it exists
+                    log_func(_('dl_fail', "HTTP 416: Corrupted partial file detected. Clearing for retry."))
                     try:
-                        part_file = ydl.prepare_filename(info) + ".part" if 'info' in locals() else None
-                        if part_file and os.path.exists(part_file):
-                            os.remove(part_file)
+                        part_pattern = os.path.join(library_path, f"{clean_name}.*")
+                        import glob
+                        for f in glob.glob(part_pattern):
+                            if f.endswith('.part'):
+                                os.remove(f)
                     except: pass
+                    
+                    if attempt < max_retries - 1:
+                        log_func("Retrying download...")
+                        continue # Retry same candidate
+                    else:
+                        # If 416 persists, maybe try next candidate? 
+                        # Unlikely to help if it's the same video, but if next candidate finds diff video it might.
+                        break 
+                elif "sign in" in error_msg or "bot" in error_msg:
+                    log_func(_('bot_detect'))
+                    return None # Stop trying if bot detected
                 else:
-                    log_func(_('dl_fail', e))
-                return None
-
-            filename = ydl.prepare_filename(info)
-            base, ext = os.path.splitext(filename)
-            final_path = base + "." + audio_format
-            
-            if os.path.exists(final_path):
-                log_func(f" -> {os.path.basename(final_path)}")
-                return final_path
-            
-            if os.path.exists(filename):
-                log_func(f" -> {os.path.basename(filename)}")
-                return filename
-            
-            return final_path
-            
-    except TaskAbortedException:
-        return None
-    except Exception as e:
-        log_func(_('dl_module_error', e))
-        return None
+                    # If it's the last candidate and last retry, log error
+                    if is_last_candidate and attempt == max_retries-1:
+                        log_func(_('dl_fail', strip_ansi(str(e))))
+                    # Otherwise silently fail to let next candidate try
+                    break 
+        
+        # If we reached here, it means this candidate failed (break or exhausted retries)
+        # Loop continues to next candidate
+        
+    return None
