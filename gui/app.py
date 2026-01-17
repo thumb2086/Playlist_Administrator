@@ -125,6 +125,10 @@ class PlaylistApp:
         self.progress_bar = ttk.Progressbar(self.root, variable=self.progress_var, maximum=100)
         self.progress_bar.pack(fill="x", padx=20, pady=5)
         
+        # Speed Display
+        self.speed_label = tk.Label(self.root, text="準備就緒", font=("Microsoft JhengHei", 9), fg="#666")
+        self.speed_label.pack(fill="x", padx=20, pady=(0, 5))
+        
         # 3. Log Section
         self.log_frame = tk.LabelFrame(self.root, text=_('log_title'), font=("Microsoft JhengHei", 10, "bold"))
         self.log_frame.pack(fill="both", expand=True, padx=10, pady=5)
@@ -139,6 +143,9 @@ class PlaylistApp:
         if total == 0: return
         pct = (current / total) * 100
         self.progress_var.set(pct)
+    
+    def update_speed_display(self, speed_text):
+        self.root.after(0, lambda: self.speed_label.config(text=f"下載速度: {speed_text}"))
 
     def _log_ui(self, message):
         self.log_text.config(state='normal')
@@ -408,7 +415,8 @@ class PlaylistApp:
                 post_download_callback=lambda cache: (
                     self.root.after(0, lambda: self.refresh_url_list(cache)),
                     self.root.after(0, lambda: self.update_stats_ui(cache))
-                )
+                ),
+                speed_display_callback=self.update_speed_display
             )
             
             if not self.stop_event.is_set():
@@ -419,6 +427,7 @@ class PlaylistApp:
             self.log(_('error_critical', e))
             
         self.log(_('update_end'))
+        self.root.after(0, lambda: self.speed_label.config(text="準備就緒"))
         self.root.after(0, self.refresh_url_list)
         self.root.after(0, self.update_stats_ui)
         self.root.after(0, lambda: self.update_btn.config(state="normal", text=_('update_all_btn'), bg="#d0f0c0"))

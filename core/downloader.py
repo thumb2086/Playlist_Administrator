@@ -41,15 +41,77 @@ class YdlLogger:
 class TaskAbortedException(Exception):
     pass
 
-def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None):
+def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None):
     """Downloads song in specified format (mp3 or flac)"""
     
+    # Progress tracking state
+    import time
+    last_progress_time = [0]  # Use list to allow modification in nested function
+    last_progress_pct = [0]
+
     def check_stop():
-        if stats and stats.stop_event and stats.stop_event.is_set():
+        if stats and getattr(stats, 'stop_event', None) and stats.stop_event.is_set():
             raise TaskAbortedException("Task aborted by user")
 
     def progress_hook(d):
         check_stop()
+        if d['status'] == 'downloading':
+            current_time = time.time()
+            
+            # Get progress data
+            downloaded = d.get('downloaded_bytes', 0)
+            total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+            speed = d.get('speed', 0)
+            eta = d.get('eta', 0)
+            
+            # Calculate current percentage
+            current_pct = (downloaded / total * 100) if total > 0 else 0
+            
+            # Only log if: 2+ seconds passed OR 10%+ progress made
+            time_elapsed = current_time - last_progress_time[0]
+            pct_change = abs(current_pct - last_progress_pct[0])
+            
+            if time_elapsed >= 2 or pct_change >= 10:
+                # Format speed with better handling
+                if speed and speed > 0:
+                    if speed >= 1024 * 1024:
+                        speed_str = f"{speed / (1024 * 1024):.2f} MB/s"
+                    elif speed >= 1024:
+                        speed_str = f"{speed / 1024:.1f} KB/s"
+                    else:
+                        speed_str = f"{speed:.0f} B/s"
+                else:
+                    speed_str = "等待中..."
+                
+                # Update speed display if callback provided
+                if speed_display_callback:
+                    speed_display_callback(speed_str)
+                
+                # Format progress
+                if total > 0:
+                    pct = (downloaded / total) * 100
+                    mb_downloaded = downloaded / (1024 * 1024)
+                    mb_total = total / (1024 * 1024)
+                    
+                    # Format ETA
+                    if eta:
+                        eta_min = eta // 60
+                        eta_sec = eta % 60
+                        eta_str = f"{int(eta_min)}:{int(eta_sec):02d}"
+                    else:
+                        eta_str = "?"
+                    
+                    log_func(f"  ⬇️ {pct:.1f}% | {mb_downloaded:.1f}/{mb_total:.1f} MB | {speed_str} | ETA {eta_str}")
+                else:
+                    mb_downloaded = downloaded / (1024 * 1024)
+                    log_func(f"  ⬇️ {mb_downloaded:.1f} MB | {speed_str}")
+                
+                # Update tracking state
+                last_progress_time[0] = current_time
+                last_progress_pct[0] = current_pct
+                
+        elif d['status'] == 'finished':
+            log_func("  ✅ Download complete, converting...")
     
     # Check if we already have it
     existing = find_song_in_library(song_name, file_list)
@@ -60,6 +122,30 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
 
     clean_name = sanitize_filename(song_name)
     out_template = os.path.join(library_path, f"{clean_name}.%(ext)s")
+
+    # Configure yt-dlp options
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': out_template,
+        'quiet': True,
+        'no_warnings': True,
+        'extract_audio': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': audio_format,
+            'preferredquality': '0' if audio_format == 'flac' else '320',
+        }],
+        'logger': YdlLogger(log_func, stats),
+        'progress_hooks': [progress_hook],
+        'keepvideo': False,
+        'windowsfilenames': True,
+        'restrictfilenames': False,
+    }
+    
+    # Add cookies if available
+    cookies_path = 'cookies.txt'
+    if os.path.exists(cookies_path):
+        ydl_opts['cookiefile'] = cookies_path
 
     # Generate search candidates
     candidates = []
@@ -161,8 +247,8 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     log_func(_('bot_detect'))
                     return None # Stop trying if bot detected
                 else:
-                    # If it's the last candidate and last retry, log error
-                    if is_last_candidate and attempt == max_retries-1:
+                    # If it's the last candidate, log error before giving up
+                    if is_last_candidate:
                         log_func(_('dl_fail', strip_ansi(str(e))))
                     # Otherwise silently fail to let next candidate try
                     break 
