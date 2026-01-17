@@ -1,0 +1,31 @@
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local user data
+config.json
+cookies.txt
+cookies.txt.bak
+
+# App data directories
+Library/
+Playlists/
+USB_Export/
+Test_Library/
+
+# Logs and temporary files
+*.txt
+*.log
+*.bak
+
+# IDE and System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
