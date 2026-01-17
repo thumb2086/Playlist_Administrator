@@ -1,0 +1,7 @@
+yt-dlp
+requests
+beautifulsoup4
+ffmpeg-python
+zhconv
+pyinstaller
+mutagen

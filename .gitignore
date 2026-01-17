@@ -21,6 +21,7 @@ Test_Library/
 
 # Logs and temporary files
 *.txt
+!requirements.txt
 *.log
 *.bak
 
@@ -28,4 +29,6 @@ Test_Library/
 .vscode/
 .idea/
 .DS_Store
-Thumbs.db
+# Release and Technical guides (Local only)
+Docs_ZH/
+RELEASING.md
