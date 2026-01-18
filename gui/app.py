@@ -142,9 +142,15 @@ class PlaylistApp:
         self.recent_lbl.pack(side="top", anchor="w", padx=15, pady=(0, 5))
         
         # Progress Bar
+        progress_frame = tk.Frame(self.root)
+        progress_frame.pack(fill="x", padx=20, pady=5)
+
         self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(self.root, variable=self.progress_var, maximum=100)
-        self.progress_bar.pack(fill="x", padx=20, pady=5)
+        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100)
+        self.progress_bar.pack(side="left", fill="x", expand=True)
+        
+        self.progress_label = tk.Label(progress_frame, text="", font=("Microsoft JhengHei", 9), width=10, anchor="e")
+        self.progress_label.pack(side="right", padx=5)
         
         # Speed Display
         self.speed_label = tk.Label(self.root, text="準備就緒", font=("Microsoft JhengHei", 9), fg="#666")
@@ -164,12 +170,17 @@ class PlaylistApp:
 
     def update_progress(self, current, total):
         now = time.time()
-        if now - self.last_progress_update < 0.1: # Throttle to 10fps
+        if now - self.last_progress_update < 0.1 and current < total: # Throttle, but always show final update
             return
         self.last_progress_update = now
+        
         if total > 0:
             pct = (current / total) * 100
             self.progress_var.set(pct)
+            self.progress_label.config(text=f"{current} / {total}")
+        else:
+            self.progress_var.set(0)
+            self.progress_label.config(text="")
     
     def update_speed_display(self, speed_text):
         now = time.time()
@@ -486,6 +497,7 @@ class PlaylistApp:
             
         self.log(_('update_end'))
         self.root.after(0, lambda: self.speed_label.config(text="準備就緒"))
+        self.root.after(0, lambda: self.progress_label.config(text=""))
         self.root.after(0, self.refresh_url_list)
         self.root.after(0, self.update_stats_ui)
         self.root.after(0, lambda: self.update_btn.config(state="normal", text=_('update_all_btn'), bg="#d0f0c0"))
@@ -493,52 +505,58 @@ class PlaylistApp:
         self.root.after(0, lambda: self.cancel_btn.config(state="disabled", text=_('cancel_btn')))
 
     def show_stats_window(self, stats):
+        total_downloaded = len(stats.songs_downloaded)
+        if total_downloaded == 0:
+            messagebox.showinfo(_('stats_win_title'), _('no_new_songs_downloaded'))
+            return
+
         win = tk.Toplevel(self.root)
         win.title(_('stats_win_title'))
-        win.geometry("500x400")
+        win.geometry("550x450")
         
-        txt = scrolledtext.ScrolledText(win, font=("Microsoft JhengHei", 10))
+        txt = scrolledtext.ScrolledText(win, font=("Microsoft JhengHei", 10), wrap=tk.WORD)
         txt.pack(fill="both", expand=True, padx=10, pady=10)
         
         report = []
-        report.append(f"=== {_('update_stats_title')} ===\n")
+        report.append(f"=== {_('update_stats_title')} ===")
         report.append(_('stats_playlists_scanned', stats.playlists_scanned))
-        report.append(_('stats_songs_downloaded', len(stats.songs_downloaded)) + "\n")
+        report.append(_('stats_songs_downloaded', total_downloaded) + "\n")
         
-        if stats.songs_downloaded:
-            report.append("--- " + _('stats_new_songs') + " ---")
-            for idx, s in enumerate(stats.songs_downloaded, 1):
-                report.append(f"{idx}. {s}")
-            report.append("")
+        # --- Download Summary by Category ---
+        summary = {'華語': set(), '日語': set(), '韓語': set(), '西洋': set(), '其他': set()}
+        
+        for pl_name, songs in stats.playlist_updates.items():
+            lower_pl = pl_name.lower()
+            cat = '其他'
+            if any(k in lower_pl for k in ['華語', '中文', 'chinese', 'mandarin']):
+                cat = '華語'
+            elif any(k in lower_pl for k in ['日', 'japan', 'anime', '東洋', 'j-pop']):
+                cat = '日語'
+            elif any(k in lower_pl for k in ['韓', 'korea', 'k-pop']):
+                cat = '韓語'
+            elif any(k in lower_pl for k in ['西洋', 'english', 'edm', 'western']):
+                cat = '西洋'
+            
+            for song in songs:
+                summary[cat].add(song)
 
-        if stats.playlist_changes:
-            report.append("--- " + _('stats_playlist_changes') + " ---")
-            for pl, change in stats.playlist_changes.items():
-                added = change['added']
-                removed = change['removed']
-                if added or removed:
-                    report.append(f"[{pl}]")
-                    if added:
-                        report.append(_('stats_added_songs', len(added)))
-                        for s in added: report.append(f"    - {s}")
-                    if removed:
-                        report.append(_('stats_removed_songs', len(removed)))
-                        for s in removed: report.append(f"    - {s}")
-                else:
-                    report.append(f"[{pl}] " + _('stats_no_change'))
+        report.append(f"--- {_('dl_summary_title')} ---")
+        report.append(_('dl_summary_chinese', len(summary['華語'])))
+        report.append(_('dl_summary_japanese', len(summary['日語'])))
+        report.append(_('dl_summary_korean', len(summary['韓語'])))
+        report.append(_('dl_summary_western', len(summary['西洋'])))
+        report.append(_('dl_summary_other', len(summary['其他'])) + "\n")
+
+        # --- Playlist Update Statistics ---
+        updated_playlists = {name: songs for name, songs in stats.playlist_updates.items() if songs}
+        total_updated_playlists = len(updated_playlists)
+        total_playlists = self.config.get('spotify_urls', [])
+
+        report.append(f"--- {_('playlist_update_summary')} ---")
+        report.append(_('playlist_update_counts', total_updated_playlists, len(total_playlists)))
         
-        # Display playlist-specific update information
-        if stats.playlist_updates:
-            report.append("\n--- " + _('playlist_update_summary') + " ---")
-            for pl_name, songs in stats.playlist_updates.items():
-                if songs:
-                    report.append(f"[{pl_name}] - {len(songs)} {_('songs_updated')}")
-                    for song in songs:
-                        report.append(f"    ✓ {song}")
-                else:
-                    report.append(f"[{pl_name}] - {_('no_songs_updated')}")
-        else:
-              report.append(_('no_pl_files'))
+        for pl_name, songs in sorted(updated_playlists.items(), key=lambda item: len(item[1]), reverse=True):
+            report.append(f"  - {pl_name}: {_('stats_added_songs', len(songs))}")
 
         txt.insert(tk.END, "\n".join(report))
         txt.config(state='disabled')

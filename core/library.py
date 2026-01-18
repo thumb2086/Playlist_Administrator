@@ -37,10 +37,24 @@ def parse_playlist(file_path):
 def get_normalized_tokens(text):
     import re
     from zhconv import convert
-    text = convert(str(text), 'zh-cn') 
-    text = re.sub(r"[\(\[【\)\]】]", " ", text)
-    text = re.sub(r"[^\w\u4e00-\u9fff]+", " ", text)
-    return sorted([t.lower() for t in text.split() if t])
+
+    # 1. Convert to lowercase and Simplified Chinese
+    text = convert(str(text).lower(), 'zh-cn')
+
+    # 2. Standardize artist separators and common terms to spaces
+    # Handles 'feat.', 'ft.', 'vs', 'vs.', '&', ',', ' x '
+    text = re.sub(r'\s*(feat|ft|vs)\.?\s*|\s*[&,x]\s*', ' ', text)
+
+    # 3. Remove content in brackets (e.g., (Live), [Remix], 【MV】)
+    # Also removes the brackets themselves
+    text = re.sub(r"[\(\[【][^\)\]】]*[\)\]】]", " ", text)
+
+    # 4. Replace all non-alphanumeric characters (excluding Chinese) with spaces
+    # This will also handle underscores and other symbols
+    text = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", text)
+
+    # 5. Split into tokens, remove empty strings, and sort
+    return sorted([t for t in text.split() if t])
 
 def build_library_index(audio_files):
     index = {}
