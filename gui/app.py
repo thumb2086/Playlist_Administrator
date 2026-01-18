@@ -3,7 +3,7 @@ import glob
 import threading
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
-from utils.config import load_config, save_config, ensure_dirs
+from utils.config import load_config, save_config, ensure_dirs, prompt_and_set_base_path, derive_paths
 from utils.i18n import I18N, _
 from core.library import UpdateStats, update_library_logic, export_usb_logic, get_detailed_stats
 
@@ -14,8 +14,15 @@ class PlaylistApp:
         self.root.geometry("850x930")
         
         self.config = load_config()
+
+        # Prompt for base path if not set
+        if 'base_path' not in self.config or not self.config['base_path']:
+            if not prompt_and_set_base_path(self.config):
+                messagebox.showerror(_('error_critical_title'), _('base_folder_not_set_error'))
+                self.root.destroy()
+                return
+        
         ensure_dirs(self.config)
-        # self.deduplicate_urls() # Removed per user preference for more manual control
         
         self.pause_event = threading.Event()
         self.pause_event.set() 
@@ -57,6 +64,10 @@ class PlaylistApp:
         lang_cb = ttk.Combobox(lang_frame, textvariable=self.lang_var, values=['zh-TW', 'en'], state="readonly", width=10)
         lang_cb.pack(side="left", padx=5)
         lang_cb.bind("<<ComboboxSelected>>", self.change_language)
+
+        # Base Path Settings Button
+        self.settings_btn = tk.Button(lang_frame, text=_('set_base_folder_btn'), command=self.change_base_path, font=("Microsoft JhengHei", 9))
+        self.settings_btn.pack(side="right", padx=10)
 
         # 1. URL Section
         self.url_frame = tk.LabelFrame(self.root, text=_('step_1_title'), font=("Microsoft JhengHei", 10, "bold"))
@@ -153,6 +164,14 @@ class PlaylistApp:
         self.log_text.see(tk.END)
         self.log_text.config(state='disabled')
 
+    def change_base_path(self):
+        if prompt_and_set_base_path(self.config):
+            ensure_dirs(self.config)
+            # Refresh UI that depends on paths
+            self.refresh_url_list()
+            self.update_stats_ui()
+            self.log(_('base_folder_changed'))
+
     def change_language(self, event):
         new_lang = self.lang_var.get()
         self.config['language'] = new_lang
@@ -175,6 +194,7 @@ class PlaylistApp:
         self.export_btn.config(text=_('export_usb_btn'))
         self.stats_frame.config(text=_('stats_title'))
         self.log_frame.config(text=_('log_title'))
+        self.settings_btn.config(text=_('set_base_folder_btn'))
 
     def refresh_url_list(self, audio_cache=None):
         self.url_listbox.delete(0, tk.END)
@@ -419,9 +439,8 @@ class PlaylistApp:
                 speed_display_callback=self.update_speed_display
             )
             
-            if not self.stop_event.is_set():
-                self.root.after(0, self.show_stats_window, stats)
-            else:
+            self.root.after(0, self.show_stats_window, stats)
+            if self.stop_event.is_set():
                 self.log(_('task_cancelled'))
         except Exception as e:
             self.log(_('error_critical', e))

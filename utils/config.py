@@ -1,41 +1,60 @@
 import os
 import json
+from tkinter import filedialog, messagebox
 
 CONFIG_FILE = 'config.json'
 
 def load_config():
+    config = {}
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             config = json.load(f)
-            # Default values
-            if 'audio_format' not in config:
-                config['audio_format'] = 'mp3'
-            if 'language' not in config:
-                config['language'] = 'zh-TW'
-            if 'url_names' not in config:
-                config['url_names'] = {}
-            if 'last_updated' not in config:
-                config['last_updated'] = {}
-            
-            from utils.i18n import I18N
-            I18N.set_language(config['language'])
-            return config
-    return {
-        "library_path": "./Library",
-        "playlists_path": "./Playlists",
-        "export_path": "./USB_Export",
-        "spotify_urls": [],
-        "url_names": {},
-        "last_updated": {},
-        "audio_format": "mp3",
-        "language": "zh-TW"
+
+    # Set defaults for missing keys
+    defaults = {
+        'audio_format': 'mp3',
+        'language': 'zh-TW',
+        'spotify_urls': [],
+        'url_names': {},
+        'last_updated': {}
     }
+    for key, value in defaults.items():
+        config.setdefault(key, value)
+
+    # If base_path is set, derive other paths from it
+    if 'base_path' in config and config['base_path']:
+        derive_paths(config)
+
+    from utils.i18n import I18N
+    I18N.set_language(config['language'])
+    
+    return config
+
+def derive_paths(config):
+    base_path = config['base_path']
+    config['library_path'] = os.path.join(base_path, 'Music')
+    config['playlists_path'] = os.path.join(base_path, 'Playlists')
+    config['export_path'] = os.path.join(base_path, 'USB_Output')
+
+def prompt_and_set_base_path(config):
+    from utils.i18n import _
+    new_path = filedialog.askdirectory(title=_('select_base_folder'))
+    if new_path:
+        config['base_path'] = new_path
+        derive_paths(config)
+        save_config(config)
+        messagebox.showinfo(_('base_folder_set_title'), _('base_folder_set_msg', new_path))
+        return True
+    return False
 
 def save_config(config):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+        json.dump(config, f, indent=4, ensure_ascii=False)
 
 def ensure_dirs(config):
+    if 'base_path' not in config or not config['base_path']:
+        return # Can't create dirs if base path is not set
+        
     for key in ['library_path', 'playlists_path', 'export_path']:
         path = config.get(key)
         if path and isinstance(path, str):
