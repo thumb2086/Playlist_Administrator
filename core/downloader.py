@@ -55,6 +55,12 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
 
     def progress_hook(d):
         check_stop()
+        # --- DIAGNOSTIC LOG ---
+        if not isinstance(d, dict):
+            log_func(f"[DIAGNOSTIC] progress_hook received non-dict: type={type(d)}, content={d}")
+            return
+        # --- END DIAGNOSTIC ---
+        
         if d['status'] == 'downloading':
             current_time = time.time()
             

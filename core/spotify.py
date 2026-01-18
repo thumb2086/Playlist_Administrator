@@ -68,6 +68,9 @@ def scrape_via_spotify_embed(config, stats, log_func):
         if last_updated.get(sp_url) == today:
             name = config.get('url_names', {}).get(sp_url, sp_url)
             log_func(_('skip_synced', name))
+            # Even if skipped, ensure the playlist name exists in changes dict for report consistency
+            if stats and name not in stats.playlist_changes:
+                stats.playlist_changes[name] = {'added': [], 'removed': []}
             continue
 
         pl_id = None
@@ -187,7 +190,11 @@ def scrape_via_spotify_embed(config, stats, log_func):
                 added = list(new_songs - old_songs)
                 removed = list(old_songs - new_songs)
                 
-                if stats:
+                # Always initialize the key for the report
+                if stats and pl_name not in stats.playlist_changes:
+                    stats.playlist_changes[pl_name] = {'added': [], 'removed': []}
+
+                if stats and (added or removed):
                     stats.playlist_changes[pl_name] = {'added': added, 'removed': removed}
 
                 with open(m3u_path, 'w', encoding='utf-8') as f:

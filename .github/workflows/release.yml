@@ -28,7 +28,7 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "PlaylistManager" --add-data "core;core" --add-data "gui;gui" --add-data "utils;utils" main.py
+        pyinstaller --noconfirm --onefile --windowed --name "PlaylistManager" --add-data "core;core" --add-data "gui;gui" --add-data "utils;utils" --collect-all zhconv main.py
 
     - name: Create Release
       id: create_release

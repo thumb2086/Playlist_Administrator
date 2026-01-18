@@ -69,6 +69,7 @@ class I18N:
             'scrape_error': " -> 爬蟲錯誤: {0}",
             'no_pl_files': "Playlists 資料夾中沒有歌單檔案。",
             'scanning_lib': "正在掃描本地音樂庫...",
+            'building_index': " -> 正在建立索引以便快速搜尋...",
             'indexed_songs': " -> 已索引 {0} 首歌曲",
             'analyzing_missing': "正在分析需下載歌曲 (共 {0} 個歌單)...",
             'task_stopped': "--- 已停止任務 ---",
@@ -104,6 +105,9 @@ class I18N:
             'stats_added_songs': "  + 新增: {0} 首",
             'stats_removed_songs': "  - 移除(或改名): {0} 首",
             'stats_no_change': "無變動",
+            'playlist_update_summary': "歌單更新統計",
+            'songs_updated': "首歌曲已更新",
+            'no_songs_updated': "無歌曲更新",
         },
         'en': {
             'app_title': "Playlist Manager",
@@ -174,6 +178,7 @@ class I18N:
             'scrape_error': " -> Scraper Error: {0}",
             'no_pl_files': "No playlist files found in Playlists folder.",
             'scanning_lib': "Scanning local library...",
+            'building_index': " -> Building index for fast search...",
             'indexed_songs': " -> Indexed {0} songs",
             'analyzing_missing': "Analyzing missing songs (total {0} playlists)...",
             'task_stopped': "--- Task Stopped ---",
@@ -209,6 +214,9 @@ class I18N:
             'stats_added_songs': "  + Added: {0}",
             'stats_removed_songs': "  - Removed/Renamed: {0}",
             'stats_no_change': "No changes",
+            'playlist_update_summary': "Playlist Update Summary",
+            'songs_updated': "songs updated",
+            'no_songs_updated': "no songs updated",
         },
     }
 

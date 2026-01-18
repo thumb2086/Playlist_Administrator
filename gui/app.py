@@ -1,8 +1,10 @@
 import os
 import glob
+import time
 import threading
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
+from collections import deque
 from utils.config import load_config, save_config, ensure_dirs, prompt_and_set_base_path, derive_paths
 from utils.i18n import I18N, _
 from core.library import UpdateStats, update_library_logic, export_usb_logic, get_detailed_stats
@@ -14,6 +16,14 @@ class PlaylistApp:
         self.root.geometry("850x930")
         
         self.config = load_config()
+
+        # --- UI Throttling & Batching --- 
+        self.last_progress_update = 0
+        self.last_speed_update = 0
+        self.log_queue = deque()
+        self.log_update_job = None
+        self.last_full_refresh = 0
+        self.songs_since_last_refresh = 0
 
         # Prompt for base path if not set
         if 'base_path' not in self.config or not self.config['base_path']:
@@ -148,21 +158,38 @@ class PlaylistApp:
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
 
     def log(self, message):
-        self.root.after(0, self._log_ui, message)
+        self.log_queue.append(str(message))
+        if self.log_update_job is None:
+            self.log_update_job = self.root.after(200, self._process_log_queue)
 
     def update_progress(self, current, total):
-        if total == 0: return
-        pct = (current / total) * 100
-        self.progress_var.set(pct)
+        now = time.time()
+        if now - self.last_progress_update < 0.1: # Throttle to 10fps
+            return
+        self.last_progress_update = now
+        if total > 0:
+            pct = (current / total) * 100
+            self.progress_var.set(pct)
     
     def update_speed_display(self, speed_text):
+        now = time.time()
+        if now - self.last_speed_update < 0.5: # Throttle to 2fps
+            return
+        self.last_speed_update = now
         self.root.after(0, lambda: self.speed_label.config(text=f"下載速度: {speed_text}"))
 
-    def _log_ui(self, message):
+    def _process_log_queue(self):
+        self.log_update_job = None
+        if not self.log_queue:
+            return
+
         self.log_text.config(state='normal')
-        self.log_text.insert(tk.END, str(message) + "\n")
+        # Batch insert
+        messages = "\n".join(self.log_queue) + "\n"
+        self.log_text.insert(tk.END, messages)
         self.log_text.see(tk.END)
         self.log_text.config(state='disabled')
+        self.log_queue.clear()
 
     def change_base_path(self):
         if prompt_and_set_base_path(self.config):
@@ -428,22 +455,34 @@ class PlaylistApp:
         stats.pause_event = self.pause_event 
         stats.stop_event = self.stop_event
         
+        def post_dl_throttle_callback(cache):
+            self.songs_since_last_refresh += 1
+            now = time.time()
+            # Refresh every 5 songs OR every 5 seconds, whichever comes first
+            if self.songs_since_last_refresh >= 5 or (now - self.last_full_refresh > 5):
+                self.root.after(0, lambda: self.refresh_url_list(cache))
+                self.root.after(0, lambda: self.update_stats_ui(cache))
+                self.songs_since_last_refresh = 0
+                self.last_full_refresh = now
+
         try:
             update_library_logic(
                 self.config, stats, self.log, self.update_progress,
                 post_scrape_callback=lambda: self.root.after(0, self.refresh_url_list),
-                post_download_callback=lambda cache: (
-                    self.root.after(0, lambda: self.refresh_url_list(cache)),
-                    self.root.after(0, lambda: self.update_stats_ui(cache))
-                ),
+                post_download_callback=post_dl_throttle_callback,
                 speed_display_callback=self.update_speed_display
             )
             
+            # Reset counters for next run
+            self.songs_since_last_refresh = 0
+            self.last_full_refresh = 0
             self.root.after(0, self.show_stats_window, stats)
             if self.stop_event.is_set():
                 self.log(_('task_cancelled'))
         except Exception as e:
-            self.log(_('error_critical', e))
+            import traceback
+            tb_str = traceback.format_exc()
+            self.log(_('error_critical', f"{e}\n{tb_str}"))
             
         self.log(_('update_end'))
         self.root.after(0, lambda: self.speed_label.config(text="準備就緒"))
@@ -487,6 +526,17 @@ class PlaylistApp:
                         for s in removed: report.append(f"    - {s}")
                 else:
                     report.append(f"[{pl}] " + _('stats_no_change'))
+        
+        # Display playlist-specific update information
+        if stats.playlist_updates:
+            report.append("\n--- " + _('playlist_update_summary') + " ---")
+            for pl_name, songs in stats.playlist_updates.items():
+                if songs:
+                    report.append(f"[{pl_name}] - {len(songs)} {_('songs_updated')}")
+                    for song in songs:
+                        report.append(f"    ✓ {song}")
+                else:
+                    report.append(f"[{pl_name}] - {_('no_songs_updated')}")
         else:
               report.append(_('no_pl_files'))
 
