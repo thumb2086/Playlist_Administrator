@@ -38,22 +38,42 @@ def get_normalized_tokens(text):
     import re
     from zhconv import convert
 
-    # 1. Convert to lowercase and Simplified Chinese
-    text = convert(str(text).lower(), 'zh-cn')
+    # 1. Convert to lowercase
+    text = str(text).lower()
+    
+    # 2. Convert Chinese characters to Simplified Chinese, but preserve Japanese
+    # Only apply zhconv to Chinese characters, not Japanese kana
+    try:
+        # Split text to preserve Japanese characters
+        import re as regex
+        # This regex separates Chinese characters from other characters
+        def convert_chinese_only(match):
+            chinese_text = match.group(0)
+            try:
+                return convert(chinese_text, 'zh-cn')
+            except:
+                return chinese_text
+        
+        # Apply conversion only to Chinese characters (CJK Unified Ideographs)
+        text = regex.sub(r'[\u4e00-\u9fff]', convert_chinese_only, text)
+    except:
+        # If conversion fails, keep original text
+        pass
 
-    # 2. Standardize artist separators and common terms to spaces
+    # 3. Standardize artist separators and common terms to spaces
     # Handles 'feat.', 'ft.', 'vs', 'vs.', '&', ',', ' x '
     text = re.sub(r'\s*(feat|ft|vs)\.?\s*|\s*[&,x]\s*', ' ', text)
 
-    # 3. Remove content in brackets (e.g., (Live), [Remix], 【MV】)
+    # 4. Remove content in brackets (e.g., (Live), [Remix], 【MV】)
     # Also removes the brackets themselves
     text = re.sub(r"[\(\[【][^\)\]】]*[\)\]】]", " ", text)
 
-    # 4. Replace all non-alphanumeric characters (excluding Chinese) with spaces
+    # 5. Replace all non-alphanumeric characters (excluding Chinese and Japanese) with spaces
     # This will also handle underscores and other symbols
-    text = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", text)
+    # Include Japanese Hiragana (\u3040-\u309f) and Katakana (\u30a0-\u30ff)
+    text = re.sub(r"[^a-z0-9\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]+", " ", text)
 
-    # 5. Split into tokens, remove empty strings, and sort
+    # 6. Split into tokens, remove empty strings, and sort
     return sorted([t for t in text.split() if t])
 
 def build_library_index(audio_files):
@@ -93,6 +113,7 @@ def find_song_in_library(song_name, library_source):
 def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None, speed_display_callback=None):
     from core.spotify import scrape_via_spotify_embed
     from core.downloader import download_song
+    import time
     
     # 1. Scrape First
     scrape_via_spotify_embed(config, stats, log_func)
@@ -122,7 +143,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     # Build the library index for fast lookups
     log_func(_('building_index'))
     library_index = build_library_index(audio_files_cache)
-    log_func(_('indexed_songs', len(library_index)))
+    log_func(_('indexed_songs', len(audio_files_cache)))  # Show total files, not unique songs
 
     # PHASE 1: Identify Missing Songs & Renaming
     log_func(_('analyzing_missing', len(files)))
@@ -159,7 +180,48 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     if total_missing > 0:
         log_func(_('dl_start'))
         current_dl = 0
-        successful_downloads = 0  
+        successful_downloads = 0
+        
+        # Create a wrapper to pass overall ETA to progress function
+        overall_start_time = time.time()
+        total_downloaded_time = 0  # Track cumulative download time
+        
+        # Initial progress call to show task starting
+        if progress_func:
+            # Provide an initial rough estimate (2 minutes per song)
+            initial_eta = total_missing * 120  # 2 minutes per song
+            progress_func(0, total_missing, initial_eta)
+        
+        def progress_with_overall_eta(current, total, song_eta=None):
+            if progress_func:
+                # Use provided song_eta if available, otherwise calculate based on average time
+                if song_eta is not None and isinstance(song_eta, (int, float)):
+                    # Use the provided ETA directly, even if small
+                    eta_seconds = song_eta
+                elif current > 0 and total_downloaded_time > 0:
+                    # Calculate overall ETA based on progress and average time per song
+                    avg_time_per_song = total_downloaded_time / max(1, current)
+                    remaining_songs = total - current
+                    eta_seconds = remaining_songs * avg_time_per_song
+                else:
+                    eta_seconds = 0
+                
+                # Ensure eta_seconds is numeric
+                try:
+                    eta_seconds = float(eta_seconds)
+                except (ValueError, TypeError):
+                    eta_seconds = 0
+                
+                if eta_seconds > 0:
+                    eta_min = int(eta_seconds // 60)
+                    eta_sec = int(eta_seconds % 60)
+                    overall_eta = f"{eta_min}:{eta_sec:02d}"
+                else:
+                    overall_eta = "即將完成" if current > 0 else None
+                
+                progress_func(current, total, overall_eta)
+            else:
+                progress_func(0, total, None)
         
         for item in songs_to_download:
             song_name = item['name']
@@ -175,8 +237,63 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                  
             log_func(_('dl_progress', current_dl+1, total_missing, remaining, pl_name, song_name))
             
-            res = download_song(song_name, library_path, audio_format, log_func, audio_files_cache, stats, speed_display_callback)
+            # Create a progress callback for this song
+            song_start_time = time.time()
+            def song_progress_callback(current, total, eta=None):
+                # Update overall progress with current song progress
+                # Use current_dl + (current/total) to show progress within current song
+                if total > 0:
+                    song_progress = current / total
+                    overall_progress = current_dl + song_progress
+                else:
+                    overall_progress = current_dl
+                
+                # Calculate overall ETA for the entire task
+                if total_downloaded_time > 0 and current_dl > 0:
+                    avg_time_per_song = total_downloaded_time / current_dl
+                    remaining_songs = total_missing - current_dl
+                    eta_seconds = remaining_songs * avg_time_per_song
+                    # Ensure eta_seconds is numeric
+                    try:
+                        eta_seconds = float(eta_seconds)
+                    except (ValueError, TypeError):
+                        eta_seconds = None
+                    progress_with_overall_eta(overall_progress, total_missing, eta_seconds)
+                else:
+                    # For first song, try to use current song's ETA as rough estimate
+                    if eta and isinstance(eta, (int, float)) and eta > 0:
+                        # Rough estimate: current song ETA * remaining songs
+                        remaining_songs = total_missing - current_dl
+                        overall_eta = eta * remaining_songs
+                        progress_with_overall_eta(overall_progress, total_missing, overall_eta)
+                    elif total > 0 and current > 0:
+                        # If we have current song progress, estimate based on current song's progress rate
+                        song_progress_ratio = current / total
+                        if song_progress_ratio > 0:
+                            # Estimate total time for current song based on elapsed time and progress
+                            elapsed_time = time.time() - song_start_time
+                            estimated_total_song_time = elapsed_time / song_progress_ratio
+                            remaining_song_time = estimated_total_song_time - elapsed_time
+                            # Rough estimate: remaining time for current song + time for remaining songs
+                            remaining_songs = total_missing - current_dl - 1  # Exclude current song
+                            if remaining_songs > 0:
+                                # Estimate 2 minutes per remaining song as fallback
+                                estimated_remaining_time = remaining_song_time + (remaining_songs * 120)
+                            else:
+                                estimated_remaining_time = remaining_song_time
+                            progress_with_overall_eta(overall_progress, total_missing, estimated_remaining_time)
+                        else:
+                            progress_with_overall_eta(overall_progress, total_missing, None)
+                    else:
+                        progress_with_overall_eta(overall_progress, total_missing, None)
+            
+            res = download_song(song_name, library_path, audio_format, log_func, audio_files_cache, stats, None, song_progress_callback, current_dl)
             if res and os.path.exists(res):
+                # Track time spent on this song
+                song_end_time = time.time()
+                song_duration = song_end_time - song_start_time
+                total_downloaded_time += song_duration
+                
                 stats.songs_downloaded.append(song_name)
                 # Track which playlist this song was updated for
                 if pl_name not in stats.playlist_updates:
@@ -193,7 +310,21 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     time.sleep(15)
             
             current_dl += 1
-            if progress_func: progress_func(current_dl, total_missing)
+            # Update progress with overall ETA calculation
+            if total_downloaded_time > 0 and current_dl > 0:
+                avg_time_per_song = total_downloaded_time / current_dl
+                remaining_songs = total_missing - current_dl
+                eta_seconds = remaining_songs * avg_time_per_song
+                # Ensure eta_seconds is numeric
+                try:
+                    eta_seconds = float(eta_seconds)
+                except (ValueError, TypeError):
+                    eta_seconds = None
+                if progress_func: 
+                    progress_func(current_dl, total_missing, eta_seconds)
+            else:
+                if progress_func: 
+                    progress_func(current_dl, total_missing, None)
             
             if current_dl < total_missing:  
                 delay = random.uniform(3, 8)
@@ -301,7 +432,14 @@ def get_detailed_stats(config, audio_files=None):
         audio_files = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
     
     total_songs = len(audio_files)
-    total_size_bytes = sum(os.path.getsize(f) for f in audio_files)
+    total_size_bytes = 0
+    for f in audio_files:
+        try:
+            if os.path.exists(f):
+                total_size_bytes += os.path.getsize(f)
+        except (OSError, IOError):
+            # Skip files that can't be accessed (deleted, moved, etc.)
+            continue
     total_size_mb = total_size_bytes / (1024 * 1024)
     
     # Recently added (by mtime)
@@ -327,11 +465,49 @@ def get_detailed_stats(config, audio_files=None):
     total_playlist_entries = len(all_pl_songs)
     unique_playlist_entries = len(unique_pl_songs)
     
-    # Calculate savings
-    # Average song size in library
-    avg_size_bytes = (total_size_bytes / total_songs) if total_songs > 0 else 0
+    # Calculate actual savings by summing sizes of duplicate songs
     duplicates_count = total_playlist_entries - unique_playlist_entries
-    savings_mb = (duplicates_count * avg_size_bytes) / (1024 * 1024)
+    
+    # Build song name to file path mapping for accurate size calculation
+    song_to_files = {}
+    for file_path in audio_files:
+        if os.path.exists(file_path):
+            filename = os.path.basename(file_path)
+            name_no_ext = os.path.splitext(filename)[0]
+            tokens_tuple = tuple(get_normalized_tokens(name_no_ext))
+            if tokens_tuple:
+                if tokens_tuple not in song_to_files:
+                    song_to_files[tokens_tuple] = []
+                song_to_files[tokens_tuple].append(file_path)
+    
+    # Count song occurrences in playlists
+    song_occurrences = {}
+    for pl_file in pl_files:
+        songs = parse_playlist(pl_file)
+        for song_name in songs:
+            query_tokens = tuple(get_normalized_tokens(song_name))
+            if query_tokens:
+                if query_tokens not in song_occurrences:
+                    song_occurrences[query_tokens] = 0
+                song_occurrences[query_tokens] += 1
+    
+    # Calculate actual savings: for each song that appears multiple times, 
+    # add (occurrences - 1) * file_size
+    actual_savings_bytes = 0
+    for tokens_tuple, occurrences in song_occurrences.items():
+        if occurrences > 1 and tokens_tuple in song_to_files:
+            # Find the first existing file for this song
+            for file_path in song_to_files[tokens_tuple]:
+                if os.path.exists(file_path):
+                    try:
+                        file_size = os.path.getsize(file_path)
+                        # Add file size for each duplicate occurrence (occurrences - 1)
+                        actual_savings_bytes += (occurrences - 1) * file_size
+                        break  # Only use the first file found
+                    except (OSError, IOError):
+                        continue
+    
+    savings_mb = actual_savings_bytes / (1024 * 1024)
     
     return {
         'total_songs': total_songs,

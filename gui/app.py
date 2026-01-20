@@ -149,12 +149,15 @@ class PlaylistApp:
         self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100)
         self.progress_bar.pack(side="left", fill="x", expand=True)
         
-        self.progress_label = tk.Label(progress_frame, text="", font=("Microsoft JhengHei", 9), width=10, anchor="e")
+        self.progress_label = tk.Label(progress_frame, text="", font=("Microsoft JhengHei", 9), anchor="e", width=15)
         self.progress_label.pack(side="right", padx=5)
         
         # Speed Display
-        self.speed_label = tk.Label(self.root, text="準備就緒", font=("Microsoft JhengHei", 9), fg="#666")
-        self.speed_label.pack(fill="x", padx=20, pady=(0, 5))
+        speed_frame = tk.Frame(self.root)
+        speed_frame.pack(fill="x", padx=20, pady=(0, 5))
+        
+        self.speed_label = tk.Label(speed_frame, text="準備就緒", font=("Microsoft JhengHei", 9), fg="#666", anchor="w")
+        self.speed_label.pack(fill="x")
         
         # 3. Log Section
         self.log_frame = tk.LabelFrame(self.root, text=_('log_title'), font=("Microsoft JhengHei", 10, "bold"))
@@ -168,26 +171,85 @@ class PlaylistApp:
         if self.log_update_job is None:
             self.log_update_job = self.root.after(200, self._process_log_queue)
 
-    def update_progress(self, current, total):
+    def update_progress(self, current, total, eta=None):
         now = time.time()
         if now - self.last_progress_update < 0.1 and current < total: # Throttle, but always show final update
             return
         self.last_progress_update = now
         
-        if total > 0:
-            pct = (current / total) * 100
+        # Validate current and total parameters first
+        try:
+            current_val = int(current) if current is not None else 0
+            total_val = int(total) if total is not None else 0
+        except (ValueError, TypeError):
+            current_val = 0
+            total_val = 0
+        
+        # Ensure reasonable values
+        if current_val < 0:
+            current_val = 0
+        if total_val <= 0:
+            total_val = 0
+        if current_val > total_val and total_val > 0:
+            current_val = total_val
+        
+        if total_val > 0:
+            pct = (current_val / total_val) * 100
             self.progress_var.set(pct)
-            self.progress_label.config(text=f"{current} / {total}")
+            
+            # Format progress text with ETA
+            progress_text = f"{current_val}/{total_val}"
+            
+            # Ensure eta is numeric before comparison
+            try:
+                eta_numeric = float(eta) if eta else 0
+            except (ValueError, TypeError):
+                eta_numeric = 0
+            
+            if eta_numeric > 0 and current_val < total_val:
+                eta_seconds = eta_numeric
+                eta_min = int(eta_seconds // 60)
+                eta_sec = int(eta_seconds % 60)
+                if eta_min > 0:
+                    progress_text += f" ({eta_min}:{eta_sec:02d})"
+                else:
+                    progress_text += f" ({eta_sec}s)"
+            elif current_val >= total_val and total_val > 0:
+                progress_text += " ✓"
+            
+            self.progress_label.config(text=progress_text)
+            
+            # Update speed label with ETA when available
+            if eta_numeric > 0 and current_val < total_val:
+                eta_seconds = eta_numeric
+                eta_min = int(eta_seconds // 60)
+                eta_sec = int(eta_seconds % 60)
+                if eta_min > 0:
+                    eta_text = f"剩餘時間: {eta_min}:{eta_sec:02d}"
+                else:
+                    eta_text = f"剩餘時間: {eta_sec}秒"
+                self.speed_label.config(text=eta_text)
+            elif current_val >= total_val:
+                self.speed_label.config(text="下載完成")
+            elif current_val == 0:
+                # Starting state - show task info
+                self.speed_label.config(text=f"準備下載 {total_val} 首歌曲")
+            else:
+                self.speed_label.config(text="準備就緒")
         else:
             self.progress_var.set(0)
             self.progress_label.config(text="")
+            self.speed_label.config(text="準備就緒")
     
     def update_speed_display(self, speed_text):
         now = time.time()
         if now - self.last_speed_update < 0.5: # Throttle to 2fps
             return
         self.last_speed_update = now
-        self.root.after(0, lambda: self.speed_label.config(text=f"下載速度: {speed_text}"))
+        # Only update speed display if not showing ETA
+        current_text = self.speed_label.cget("text")
+        if not current_text.startswith("預估時間:") and current_text != "完成":
+            self.root.after(0, lambda: self.speed_label.config(text=f"下載速度: {speed_text}"))
 
     def _process_log_queue(self):
         self.log_update_job = None
@@ -498,8 +560,21 @@ class PlaylistApp:
         self.log(_('update_end'))
         self.root.after(0, lambda: self.speed_label.config(text="準備就緒"))
         self.root.after(0, lambda: self.progress_label.config(text=""))
-        self.root.after(0, self.refresh_url_list)
-        self.root.after(0, self.update_stats_ui)
+        
+        # Final refresh with updated audio cache
+        def final_refresh():
+            # Get fresh audio files list after download completion
+            import glob
+            import os
+            library_path = self.config['library_path']
+            search_pattern = os.path.join(library_path, "**", "*")
+            all_files = glob.glob(search_pattern, recursive=True)
+            audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
+            
+            self.refresh_url_list(audio_files_cache)
+            self.update_stats_ui(audio_files_cache)
+        
+        self.root.after(0, final_refresh)
         self.root.after(0, lambda: self.update_btn.config(state="normal", text=_('update_all_btn'), bg="#d0f0c0"))
         self.root.after(0, lambda: self.pause_btn.config(state="disabled", text=_('pause_btn'), bg="#FFEB3B"))
         self.root.after(0, lambda: self.cancel_btn.config(state="disabled", text=_('cancel_btn')))
@@ -554,9 +629,21 @@ class PlaylistApp:
 
         report.append(f"--- {_('playlist_update_summary')} ---")
         report.append(_('playlist_update_counts', total_updated_playlists, len(total_playlists)))
+        report.append(_('stats_songs_downloaded', total_downloaded))
         
+        # Show detailed playlist updates
         for pl_name, songs in sorted(updated_playlists.items(), key=lambda item: len(item[1]), reverse=True):
             report.append(f"  - {pl_name}: {_('stats_added_songs', len(songs))}")
+        
+        # Add detailed song list
+        if updated_playlists:
+            report.append(f"\n{_('song_list_title')}")
+            for pl_name, songs in sorted(updated_playlists.items(), key=lambda item: len(item[1]), reverse=True):
+                if songs:  # Only show playlists that have songs
+                    report.append(f"{pl_name}:")
+                    for song in sorted(songs):
+                        report.append(f"  {song}")
+                    report.append("")  # Add empty line between playlists
 
         txt.insert(tk.END, "\n".join(report))
         txt.config(state='disabled')

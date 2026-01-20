@@ -41,13 +41,15 @@ class YdlLogger:
 class TaskAbortedException(Exception):
     pass
 
-def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None):
+def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None, progress_callback=None, current_dl=0):
     """Downloads song in specified format (mp3 or flac)"""
     
     # Progress tracking state
     import time
     last_progress_time = [0]  # Use list to allow modification in nested function
     last_progress_pct = [0]
+    last_speed_time = [0]  # Track last speed calculation
+    last_speed_value = [0]   # Track last speed for smoothing
 
     def check_stop():
         if stats and getattr(stats, 'stop_event', None) and stats.stop_event.is_set():
@@ -72,6 +74,12 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
             
             # Calculate current percentage
             current_pct = (downloaded / total * 100) if total > 0 else 0
+            
+            # Update speed tracking for smoothing
+            current_time = time.time()
+            if speed > 0:
+                last_speed_time[0] = current_time
+                last_speed_value[0] = speed
             
             # Only log if: 2+ seconds passed OR 10%+ progress made
             time_elapsed = current_time - last_progress_time[0]
@@ -99,13 +107,33 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     mb_downloaded = downloaded / (1024 * 1024)
                     mb_total = total / (1024 * 1024)
                     
-                    # Format ETA
-                    if eta:
-                        eta_min = eta // 60
-                        eta_sec = eta % 60
+                    # Enhanced ETA calculation
+                    eta_str = ""
+                    eta_seconds = 0
+                    # Ensure eta is numeric before comparison
+                    try:
+                        eta_numeric = float(eta) if eta else 0
+                    except (ValueError, TypeError):
+                        eta_numeric = 0
+                    
+                    if eta_numeric > 0:
+                        # Use yt-dlp ETA if available
+                        eta_min = eta_numeric // 60
+                        eta_sec = eta_numeric % 60
                         eta_str = f"{int(eta_min)}:{int(eta_sec):02d}"
+                        eta_seconds = eta_numeric
+                    elif speed > 0 and total > downloaded:
+                        # Calculate ETA based on current speed
+                        remaining_bytes = total - downloaded
+                        eta_seconds = remaining_bytes / speed
+                        if eta_seconds > 0:
+                            eta_min = int(eta_seconds // 60)
+                            eta_sec = int(eta_seconds % 60)
+                            eta_str = f"{eta_min}:{eta_sec:02d}"
+                        else:
+                            eta_str = "即將完成"
                     else:
-                        eta_str = "?"
+                        eta_str = "計算中..."
                     
                     log_func(f"  ⬇️ {pct:.1f}% | {mb_downloaded:.1f}/{mb_total:.1f} MB | {speed_str} | ETA {eta_str}")
                 else:
@@ -115,6 +143,10 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                 # Update tracking state
                 last_progress_time[0] = current_time
                 last_progress_pct[0] = current_pct
+                
+                # Call progress callback if provided
+                if progress_callback:
+                    progress_callback(current_dl, total, eta_seconds if eta_seconds > 0 else None)
                 
         elif d['status'] == 'finished':
             log_func("  ✅ Download complete, converting...")
@@ -164,8 +196,20 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
     if ' - ' in base_query:
         c2 = base_query.replace(' - ', ' ')
         if c2 not in candidates: candidates.append(c2)
+    
+    # 3. Artist + Title (without dash) for better matching
+    if ' - ' in song_name:
+        parts = song_name.split(' - ', 1)
+        if len(parts) == 2:
+            artist = parts[0].strip().replace(',', ' ').replace('\xa0', ' ')
+            title = parts[1].strip().replace(',', ' ').replace('\xa0', ' ')
+            # Artist Title (no dash)
+            c4 = f"{artist} {title}"
+            c4 = ' '.join(c4.split())
+            if c4 and c4 not in candidates:
+                candidates.append(c4)
         
-    # 3. Title only (Last resort)
+    # 4. Title only (Last resort)
     if ' - ' in song_name: # Use original name to find split
         parts = song_name.rsplit(' - ', 1)
         if len(parts) > 1:
@@ -175,6 +219,60 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
             c3 = ' '.join(c3.split())
             if c3 and c3 not in candidates:
                 candidates.append(c3)
+    
+    # 5. Add common K-pop search terms
+    title_lower = base_query.lower()
+    if any(keyword in title_lower for keyword in ['twice', 'blackpink', 'bts', 'seventeen', 'ive', 'nct', 'stray', 'enhypen', 'ateez', 'lisa', 'newjeans', 'tomorrow x together']):
+        # Try with "official" or "mv" for K-pop songs
+        c5 = base_query + " official mv"
+        if c5 not in candidates:
+            candidates.append(c5)
+        c6 = base_query + " music video"
+        if c6 not in candidates:
+            candidates.append(c6)
+    
+    # 6. Handle songs with parentheses - try without parentheses content
+    if '(' in base_query and ')' in base_query:
+        # Remove content in parentheses for cleaner search
+        base_no_parens = re.sub(r'\s*\([^)]*\)', '', base_query).strip()
+        if base_no_parens and base_no_parens not in candidates:
+            candidates.append(base_no_parens)
+        
+        # Also try with just the main part + "official mv"
+        if base_no_parens:
+            c7 = base_no_parens + " official mv"
+            if c7 not in candidates:
+                candidates.append(c7)
+    
+    # 7. For songs with special characters, try simplified version
+    simplified = re.sub(r'[^\w\s\-]', ' ', base_query)
+    simplified = ' '.join(simplified.split())
+    if simplified and simplified != base_query and simplified not in candidates:
+        candidates.append(simplified)
+    
+    # 8. Try shortened versions for very long titles
+    if len(base_query) > 50:
+        # Try just first few words
+        words = base_query.split()
+        if len(words) > 4:
+            shortened = ' '.join(words[:4])
+            if shortened not in candidates:
+                candidates.append(shortened)
+    
+    # 9. Try keyword-based search for complex titles
+    if 'BOUNCY' in base_query:
+        candidates.append('ATEEZ BOUNCY')
+        candidates.append('ATEEZ BOUNCY official mv')
+    if 'HOT CHILLI PEPPERS' in base_query:
+        candidates.append('ATEEZ HOT CHILLI PEPPERS')
+    
+    # 10. For Japanese versions, try without "Japanese Ver."
+    if 'Japanese Ver.' in base_query:
+        base_no_jp = base_query.replace('Japanese Ver.', '').strip()
+        if base_no_jp not in candidates:
+            candidates.append(base_no_jp)
+            candidates.append(base_no_jp + ' japanese version')
+            candidates.append(base_no_jp + ' jp ver')
 
     from utils.i18n import _
     
