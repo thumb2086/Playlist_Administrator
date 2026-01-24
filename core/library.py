@@ -199,9 +199,13 @@ def move_unsorted_songs(config, log_func):
     from utils.i18n import _
     log_func(_('moving_unsorted'))
     
-    library_path = os.path.abspath(config['library_path'])
-    playlists_path = os.path.abspath(config['playlists_path'])
+    # Normalize paths to standard Windows backslashes for reliable string comparison
+    library_path = os.path.normpath(os.path.abspath(config['library_path']))
+    playlists_path = os.path.normpath(os.path.abspath(config['playlists_path']))
     unsorted_dir = os.path.join(library_path, "_Unsorted")
+    
+    # Standardize unsorted_dir for comparison
+    unsorted_dir_norm = unsorted_dir.lower() + os.sep
     
     # 1. Gather all songs from all playlists
     all_playlist_files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
@@ -210,9 +214,11 @@ def move_unsorted_songs(config, log_func):
     songs_in_playlists = set()
     for pl_file in all_playlist_files:
         base = os.path.basename(pl_file)
-        if "_未分類" in base or "_Unsorted" in base: continue
+        # Skip the unsorted playlists themselves
+        if any(x in base for x in ["_未分類", "_Unsorted"]): continue
         songs_in_playlists.update(parse_playlist(pl_file))
     
+    # Build tokens for comparison
     playlist_tokens = set()
     for s in songs_in_playlists:
         t = tuple(get_normalized_tokens(s))
@@ -220,11 +226,12 @@ def move_unsorted_songs(config, log_func):
         
     # 2. Identify orphan files in Music root
     search_pattern = os.path.join(library_path, "**", "*")
-    all_library_files = [f for f in glob.glob(search_pattern, recursive=True) if os.path.isfile(f)]
+    all_library_files = [os.path.normpath(f) for f in glob.glob(search_pattern, recursive=True) if os.path.isfile(f)]
     
     orphans = []
     for f in all_library_files:
-        if unsorted_dir in f: continue
+        # ROBUST CHECK: skip if file is actually inside the _Unsorted directory
+        if f.lower().startswith(unsorted_dir_norm): continue
         if os.path.basename(f).startswith('.'): continue
         if not f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')): continue
         
@@ -234,26 +241,36 @@ def move_unsorted_songs(config, log_func):
         if file_tokens not in playlist_tokens:
             orphans.append(f)
             
-    # 3. Create _Unsorted dir and move files
-    if not os.path.exists(unsorted_dir):
+    # 3. Move files to _Unsorted dir
+    if orphans and not os.path.exists(unsorted_dir):
         os.makedirs(unsorted_dir, exist_ok=True)
         
     moved_count = 0
     for f in orphans:
         try:
             dest = os.path.join(unsorted_dir, os.path.basename(f))
+            # Double safety: don't remove if they are same file, or just skip if destination exists
+            if os.path.normpath(f).lower() == os.path.normpath(dest).lower():
+                continue
+                
             if os.path.exists(dest):
-                os.remove(f)
+                os.remove(f) # It's a duplicate of something already in _Unsorted
             else:
                 os.rename(f, dest)
             moved_count += 1
         except: pass
         
     # 4. Create/Update Unsorted Playlist
-    pl_name = "_未分類歌曲" if I18N.current_lang == 'zh-TW' else "_Unsorted_Songs"
+    # Use a localized name for the playlist
+    pl_name = "_" + _('removed_songs_pl')
     m3u_path = os.path.join(playlists_path, f"{pl_name}.m3u8")
     
-    # Critical Debug: Check the directory directly
+    # Cleanup old legacy name if it exists
+    old_m3u_path = os.path.join(playlists_path, "_Unsorted_Songs.m3u8")
+    if old_m3u_path != m3u_path and os.path.exists(old_m3u_path):
+        try: os.remove(old_m3u_path)
+        except: pass
+    
     if os.path.exists(unsorted_dir):
         files_in_dir = os.listdir(unsorted_dir)
         audio_orphans = [f for f in files_in_dir if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
@@ -263,7 +280,7 @@ def move_unsorted_songs(config, log_func):
                 os.makedirs(playlists_path, exist_ok=True)
                 with open(m3u_path, 'w', encoding='utf-8-sig', newline='') as f:
                     f.write("#EXTM3U\r\n")
-                    for base in audio_orphans:
+                    for base in sorted(audio_orphans):
                         name_no_ext = os.path.splitext(base)[0]
                         # Relative path from Playlists folder to Music/_Unsorted folder
                         rel_path = f"../Music/_Unsorted/{base}"
@@ -276,11 +293,10 @@ def move_unsorted_songs(config, log_func):
                     log_func(f" -> 已更新 {len(audio_orphans)} 首未分類歌曲的播放清單")
             except Exception as e:
                 log_func(f" [DEBUG] 寫入歌單失敗: {e}")
-        else:
-            log_func(f" [DEBUG] _Unsorted 資料夾中無音檔 (總檔案數: {len(files_in_dir)})")
-    else:
-        log_func(f" [DEBUG] 找不到 _Unsorted 資料夾: {unsorted_dir}")
-        
+        elif os.path.exists(m3u_path):
+            try: os.remove(m3u_path)
+            except: pass
+    
     return moved_count
 
 def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None, speed_display_callback=None):

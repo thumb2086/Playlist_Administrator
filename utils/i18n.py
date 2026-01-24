@@ -119,6 +119,7 @@ class I18N:
             'organized_files': " -> 已整理並更名 {0} 個受 Explicit 標籤影響的檔案",
             'moving_unsorted': "正在分析並處理未分類歌曲...",
             'unsorted_done': " -> 已將 {0} 首未分類歌曲移至 Music/_Unsorted 檔案夾並更新歌單",
+            'removed_songs_pl': "已移除歌曲",
         },
         'en': {
             'app_title': "Playlist Manager",
@@ -239,6 +240,7 @@ class I18N:
             'organized_files': " -> Organized and renamed {0} files with Explicit prefix artifacts",
             'moving_unsorted': "Analyzing and handling unsorted songs...",
             'unsorted_done': " -> Moved {0} unsorted songs to Music/_Unsorted and updated playlist",
+            'removed_songs_pl': "Removed Songs",
         },
     }
 
