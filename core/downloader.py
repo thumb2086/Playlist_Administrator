@@ -347,6 +347,13 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                         # If 416 persists, maybe try next candidate? 
                         # Unlikely to help if it's the same video, but if next candidate finds diff video it might.
                         break 
+                elif "403" in error_msg or "forbidden" in error_msg:
+                    log_func(_('dl_fail', "HTTP 403: Access forbidden. Trying next search..."))
+                    # Add a small delay before trying next candidate
+                    import time
+                    time.sleep(1)
+                    # Break to try next candidate immediately
+                    break
                 elif "sign in" in error_msg or "bot" in error_msg:
                     log_func(_('bot_detect'))
                     return None # Stop trying if bot detected
