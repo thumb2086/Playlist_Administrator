@@ -194,6 +194,95 @@ def rename_explicit_files(library_path, log_func):
         log_func(_('organized_files', count))
     return count
 
+def move_unsorted_songs(config, log_func):
+    """ Moves songs not in any playlist to _Unsorted folder and creates a playlist for them """
+    from utils.i18n import _
+    log_func(_('moving_unsorted'))
+    
+    library_path = os.path.abspath(config['library_path'])
+    playlists_path = os.path.abspath(config['playlists_path'])
+    unsorted_dir = os.path.join(library_path, "_Unsorted")
+    
+    # 1. Gather all songs from all playlists
+    all_playlist_files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
+                         glob.glob(os.path.join(playlists_path, "*.m3u"))
+    
+    songs_in_playlists = set()
+    for pl_file in all_playlist_files:
+        base = os.path.basename(pl_file)
+        if "_未分類" in base or "_Unsorted" in base: continue
+        songs_in_playlists.update(parse_playlist(pl_file))
+    
+    playlist_tokens = set()
+    for s in songs_in_playlists:
+        t = tuple(get_normalized_tokens(s))
+        if t: playlist_tokens.add(t)
+        
+    # 2. Identify orphan files in Music root
+    search_pattern = os.path.join(library_path, "**", "*")
+    all_library_files = [f for f in glob.glob(search_pattern, recursive=True) if os.path.isfile(f)]
+    
+    orphans = []
+    for f in all_library_files:
+        if unsorted_dir in f: continue
+        if os.path.basename(f).startswith('.'): continue
+        if not f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')): continue
+        
+        filename_no_ext = os.path.splitext(os.path.basename(f))[0]
+        file_tokens = tuple(get_normalized_tokens(filename_no_ext))
+        
+        if file_tokens not in playlist_tokens:
+            orphans.append(f)
+            
+    # 3. Create _Unsorted dir and move files
+    if not os.path.exists(unsorted_dir):
+        os.makedirs(unsorted_dir, exist_ok=True)
+        
+    moved_count = 0
+    for f in orphans:
+        try:
+            dest = os.path.join(unsorted_dir, os.path.basename(f))
+            if os.path.exists(dest):
+                os.remove(f)
+            else:
+                os.rename(f, dest)
+            moved_count += 1
+        except: pass
+        
+    # 4. Create/Update Unsorted Playlist
+    pl_name = "_未分類歌曲" if I18N.current_lang == 'zh-TW' else "_Unsorted_Songs"
+    m3u_path = os.path.join(playlists_path, f"{pl_name}.m3u8")
+    
+    # Critical Debug: Check the directory directly
+    if os.path.exists(unsorted_dir):
+        files_in_dir = os.listdir(unsorted_dir)
+        audio_orphans = [f for f in files_in_dir if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
+        
+        if audio_orphans:
+            try:
+                os.makedirs(playlists_path, exist_ok=True)
+                with open(m3u_path, 'w', encoding='utf-8-sig', newline='') as f:
+                    f.write("#EXTM3U\r\n")
+                    for base in audio_orphans:
+                        name_no_ext = os.path.splitext(base)[0]
+                        # Relative path from Playlists folder to Music/_Unsorted folder
+                        rel_path = f"../Music/_Unsorted/{base}"
+                        f.write(f"#EXTINF:-1,{name_no_ext}\r\n")
+                        f.write(f"{rel_path}\r\n")
+                
+                if moved_count > 0:
+                    log_func(_('unsorted_done', moved_count))
+                else:
+                    log_func(f" -> 已更新 {len(audio_orphans)} 首未分類歌曲的播放清單")
+            except Exception as e:
+                log_func(f" [DEBUG] 寫入歌單失敗: {e}")
+        else:
+            log_func(f" [DEBUG] _Unsorted 資料夾中無音檔 (總檔案數: {len(files_in_dir)})")
+    else:
+        log_func(f" [DEBUG] 找不到 _Unsorted 資料夾: {unsorted_dir}")
+        
+    return moved_count
+
 def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None, speed_display_callback=None):
     from core.spotify import scrape_via_spotify_embed
     from core.downloader import download_song
@@ -417,8 +506,17 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             if current_dl < total_missing:  
                 delay = random.uniform(3, 8)
                 time.sleep(delay)
+        
+        # FINAL STEP: Analyze and move unsorted songs (Option A+B)
+        try:
+            move_unsorted_songs(config, log_func)
+        except: pass
     else:
         log_func(_('lib_up_to_date'))
+        # Even if up to date, check for unsorted (e.g. user manually removed from Spotify)
+        try:
+            move_unsorted_songs(config, log_func)
+        except: pass
         if progress_func: progress_func(100, 100) 
 
     log_func(_('update_complete'))
