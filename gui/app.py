@@ -55,7 +55,7 @@ class PlaylistApp:
         changed = False
         for url in urls:
             if url not in url_names:
-                name = get_playlist_name(url)
+                name = get_spotify_name(url)
                 if name:
                     url_names[url] = name
                     changed = True
@@ -389,7 +389,7 @@ class PlaylistApp:
         if not url: return
         
         # 1. Normalize and check ID collision
-        if "playlist/" in url:
+        if "playlist/" in url or "artist/" in url:
             url = url.split('?')[0]
             
         urls = self.config.get('spotify_urls', [])
@@ -401,8 +401,8 @@ class PlaylistApp:
         self.update_btn.config(state="disabled", text=_('loading'))
         
         def _check_and_add():
-            from core.spotify import get_playlist_name
-            name = get_playlist_name(url)
+            from core.spotify import get_spotify_name
+            name = get_spotify_name(url)
             
             def _ui_final():
                 if not name:
@@ -446,7 +446,7 @@ class PlaylistApp:
         
         for url in urls:
             normalized = url
-            if "playlist/" in url:
+            if "playlist/" in url or "artist/" in url:
                 normalized = url.split('?')[0]
             
             if normalized not in seen:

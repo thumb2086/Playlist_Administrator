@@ -6,18 +6,27 @@ from zhconv import convert
 from utils.helpers import sanitize_filename
 from utils.config import ensure_dirs
 
-def get_playlist_name(sp_url):
-    """Helper to fetch ONLY the name of a Spotify playlist from its embed page"""
-    pl_id = None
-    if "playlist/" in sp_url:
+def get_spotify_name(sp_url):
+    """Helper to fetch ONLY the name of a Spotify playlist or artist from its embed page"""
+    sp_id = None
+    is_artist = "artist/" in sp_url
+    
+    if is_artist:
         try:
-            pl_id = sp_url.split('?')[0].split('playlist/')[-1]
+            sp_id = sp_url.split('?')[0].split('artist/')[-1]
         except: return None
-    else: pl_id = sp_url.strip()
+    elif "playlist/" in sp_url:
+        try:
+            sp_id = sp_url.split('?')[0].split('playlist/')[-1]
+        except: return None
+    else: 
+        sp_id = sp_url.strip()
     
-    if not pl_id: return None
+    if not sp_id: return None
     
-    embed_url = f"https://open.spotify.com/embed/playlist/{pl_id}"
+    type_path = "artist" if is_artist else "playlist"
+    embed_url = f"https://open.spotify.com/embed/{type_path}/{sp_id}"
+    
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7'
@@ -73,22 +82,28 @@ def scrape_via_spotify_embed(config, stats, log_func):
                 stats.playlist_changes[name] = {'added': [], 'removed': []}
             continue
 
-        pl_id = None
-        if "playlist/" in sp_url:
+        sp_id = None
+        is_artist = "artist/" in sp_url
+        if is_artist:
+            try:
+                sp_id = sp_url.split('?')[0].split('artist/')[-1]
+            except: pass
+        elif "playlist/" in sp_url:
             try:
                 # Remove query params
                 clean_url = sp_url.split('?')[0]
-                pl_id = clean_url.split('playlist/')[-1]
+                sp_id = clean_url.split('playlist/')[-1]
             except: pass
         else:
-             pl_id = sp_url.strip()
+             sp_id = sp_url.strip()
 
-        if not pl_id:
+        if not sp_id:
             log_func(_('skip_invalid', sp_url))
             continue
 
-        embed_url = f"https://open.spotify.com/embed/playlist/{pl_id}"
-        log_func(_('scanning_pl', pl_id))
+        type_path = "artist" if is_artist else "playlist"
+        embed_url = f"https://open.spotify.com/embed/{type_path}/{sp_id}"
+        log_func(_('scanning_pl', sp_id))
         log_func(_('connecting_spotify'))
         
         try:
@@ -104,7 +119,8 @@ def scrape_via_spotify_embed(config, stats, log_func):
             
             soup = BeautifulSoup(resp.text, 'html.parser')
             tracks = []
-            pl_name = f"Spotify_{pl_id}"
+            prefix = "Artist" if is_artist else "Spotify"
+            pl_name = f"{prefix}_{sp_id}"
 
             next_data_tag = soup.find("script", {"id": "__NEXT_DATA__"})
             if next_data_tag:
@@ -124,6 +140,7 @@ def scrape_via_spotify_embed(config, stats, log_func):
                              pl_name = sanitize_filename(raw_name)
                          
                          track_list = entity.get('trackList') or \
+                                      entity.get('topTracks') or \
                                       (entity.get('tracks') and entity.get('tracks').get('items'))
                          
                          if track_list:
