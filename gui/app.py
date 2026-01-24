@@ -13,7 +13,7 @@ class PlaylistApp:
     def __init__(self, root):
         self.root = root
         self.root.title(_('app_title'))
-        self.root.geometry("850x930")
+        self.root.geometry("1100x930")
         
         self.config = load_config()
 
@@ -105,10 +105,21 @@ class PlaylistApp:
         tk.Label(pl_side, text="歌單 (Playlists)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
         
         self.pl_listbox = tk.Listbox(pl_side, height=12, font=("Microsoft JhengHei", 10), exportselection=False)
-        self.pl_listbox.pack(side="left", fill="both", expand=True)
+        self.pl_listbox.pack(fill="both", expand=True)
         pl_scroll = tk.Scrollbar(pl_side, orient="vertical", command=self.pl_listbox.yview)
         pl_scroll.pack(side="right", fill="y")
         self.pl_listbox.config(yscrollcommand=pl_scroll.set)
+
+        # Middle: Albums
+        al_side = tk.Frame(list_container)
+        al_side.pack(side="left", fill="both", expand=True, padx=5)
+        tk.Label(al_side, text="專輯 (Albums)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
+        
+        self.al_listbox = tk.Listbox(al_side, height=12, font=("Microsoft JhengHei", 10), exportselection=False)
+        self.al_listbox.pack(fill="both", expand=True)
+        al_scroll = tk.Scrollbar(al_side, orient="vertical", command=self.al_listbox.yview)
+        al_scroll.pack(side="right", fill="y")
+        self.al_listbox.config(yscrollcommand=al_scroll.set)
 
         # Right side: Artists
         ar_side = tk.Frame(list_container)
@@ -116,7 +127,7 @@ class PlaylistApp:
         tk.Label(ar_side, text="藝人 (Artists)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
 
         self.ar_listbox = tk.Listbox(ar_side, height=12, font=("Microsoft JhengHei", 10), exportselection=False)
-        self.ar_listbox.pack(side="left", fill="both", expand=True)
+        self.ar_listbox.pack(fill="both", expand=True)
         ar_scroll = tk.Scrollbar(ar_side, orient="vertical", command=self.ar_listbox.yview)
         ar_scroll.pack(side="right", fill="y")
         self.ar_listbox.config(yscrollcommand=ar_scroll.set)
@@ -181,10 +192,12 @@ class PlaylistApp:
         self.log_text = scrolledtext.ScrolledText(self.log_frame, state='disabled', bg="black", fg="white", font=("Consolas", 10))
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
 
-    def log(self, message):
+    def log(self, message, immediate=False):
         self.log_queue.append(str(message))
         if self.log_update_job is None:
-            self.log_update_job = self.root.after(200, self._process_log_queue)
+            # For important progress messages, use shorter delay
+            delay = 50 if immediate and ("剩" in str(message) or "left" in str(message.lower())) else 200
+            self.log_update_job = self.root.after(delay, self._process_log_queue)
 
     def update_progress(self, current, total, eta=None):
         now = time.time()
@@ -313,6 +326,7 @@ class PlaylistApp:
 
     def refresh_url_list(self, audio_cache=None):
         self.pl_listbox.delete(0, tk.END)
+        self.al_listbox.delete(0, tk.END)
         self.ar_listbox.delete(0, tk.END)
         url_names = self.config.get('url_names', {})
         last_updated = self.config.get('last_updated', {})
@@ -327,22 +341,31 @@ class PlaylistApp:
         
         urls = self.config.get('spotify_urls', [])
         
-        self.pl_urls = [u for u in urls if "artist/" not in u]
-        self.ar_urls = [u for u in urls if "artist/" in u]
+        self.pl_urls = [u for u in urls if "artist/" not in u and "album/" not in u]  # 只有播放清單
+        self.al_urls = [u for u in urls if "album/" in u]  # 只有專輯
+        self.ar_urls = [u for u in urls if "artist/" in u]  # 只有藝人
         
         pl_files = []
-        for url in urls:
-            name = url_names.get(url, url)
-            pl_file = os.path.join(playlists_path, f"{name}.m3u")
-            if os.path.exists(pl_file):
-                pl_files.append(pl_file)
+        # 直接獲取所有存在的播放清單檔案，不依賴 URL 列表
+        for ext in ['.m3u', '.m3u8', '.txt']:
+            pl_files.extend(glob.glob(os.path.join(playlists_path, f"*{ext}")))
         
         # Batch check completeness
         report = get_playlist_completeness_report(pl_files, library_path, audio_files_cache=audio_cache)
 
         for url in urls:
             name = url_names.get(url, url)
-            pl_file = os.path.join(playlists_path, f"{name}.m3u")
+            # Try both .m3u and .m3u8 extensions
+            pl_file = None
+            for ext in ['.m3u', '.m3u8']:
+                test_file = os.path.join(playlists_path, f"{name}{ext}")
+                if os.path.exists(test_file):
+                    pl_file = test_file
+                    break
+            
+            if not pl_file:
+                # If no file found, skip this URL
+                continue
             
             status_text = ""
             is_synced_today = last_updated.get(url) == today
@@ -361,6 +384,7 @@ class PlaylistApp:
                     else:
                         status_text = f"⚠️ {name} ({_('wait_download')}, {_('missing_songs', missing)})"
             else:
+                # No playlist file exists - check if it's an artist that should have one
                 if is_synced_today:
                     status_text = f"🔄 {name} ({_('synced_today')})"
                 else:
@@ -368,6 +392,8 @@ class PlaylistApp:
             
             if url in self.pl_urls:
                 self.pl_listbox.insert(tk.END, status_text)
+            elif url in self.al_urls:
+                self.al_listbox.insert(tk.END, status_text)
             else:
                 self.ar_listbox.insert(tk.END, status_text)
 
@@ -412,7 +438,7 @@ class PlaylistApp:
         if not url: return
         
         # 1. Normalize and check ID collision
-        if "playlist/" in url or "artist/" in url:
+        if "playlist/" in url or "artist/" in url or "album/" in url:
             url = url.split('?')[0]
             
         urls = self.config.get('spotify_urls', [])
@@ -450,7 +476,12 @@ class PlaylistApp:
                     
                     self.refresh_url_list()
                     self.url_entry.delete(0, tk.END)
-                    self.log(_('added_playlist', name))
+                    
+                    # 根據 URL 類型顯示不同的成功訊息
+                    if "album/" in url:
+                        self.log(_('added_album', name))
+                    else:
+                        self.log(_('added_playlist', name))
                 
                 self.update_btn.config(state="normal", text=_('update_all_btn'), bg="#d0f0c0")
 
@@ -469,7 +500,7 @@ class PlaylistApp:
         
         for url in urls:
             normalized = url
-            if "playlist/" in url or "artist/" in url:
+            if "playlist/" in url or "artist/" in url or "album/" in url:
                 normalized = url.split('?')[0]
             
             if normalized not in seen:
@@ -498,9 +529,10 @@ class PlaylistApp:
 
     def remove_url(self):
         pl_sel = self.pl_listbox.curselection()
+        al_sel = self.al_listbox.curselection()
         ar_sel = self.ar_listbox.curselection()
         
-        if not pl_sel and not ar_sel: return
+        if not pl_sel and not al_sel and not ar_sel: return
         
         urls = self.config.get('spotify_urls', [])
         url_names = self.config.get('url_names', {})
@@ -509,6 +541,9 @@ class PlaylistApp:
         if pl_sel:
             idx = pl_sel[0]
             url = self.pl_urls[idx]
+        elif al_sel:
+            idx = al_sel[0]
+            url = self.al_urls[idx]
         else:
             idx = ar_sel[0]
             url = self.ar_urls[idx]
@@ -584,8 +619,12 @@ class PlaylistApp:
                 self.last_full_refresh = now
 
         try:
+            # Create a wrapper function for immediate progress logging
+            def log_with_immediate(message):
+                self.log(message, immediate=True)
+            
             update_library_logic(
-                self.config, stats, self.log, self.update_progress,
+                self.config, stats, log_with_immediate, self.update_progress,
                 post_scrape_callback=lambda: self.root.after(0, self.refresh_url_list),
                 post_download_callback=post_dl_throttle_callback,
                 speed_display_callback=self.update_speed_display

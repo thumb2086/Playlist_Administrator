@@ -276,6 +276,8 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
 
     from utils.i18n import _
     
+    all_candidates_failed = True  # Track if all candidates fail
+    
     for idx, current_query in enumerate(candidates):
         is_last_candidate = (idx == len(candidates) - 1)
         
@@ -287,7 +289,11 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                         if idx == 0:
                             log_func(_('searching', current_query))
                         else:
-                            log_func(f"⚠️ {_('dl_fail', 'No results')}. Retrying with: {current_query}...")
+                            # Only show "No results" warning if this is the last attempt of all candidates
+                            if is_last_candidate and attempt == max_retries - 1:
+                                log_func(f"⚠️ {_('dl_fail', 'No results')}. Trying: {current_query}...")
+                            else:
+                                log_func(_('searching', current_query))
                     
                     check_stop()
                     # Use 'detailed' to catch 416 better? No, standard is fine.
@@ -319,8 +325,10 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     
                     if os.path.exists(filename):
                         log_func(f" -> {os.path.basename(filename)}")
+                        all_candidates_failed = False  # Mark as successful
                         return filename
                     
+                    all_candidates_failed = False  # Mark as successful
                     return final_path
 
             except TaskAbortedException:
@@ -366,5 +374,9 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         
         # If we reached here, it means this candidate failed (break or exhausted retries)
         # Loop continues to next candidate
+        
+    # If all candidates failed, show final warning
+    if all_candidates_failed:
+        log_func(f"❌ {_('dl_fail', 'All search attempts failed')}")
         
     return None

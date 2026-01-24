@@ -7,13 +7,18 @@ from utils.helpers import sanitize_filename
 from utils.config import ensure_dirs
 
 def get_spotify_name(sp_url):
-    """Helper to fetch ONLY the name of a Spotify playlist or artist from its embed page"""
+    """Helper to fetch ONLY the name of a Spotify playlist, artist, or album from its embed page"""
     sp_id = None
     is_artist = "artist/" in sp_url
+    is_album = "album/" in sp_url
     
     if is_artist:
         try:
             sp_id = sp_url.split('?')[0].split('artist/')[-1]
+        except: return None
+    elif is_album:
+        try:
+            sp_id = sp_url.split('?')[0].split('album/')[-1]
         except: return None
     elif "playlist/" in sp_url:
         try:
@@ -24,7 +29,13 @@ def get_spotify_name(sp_url):
     
     if not sp_id: return None
     
-    type_path = "artist" if is_artist else "playlist"
+    if is_artist:
+        type_path = "artist"
+    elif is_album:
+        type_path = "album"
+    else:
+        type_path = "playlist"
+    
     embed_url = f"https://open.spotify.com/embed/{type_path}/{sp_id}"
     
     headers = {
@@ -84,9 +95,15 @@ def scrape_via_spotify_embed(config, stats, log_func):
 
         sp_id = None
         is_artist = "artist/" in sp_url
+        is_album = "album/" in sp_url
+        
         if is_artist:
             try:
                 sp_id = sp_url.split('?')[0].split('artist/')[-1]
+            except: pass
+        elif is_album:
+            try:
+                sp_id = sp_url.split('?')[0].split('album/')[-1]
             except: pass
         elif "playlist/" in sp_url:
             try:
@@ -101,7 +118,13 @@ def scrape_via_spotify_embed(config, stats, log_func):
             log_func(_('skip_invalid', sp_url))
             continue
 
-        type_path = "artist" if is_artist else "playlist"
+        if is_artist:
+            type_path = "artist"
+        elif is_album:
+            type_path = "album"
+        else:
+            type_path = "playlist"
+            
         embed_url = f"https://open.spotify.com/embed/{type_path}/{sp_id}"
         log_func(_('scanning_pl', sp_id))
         log_func(_('connecting_spotify'))
@@ -119,7 +142,12 @@ def scrape_via_spotify_embed(config, stats, log_func):
             
             soup = BeautifulSoup(resp.text, 'html.parser')
             tracks = []
-            prefix = "Artist" if is_artist else "Spotify"
+            if is_artist:
+                prefix = "Artist"
+            elif is_album:
+                prefix = "Album"
+            else:
+                prefix = "Spotify"
             pl_name = f"{prefix}_{sp_id}"
 
             next_data_tag = soup.find("script", {"id": "__NEXT_DATA__"})
@@ -141,7 +169,8 @@ def scrape_via_spotify_embed(config, stats, log_func):
                          
                          track_list = entity.get('trackList') or \
                                       entity.get('topTracks') or \
-                                      (entity.get('tracks') and entity.get('tracks').get('items'))
+                                      (entity.get('tracks') and entity.get('tracks').get('items')) or \
+                                      (entity.get('tracks') and entity.get('tracks').get('data'))
                          
                          if track_list:
                              import re

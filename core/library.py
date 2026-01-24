@@ -452,7 +452,11 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             if hasattr(stats, 'pause_event') and stats.pause_event:
                  stats.pause_event.wait()
                  
-            log_func(_('dl_progress', current_dl+1, total_missing, remaining, pl_name, song_name))
+            # Check if log_func supports immediate parameter
+            if hasattr(log_func, '__code__') and 'immediate' in log_func.__code__.co_varnames:
+                log_func(_('dl_progress', current_dl+1, total_missing, remaining, pl_name, song_name), immediate=True)
+            else:
+                log_func(_('dl_progress', current_dl+1, total_missing, remaining, pl_name, song_name))
             
             # Create a progress callback for this song
             song_start_time = time.time()
