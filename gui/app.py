@@ -495,6 +495,17 @@ class PlaylistApp:
             save_config(self.config)
             self.refresh_url_list()
             self.update_stats_ui()
+            
+            # Delete corresponding M3U/M3U8 file if it exists
+            name = url_names.get(url)
+            if name:
+                for ext in ['.m3u8', '.m3u']:
+                    pl_file = os.path.join(self.config['playlists_path'], f"{name}{ext}")
+                    if os.path.exists(pl_file):
+                        try:
+                            os.remove(pl_file)
+                        except: pass
+            
             self.log(_('removed_url', url))
 
     def toggle_pause(self):
@@ -575,6 +586,28 @@ class PlaylistApp:
             self.update_stats_ui(audio_files_cache)
         
         self.root.after(0, final_refresh)
+        
+        # --- Orphaned Playlists & Backups Cleanup ---
+        try:
+            playlists_path = self.config['playlists_path']
+            url_names = self.config.get('url_names', {})
+            current_names = set(url_names.values())
+            
+            # Clean up orphans
+            for ext in ['*.m3u8', '*.m3u']:
+                for f in glob.glob(os.path.join(playlists_path, ext)):
+                    name = os.path.splitext(os.path.basename(f))[0]
+                    if name not in current_names:
+                        try: os.remove(f)
+                        except: pass
+            
+            # Clean up backups
+            for pattern in ['*.path_backup', '*.relative_backup']:
+                for f in glob.glob(os.path.join(playlists_path, pattern)):
+                    try: os.remove(f)
+                    except: pass
+        except: pass
+
         self.root.after(0, lambda: self.update_btn.config(state="normal", text=_('update_all_btn'), bg="#d0f0c0"))
         self.root.after(0, lambda: self.pause_btn.config(state="disabled", text=_('pause_btn'), bg="#FFEB3B"))
         self.root.after(0, lambda: self.cancel_btn.config(state="disabled", text=_('cancel_btn')))

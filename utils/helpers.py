@@ -3,8 +3,14 @@ from zhconv import convert
 
 def sanitize_filename(name):
     """Sanitize string to be a valid filename"""
+    if not name: return name
+    # Remove non-breaking spaces and other weird whitespace
+    name = name.replace('\xa0', ' ').replace('\u200b', '').strip()
     # Windows forbidden characters: < > : " / \ | ? *
-    return re.sub(r'[<>:"/\\|?*]', '_', name)
+    # Also removing potential control characters or trailing dots/spaces
+    name = re.sub(r'[<>:"/\\|?*]', '_', name)
+    name = name.strip('. ')
+    return name[:250]  # Max path length safety
 
 def normalize_name(name):
     """Normalize string for fuzzy matching comparison"""

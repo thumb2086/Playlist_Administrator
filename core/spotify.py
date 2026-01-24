@@ -129,10 +129,10 @@ def scrape_via_spotify_embed(config, stats, log_func):
                          if track_list:
                              import re
                              def clean_artist_name(name):
-                                 # Remove "E" prefix if followed by Uppercase (Explicit tag artifact)
-                                 # e.g. "EYosebe" -> "Yosebe"
+                                 # Remove "E" prefix (Explicit tag artifact)
+                                 # e.g. "EYosebe" -> "Yosebe", "E王ADEN" -> "王ADEN"
                                  if not name: return name
-                                 return re.sub(r'^E(?=[A-Z])', '', name)
+                                 return re.sub(r'^E(?=[A-Z\u4e00-\u9fff\u3040-\u30ff])', '', name)
 
                              for item in track_list:
                                  track = item.get('track', item)
@@ -152,7 +152,7 @@ def scrape_via_spotify_embed(config, stats, log_func):
                      def clean_html_text(text):
                          # Aggressively clean "E" prefix which often appears in HTML scraping
                          if not text: return text
-                         return re.sub(r'^E(?=[A-Z])', '', text)
+                         return re.sub(r'^E(?=[A-Z\u4e00-\u9fff\u3040-\u30ff])', '', text)
 
                      for row in rows:
                          t_tag = row.find("h3", class_=lambda x: x and "TracklistRow_title" in x)
@@ -179,7 +179,23 @@ def scrape_via_spotify_embed(config, stats, log_func):
                 save_config(config)
 
                 from core.library import parse_playlist # Local import to avoid circular dep if any
-                m3u_path = os.path.join(playlists_path, f"{pl_name}.m3u")
+                
+                # Cleanup old M3U8 if name changed
+                old_pl_name = config.get('url_names', {}).get(sp_url)
+                if old_pl_name and old_pl_name != pl_name:
+                    old_path = os.path.join(playlists_path, f"{old_pl_name}.m3u8")
+                    if os.path.exists(old_path):
+                        try:
+                            os.remove(old_path)
+                            log_func(f"清理舊的播放清單檔: {old_pl_name}.m3u8")
+                        except: pass
+                    # Also cleanup legacy .m3u if it exists
+                    legacy_path = os.path.join(playlists_path, f"{old_pl_name}.m3u")
+                    if os.path.exists(legacy_path):
+                         try: os.remove(legacy_path)
+                         except: pass
+
+                m3u_path = os.path.join(playlists_path, f"{pl_name}.m3u8")
                 
                 # Check if file exists to compare
                 old_songs = set()
@@ -197,42 +213,40 @@ def scrape_via_spotify_embed(config, stats, log_func):
                 if stats and (added or removed):
                     stats.playlist_changes[pl_name] = {'added': added, 'removed': removed}
 
-                with open(m3u_path, 'w', encoding='utf-8') as f:
-                    # Write M3U header
-                    f.write("#EXTM3U\n")
-                    
-                    # Write tracks with EXTINF metadata and full file paths
+                # Get library path from config to calculate relative path
+                library_path = config.get('library_path', 'Music')
+                
+                # Build index to resolve actual filenames (handles "E" prefix and diff extensions)
+                log_func(_('scanning_lib'))
+                import glob
+                search_pattern = os.path.join(library_path, "**", "*")
+                all_files = glob.glob(search_pattern, recursive=True)
+                audio_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
+                from core.library import build_library_index, find_song_in_library
+                lib_index = build_library_index(audio_cache)
+
+                with open(m3u_path, 'w', encoding='utf-8-sig', newline='') as f:
+                    f.write("#EXTM3U\r\n")
                     for track in tracks:
-                        # Clean track name for display
                         clean_track = track.strip()
                         
-                        # Try to find the actual file path in library
-                        from core.library import find_song_in_library
-                        import glob
-                        import os
+                        # Find actual file in library
+                        actual_path = find_song_in_library(clean_track, lib_index)
                         
-                        # Get library path from config
-                        library_path = config.get('library_path', '')
-                        actual_path = None
+                        # Ensure all paths are absolute and normalized first
+                        abs_song_path = os.path.normpath(os.path.abspath(actual_path if actual_path else os.path.join(library_path, f"{clean_track}.mp3")))
+                        abs_playlists_path = os.path.normpath(os.path.abspath(playlists_path))
                         
-                        if library_path and os.path.exists(library_path):
-                            # Search for audio files in library
-                            search_pattern = os.path.join(library_path, "**", "*")
-                            all_files = glob.glob(search_pattern, recursive=True)
-                            audio_files = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
-                            
-                            # Find matching file
-                            actual_path = find_song_in_library(clean_track, audio_files)
+                        # Calculate relative path from Playlists folder to Music folder (e.g. ../Music/Song.mp3)
+                        # rel_path will generate the necessary '..' prefix automatically.
+                        rel_path = os.path.relpath(abs_song_path, start=abs_playlists_path)
                         
-                        # Write EXTINF line with song name
-                        f.write(f"#EXTINF:-1,{clean_track}\n")
+                        # Standardization: Forward slashes (/) are best for M3U8 and avoid separator issues
+                        m3u_entry_path = rel_path.replace('\\', '/')
                         
-                        # Write file path (actual path if found, otherwise just the name)
-                        if actual_path and os.path.exists(actual_path):
-                            f.write(f"{actual_path}\n")
-                        else:
-                            # Fallback to just the song name (will be resolved later)
-                            f.write(f"{clean_track}\n")
+                        # Write EXTINF and the relative path with CRLF
+                        f.write(f"#EXTINF:-1,{clean_track}\r\n")
+                        f.write(f"{m3u_entry_path}\r\n")
                 log_func(_('saved_tracks', len(tracks), os.path.basename(m3u_path)))
                 if stats: stats.playlists_scanned += 1
             else:

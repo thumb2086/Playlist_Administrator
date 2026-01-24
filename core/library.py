@@ -16,53 +16,63 @@ class UpdateStats:
 
 def parse_playlist(file_path):
     songs = []
-    if os.path.exists(file_path):
-        import re
-        def clean_line(text):
-            # Aggressively clean "E" prefix if followed by Uppercase (Explicit tag artifact)
-            # e.g. "EYosebe" -> "Yosebe"
-            # Since m3u lines are "Artist - Title", we only target the start
-            return re.sub(r'^E(?=[A-Z])', '', text)
+    if not os.path.exists(file_path):
+        return songs
 
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            
-            # Check if this is a proper M3U file with header
-            is_m3u = False
-            if lines and lines[0].strip() == '#EXTM3U':
-                is_m3u = True
-            
-            i = 0
-            while i < len(lines):
-                line = lines[i].strip()
+    try:
+        with open(file_path, 'r', encoding='utf-8-sig') as f:
+            lines = [line.strip() for line in f.readlines()]
+    except UnicodeDecodeError:
+        with open(file_path, 'r', encoding='gbk', errors='ignore') as f:
+            lines = [line.strip() for line in f.readlines()]
+
+    if not lines:
+        return songs
+
+    # Check if it's a standard M3U playlist
+    is_m3u = any('#EXTM3U' in line for line in lines[:5])
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line:
+            i += 1
+            continue
+
+        if is_m3u:
+            if line.startswith('#EXTINF:'):
+                # The next non-empty, non-comment line should be the file path
+                j = i + 1
+                while j < len(lines) and (not lines[j] or lines[j].startswith('#')):
+                    j += 1
                 
-                if not line:
+                if j < len(lines):
+                    file_path_line = lines[j]
+                    # Get filename without extension
+                    song_name = os.path.splitext(os.path.basename(file_path_line))[0]
+                    songs.append(song_name)
+                    i = j + 1
+                else:
                     i += 1
-                    continue
-                    
-                # Skip M3U headers and metadata lines
-                if line.startswith('#'):
-                    if is_m3u and line.startswith('#EXTINF'):
-                        # This is an EXTINF line, the next line should be the actual path/name
-                        i += 1
-                        if i < len(lines):
-                            next_line = lines[i].strip()
-                            if next_line and not next_line.startswith('#'):
-                                # Clean the line before adding
-                                cleaned_line = clean_line(next_line)
-                                songs.append(cleaned_line)
-                    # Skip all other comment/header lines
-                    i += 1
-                    continue
-                    
-                # For non-M3U files or files without proper format, treat as simple song list
-                if not is_m3u:
-                    # Clean the line before adding
-                    cleaned_line = clean_line(line)
-                    songs.append(cleaned_line)
-                
-                i += 1
+            else:
+                i += 1 # Skip other comments or the header
+        else:
+            # If not a standard M3U, treat every non-comment line as a song name
+            if not line.startswith('#'):
+                songs.append(line)
+            i += 1
+            
     return songs
+
+def unblock_files(directory, log_func):
+    """ Removes the 'Zone.Identifier' (Mark of the Web) from files which causes 0x80070005 errors in UWP apps """
+    import subprocess
+    if os.name == 'nt':
+        try:
+            # Use powershell to unblock all files in the directory recursively
+            cmd = f'Get-ChildItem -Path "{directory}" -Recurse | Unblock-File'
+            subprocess.run(["powershell", "-Command", cmd], capture_output=True, check=False)
+        except: pass
 
 def get_normalized_tokens(text):
     import re
@@ -89,6 +99,10 @@ def get_normalized_tokens(text):
     except:
         # If conversion fails, keep original text
         pass
+
+    # 2.5 Remove "E" prefix artifact (common in Spotify scrapes)
+    # e.g. "EYosebe", "E王ADEN"
+    text = re.sub(r'^e(?=[a-z\u4e00-\u9fff\u3040-\u30ff])', '', text)
 
     # 3. Standardize artist separators and common terms to spaces
     # Handles 'feat.', 'ft.', 'vs', 'vs.', '&', ',', ' x '
@@ -140,12 +154,59 @@ def find_song_in_library(song_name, library_source):
         # Unsupported type
         return None
 
+def rename_explicit_files(library_path, log_func):
+    """ Renames files starting with 'E' prefix and standardizes all filenames to be safe for players """
+    import re
+    from utils.helpers import sanitize_filename
+    search_pattern = os.path.join(library_path, "**", "*")
+    all_files = glob.glob(search_pattern, recursive=True)
+    count = 0
+    from utils.i18n import _
+    
+    for f in all_files:
+        if not os.path.isfile(f): continue
+        dir_name = os.path.dirname(f)
+        old_filename = os.path.basename(f)
+        
+        # 1. Strip 'E' prefix artifact
+        clean_name = old_filename
+        if re.match(r'^E[A-Z\u4e00-\u9fff\u3040-\u30ff]', old_filename):
+            clean_name = old_filename[1:]
+            
+        # 2. Aggressively sanitize the rest (fix \xa0, etc)
+        name_only, ext = os.path.splitext(clean_name)
+        safe_name = sanitize_filename(name_only) + ext
+        
+        if safe_name != old_filename:
+            new_path = os.path.join(dir_name, safe_name)
+            if not os.path.exists(new_path):
+                try:
+                    os.rename(f, new_path)
+                    count += 1
+                except: pass
+            else:
+                # If safe version exists, delete the artifact one
+                try:
+                    os.remove(f)
+                    count += 1
+                except: pass
+    if count > 0:
+        log_func(_('organized_files', count))
+    return count
+
 def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None, speed_display_callback=None):
     from core.spotify import scrape_via_spotify_embed
     from core.downloader import download_song
     import time
     
-    # 1. Scrape First
+    library_path = config['library_path']
+    from utils.i18n import _
+
+    # 0. Organize existing files first to ensure consistency
+    log_func(_('scanning_lib'))
+    rename_explicit_files(library_path, log_func)
+
+    # 1. Scrape First (Now will point to cleaned filenames)
     scrape_via_spotify_embed(config, stats, log_func)
     
     if post_scrape_callback:
@@ -153,30 +214,50 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
 
     # 2. Process Playlists
     playlists_path = config['playlists_path']
-    library_path = config['library_path']
     audio_format = config.get('audio_format', 'mp3')
     
-    files = glob.glob(os.path.join(playlists_path, "*.m3u")) + \
+    files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
+            glob.glob(os.path.join(playlists_path, "*.m3u")) + \
             glob.glob(os.path.join(playlists_path, "*.txt"))
-            
-    from utils.i18n import _
             
     if not files:
         log_func(_('no_pl_files'))
         return
 
-    log_func(_('scanning_lib'))
+    # Build the library index for fast lookups
+    log_func(_('building_index'))
+    
+    # 0.5 Unblock files to resolve 0x80070005 (Access Denied)
+    unblock_files(library_path, log_func)
+    
+    # 0.6 Clean up 'E' prefixes and fix sanitization mismatch
+    rename_explicit_files(library_path, log_func)
+
+    # 1. Scrape First (Now will point to cleaned filenames)
+    scrape_via_spotify_embed(config, stats, log_func)
+    
+    if post_scrape_callback:
+        post_scrape_callback()
+
+    # 2. Process Playlists
+    playlists_path = config['playlists_path']
+    audio_format = config.get('audio_format', 'mp3')
+    
+    files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
+            glob.glob(os.path.join(playlists_path, "*.m3u")) + \
+            glob.glob(os.path.join(playlists_path, "*.txt"))
+            
+    if not files:
+        log_func(_('no_pl_files'))
+        return
+
+    # Build the library index for fast lookups
+    log_func(_('building_index'))
     search_pattern = os.path.join(library_path, "**", "*")
     all_files = glob.glob(search_pattern, recursive=True)
     audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
-    
-    # Build the library index for fast lookups
-    log_func(_('building_index'))
     library_index = build_library_index(audio_files_cache)
     log_func(_('indexed_songs', len(audio_files_cache)))  # Show total files, not unique songs
-
-    # PHASE 1: Identify Missing Songs & Renaming
-    log_func(_('analyzing_missing', len(files)))
     songs_to_download = [] # List of {'name': s, 'playlist': pl}
     
     for pl_file in files:

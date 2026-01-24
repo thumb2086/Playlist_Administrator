@@ -116,6 +116,7 @@ class I18N:
             'song_list_title': "--歌曲列表--",
             'songs_updated': "首歌曲已更新",
             'no_songs_updated': "無歌曲更新",
+            'organized_files': " -> 已整理並更名 {0} 個受 Explicit 標籤影響的檔案",
         },
         'en': {
             'app_title': "Playlist Manager",
@@ -233,6 +234,7 @@ class I18N:
             'song_list_title': "--Song List--",
             'songs_updated': "songs updated",
             'no_songs_updated': "no songs updated",
+            'organized_files': " -> Organized and renamed {0} files with Explicit prefix artifacts",
         },
     }
 

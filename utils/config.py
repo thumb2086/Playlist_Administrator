@@ -39,6 +39,7 @@ def load_config():
 def derive_paths(config):
     base_path = config['base_path']
     config['library_path'] = os.path.join(base_path, 'Music')
+    # Use subfolder for playlists as requested by user
     config['playlists_path'] = os.path.join(base_path, 'Playlists')
     config['export_path'] = os.path.join(base_path, 'USB_Output')
 
