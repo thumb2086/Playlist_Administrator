@@ -25,13 +25,43 @@ def parse_playlist(file_path):
             return re.sub(r'^E(?=[A-Z])', '', text)
 
         with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
+            lines = f.readlines()
+            
+            # Check if this is a proper M3U file with header
+            is_m3u = False
+            if lines and lines[0].strip() == '#EXTM3U':
+                is_m3u = True
+            
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+                
+                if not line:
+                    i += 1
                     continue
-                # Clean the line before adding
-                cleaned_line = clean_line(line)
-                songs.append(cleaned_line)
+                    
+                # Skip M3U headers and metadata lines
+                if line.startswith('#'):
+                    if is_m3u and line.startswith('#EXTINF'):
+                        # This is an EXTINF line, the next line should be the actual path/name
+                        i += 1
+                        if i < len(lines):
+                            next_line = lines[i].strip()
+                            if next_line and not next_line.startswith('#'):
+                                # Clean the line before adding
+                                cleaned_line = clean_line(next_line)
+                                songs.append(cleaned_line)
+                    # Skip all other comment/header lines
+                    i += 1
+                    continue
+                    
+                # For non-M3U files or files without proper format, treat as simple song list
+                if not is_m3u:
+                    # Clean the line before adding
+                    cleaned_line = clean_line(line)
+                    songs.append(cleaned_line)
+                
+                i += 1
     return songs
 
 def get_normalized_tokens(text):

@@ -198,8 +198,41 @@ def scrape_via_spotify_embed(config, stats, log_func):
                     stats.playlist_changes[pl_name] = {'added': added, 'removed': removed}
 
                 with open(m3u_path, 'w', encoding='utf-8') as f:
+                    # Write M3U header
+                    f.write("#EXTM3U\n")
+                    
+                    # Write tracks with EXTINF metadata and full file paths
                     for track in tracks:
-                        f.write(track + "\n")
+                        # Clean track name for display
+                        clean_track = track.strip()
+                        
+                        # Try to find the actual file path in library
+                        from core.library import find_song_in_library
+                        import glob
+                        import os
+                        
+                        # Get library path from config
+                        library_path = config.get('library_path', '')
+                        actual_path = None
+                        
+                        if library_path and os.path.exists(library_path):
+                            # Search for audio files in library
+                            search_pattern = os.path.join(library_path, "**", "*")
+                            all_files = glob.glob(search_pattern, recursive=True)
+                            audio_files = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
+                            
+                            # Find matching file
+                            actual_path = find_song_in_library(clean_track, audio_files)
+                        
+                        # Write EXTINF line with song name
+                        f.write(f"#EXTINF:-1,{clean_track}\n")
+                        
+                        # Write file path (actual path if found, otherwise just the name)
+                        if actual_path and os.path.exists(actual_path):
+                            f.write(f"{actual_path}\n")
+                        else:
+                            # Fallback to just the song name (will be resolved later)
+                            f.write(f"{clean_track}\n")
                 log_func(_('saved_tracks', len(tracks), os.path.basename(m3u_path)))
                 if stats: stats.playlists_scanned += 1
             else:
