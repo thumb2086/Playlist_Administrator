@@ -46,7 +46,7 @@ class PlaylistApp:
         threading.Thread(target=self.proactive_name_fetch, daemon=True).start()
 
     def proactive_name_fetch(self):
-        from core.spotify import get_playlist_name
+        from core.spotify import get_spotify_name
         from utils.config import save_config
         
         urls = self.config.get('spotify_urls', [])
@@ -97,14 +97,29 @@ class PlaylistApp:
         self.reset_btn.pack(side="right", padx=5)
         
         list_container = tk.Frame(self.url_frame)
-        list_container.pack(fill="x", padx=5, pady=5)
+        list_container.pack(fill="both", expand=True, padx=5, pady=5)
         
-        self.url_listbox = tk.Listbox(list_container, height=12, font=("Microsoft JhengHei", 10))
-        self.url_listbox.pack(side="left", fill="x", expand=True)
+        # Left side: Playlists
+        pl_side = tk.Frame(list_container)
+        pl_side.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        tk.Label(pl_side, text="歌單 (Playlists)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
         
-        url_scroll = tk.Scrollbar(list_container, orient="vertical", command=self.url_listbox.yview)
-        url_scroll.pack(side="right", fill="y")
-        self.url_listbox.config(yscrollcommand=url_scroll.set)
+        self.pl_listbox = tk.Listbox(pl_side, height=12, font=("Microsoft JhengHei", 10), exportselection=False)
+        self.pl_listbox.pack(side="left", fill="both", expand=True)
+        pl_scroll = tk.Scrollbar(pl_side, orient="vertical", command=self.pl_listbox.yview)
+        pl_scroll.pack(side="right", fill="y")
+        self.pl_listbox.config(yscrollcommand=pl_scroll.set)
+
+        # Right side: Artists
+        ar_side = tk.Frame(list_container)
+        ar_side.pack(side="left", fill="both", expand=True, padx=(5, 0))
+        tk.Label(ar_side, text="藝人 (Artists)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
+
+        self.ar_listbox = tk.Listbox(ar_side, height=12, font=("Microsoft JhengHei", 10), exportselection=False)
+        self.ar_listbox.pack(side="left", fill="both", expand=True)
+        ar_scroll = tk.Scrollbar(ar_side, orient="vertical", command=self.ar_listbox.yview)
+        ar_scroll.pack(side="right", fill="y")
+        self.ar_listbox.config(yscrollcommand=ar_scroll.set)
 
         # 2. Action Section
         self.action_frame = tk.LabelFrame(self.root, text=_('step_2_title'), font=("Microsoft JhengHei", 10, "bold"))
@@ -297,7 +312,8 @@ class PlaylistApp:
         self.settings_btn.config(text=_('set_base_folder_btn'))
 
     def refresh_url_list(self, audio_cache=None):
-        self.url_listbox.delete(0, tk.END)
+        self.pl_listbox.delete(0, tk.END)
+        self.ar_listbox.delete(0, tk.END)
         url_names = self.config.get('url_names', {})
         last_updated = self.config.get('last_updated', {})
         
@@ -310,6 +326,10 @@ class PlaylistApp:
         library_path = self.config['library_path']
         
         urls = self.config.get('spotify_urls', [])
+        
+        self.pl_urls = [u for u in urls if "artist/" not in u]
+        self.ar_urls = [u for u in urls if "artist/" in u]
+        
         pl_files = []
         for url in urls:
             name = url_names.get(url, url)
@@ -346,7 +366,10 @@ class PlaylistApp:
                 else:
                     status_text = f"⏳ {name} ({_('wait_sync')})"
             
-            self.url_listbox.insert(tk.END, status_text)
+            if url in self.pl_urls:
+                self.pl_listbox.insert(tk.END, status_text)
+            else:
+                self.ar_listbox.insert(tk.END, status_text)
 
     def reset_update_status(self):
         self.config['last_updated'] = {}
@@ -474,13 +497,24 @@ class PlaylistApp:
             self.log(_('auto_cleaned'))
 
     def remove_url(self):
-        sel = self.url_listbox.curselection()
-        if not sel: return
-        idx = sel[0]
+        pl_sel = self.pl_listbox.curselection()
+        ar_sel = self.ar_listbox.curselection()
+        
+        if not pl_sel and not ar_sel: return
+        
         urls = self.config.get('spotify_urls', [])
-        if 0 <= idx < len(urls):
-            url = urls[idx]
-            urls.pop(idx)
+        url_names = self.config.get('url_names', {})
+        last_updated = self.config.get('last_updated', {})
+        
+        if pl_sel:
+            idx = pl_sel[0]
+            url = self.pl_urls[idx]
+        else:
+            idx = ar_sel[0]
+            url = self.ar_urls[idx]
+
+        if url in urls:
+            urls.remove(url)
             
             # Also remove name mapping if it exists
             url_names = self.config.get('url_names', {})

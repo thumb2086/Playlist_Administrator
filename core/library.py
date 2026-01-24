@@ -249,16 +249,40 @@ def move_unsorted_songs(config, log_func):
     for f in orphans:
         try:
             dest = os.path.join(unsorted_dir, os.path.basename(f))
-            # Double safety: don't remove if they are same file, or just skip if destination exists
             if os.path.normpath(f).lower() == os.path.normpath(dest).lower():
                 continue
                 
             if os.path.exists(dest):
-                os.remove(f) # It's a duplicate of something already in _Unsorted
+                os.remove(f) 
             else:
                 os.rename(f, dest)
             moved_count += 1
         except: pass
+
+    # 3.5 Move files BACK from _Unsorted if they are now in a playlist
+    recovered_count = 0
+    if os.path.exists(unsorted_dir):
+        unsorted_files = [os.path.join(unsorted_dir, f) for f in os.listdir(unsorted_dir) if os.path.isfile(os.path.join(unsorted_dir, f))]
+        for f in unsorted_files:
+            if not f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')): continue
+            
+            filename_no_ext = os.path.splitext(os.path.basename(f))[0]
+            file_tokens = tuple(get_normalized_tokens(filename_no_ext))
+            
+            if file_tokens in playlist_tokens:
+                try:
+                    dest = os.path.join(library_path, os.path.basename(f))
+                    if not os.path.exists(dest):
+                        os.rename(f, dest)
+                        recovered_count += 1
+                    else:
+                        # Already exists in root, just delete from unsorted
+                        os.remove(f)
+                        recovered_count += 1
+                except: pass
+    
+    if recovered_count > 0:
+        log_func(_('reorganized_unsorted', recovered_count))
         
     # 4. Create/Update Unsorted Playlist
     # Use a localized name for the playlist
