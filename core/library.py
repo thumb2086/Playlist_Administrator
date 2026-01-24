@@ -198,51 +198,27 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     from core.spotify import scrape_via_spotify_embed
     from core.downloader import download_song
     import time
-    
+            
+    # 0. Initialize
     library_path = config['library_path']
+    playlists_path = config['playlists_path']
+    audio_format = config.get('audio_format', 'mp3')
     from utils.i18n import _
 
-    # 0. Organize existing files first to ensure consistency
+    # 1. Maintenance & Cleanup
     log_func(_('scanning_lib'))
-    rename_explicit_files(library_path, log_func)
-
-    # 1. Scrape First (Now will point to cleaned filenames)
-    scrape_via_spotify_embed(config, stats, log_func)
-    
-    if post_scrape_callback:
-        post_scrape_callback()
-
-    # 2. Process Playlists
-    playlists_path = config['playlists_path']
-    audio_format = config.get('audio_format', 'mp3')
-    
-    files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
-            glob.glob(os.path.join(playlists_path, "*.m3u")) + \
-            glob.glob(os.path.join(playlists_path, "*.txt"))
-            
-    if not files:
-        log_func(_('no_pl_files'))
-        return
-
-    # Build the library index for fast lookups
-    log_func(_('building_index'))
-    
-    # 0.5 Unblock files to resolve 0x80070005 (Access Denied)
+    # 1.1 Unblock files to resolve 0x80070005 (Access Denied)
     unblock_files(library_path, log_func)
-    
-    # 0.6 Clean up 'E' prefixes and fix sanitization mismatch
+    # 1.2 Clean up 'E' prefixes and fix sanitization mismatch
     rename_explicit_files(library_path, log_func)
 
-    # 1. Scrape First (Now will point to cleaned filenames)
+    # 2. Scrape Spotify (Update local tracklists from URL)
     scrape_via_spotify_embed(config, stats, log_func)
-    
     if post_scrape_callback:
         post_scrape_callback()
 
-    # 2. Process Playlists
-    playlists_path = config['playlists_path']
-    audio_format = config.get('audio_format', 'mp3')
-    
+    # 3. Build Fresh Index and Scan Playlists
+    # Scan for all playlist formats
     files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
             glob.glob(os.path.join(playlists_path, "*.m3u")) + \
             glob.glob(os.path.join(playlists_path, "*.txt"))
@@ -257,7 +233,8 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     all_files = glob.glob(search_pattern, recursive=True)
     audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
     library_index = build_library_index(audio_files_cache)
-    log_func(_('indexed_songs', len(audio_files_cache)))  # Show total files, not unique songs
+    log_func(_('indexed_songs', len(audio_files_cache)))
+    
     songs_to_download = [] # List of {'name': s, 'playlist': pl}
     
     for pl_file in files:
@@ -563,7 +540,8 @@ def get_detailed_stats(config, audio_files=None):
         recent_5.append((os.path.basename(f), date_str))
         
     # 2. Duplicate/Savings Stats
-    pl_files = glob.glob(os.path.join(playlists_path, "*.m3u")) + \
+    pl_files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
+               glob.glob(os.path.join(playlists_path, "*.m3u")) + \
                glob.glob(os.path.join(playlists_path, "*.txt"))
     
     all_pl_songs = []
