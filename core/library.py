@@ -461,7 +461,20 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             else:
                 progress_func(0, total, None)
         
-        for item in songs_to_download:
+        # Initialize song status tracking for downloads
+        download_status = {}
+        for i, item in enumerate(songs_to_download):
+            song_name = item['name']
+            download_status[i] = {
+                'name': song_name,
+                'status': '⏳ 等待中',
+                'order': i + 1
+            }
+            # Initialize song status in UI
+            if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                stats.app.update_song_status(i, '⏳ 等待中', song_name)
+
+        for i, item in enumerate(songs_to_download):
             song_name = item['name']
             pl_name = item['playlist']
             remaining = total_missing - (current_dl + 1)
@@ -472,6 +485,10 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
 
             if hasattr(stats, 'pause_event') and stats.pause_event:
                  stats.pause_event.wait()
+            
+            # Update status to downloading
+            if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                stats.app.update_song_status(i, '🔽 下載中', song_name)
                  
             # Check if log_func supports immediate parameter
             if hasattr(log_func, '__code__') and 'immediate' in log_func.__code__.co_varnames:
@@ -531,6 +548,10 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             
             res = download_song(song_name, library_path, audio_format, log_func, audio_files_cache, stats, None, song_progress_callback, current_dl)
             if res and os.path.exists(res):
+                # Update status to success
+                if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                    stats.app.update_song_status(i, '✅ 完成', song_name)
+                
                 # Track time spent on this song
                 song_end_time = time.time()
                 song_duration = song_end_time - song_start_time
@@ -550,6 +571,10 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 if successful_downloads % 10 == 0:
                     log_func(_('dl_rest', successful_downloads))
                     time.sleep(15)
+            else:
+                # Update status to failed
+                if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                    stats.app.update_song_status(i, '❌ 失敗', song_name)
             
             current_dl += 1
             # Update progress with overall ETA calculation
@@ -568,6 +593,8 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 if progress_func: 
                     progress_func(current_dl, total_missing, None)
             
+            # Only add delay if not the last song and not cancelled
+            if current_dl < total_missing - 1:
                 delay = random.uniform(3, 8)
                 time.sleep(delay)
         

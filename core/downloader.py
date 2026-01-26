@@ -166,6 +166,9 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
 
     def progress_hook(d):
         check_stop()
+        # Add more frequent checks during download
+        if d.get('status') == 'downloading':
+            check_stop()  # Check again during download
         # --- DIAGNOSTIC LOG ---
         if not isinstance(d, dict):
             log_func(f"[DIAGNOSTIC] progress_hook received non-dict: type={type(d)}, content={d}")
@@ -390,9 +393,14 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
     for idx, current_query in enumerate(candidates):
         is_last_candidate = (idx == len(candidates) - 1)
         
+        # Check for cancellation before each candidate
+        check_stop()
+        
         max_retries = 2
         for attempt in range(max_retries):
             try:
+                # Check for cancellation before each attempt
+                check_stop()
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     if attempt == 0:
                         if idx == 0:

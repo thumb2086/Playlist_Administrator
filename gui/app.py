@@ -252,10 +252,10 @@ class PlaylistApp:
 
         # 2.5 Player Section (In Tab 2)
         # Use a big full-width frame for player
-        player_main_container = tk.Frame(self.tab_player)
+        player_main_container = tk.Frame(self.tab_player, bg="#f0f0f0")
         player_main_container.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.player_frame = tk.LabelFrame(player_main_container, text=_('player_title'), font=("Microsoft JhengHei", 10, "bold"))
+        self.player_frame = tk.LabelFrame(player_main_container, text=_('player_title'), font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0")
         self.player_frame.pack(fill="both", expand=True)
         
         # Huge Lyrics Display at the Top
@@ -266,7 +266,7 @@ class PlaylistApp:
         self.lyrics_lbl = tk.Label(self.lyrics_container, text=_('player_no_lyrics'), font=("Microsoft JhengHei", 32, "bold"), fg="#00FF00", bg="#000000", wraplength=900)
         self.lyrics_lbl.pack(expand=True, fill="both")
 
-        player_controls = tk.Frame(self.player_frame)
+        player_controls = tk.Frame(self.player_frame, bg="#f0f0f0")
         player_controls.pack(fill="x", padx=10, pady=20)
         
         self.now_playing_lbl = tk.Label(self.player_frame, text=_('player_now_playing', _('no_data')), font=("Microsoft JhengHei", 12), fg="#2196F3", anchor="center")
@@ -408,6 +408,8 @@ class PlaylistApp:
         is_error = any(keyword in msg_str for keyword in ['❌', '🚫', '🔌', '⚠️', 'Error', 'error', '錯誤', '失敗'])
         is_important = any(keyword in msg_str for keyword in ['---', '統計完成', '🎉', '歌詞補抓完成', '✅', '成功', '已更新', 'Download complete', '->'])
         
+        # Don't interfere with player panel - keep it for lyrics only
+        
         if is_error or is_important:
             self.log_queue.append(msg_str)
             if self.log_update_job is None:
@@ -415,6 +417,7 @@ class PlaylistApp:
                 delay = 50 if immediate and ("剩" in msg_str or "left" in msg_str.lower()) else 200
                 self.log_update_job = self.root.after(delay, self._process_log_queue)
     
+        
     def update_song_status(self, song_index, status, song_name):
         """Update song status in the treeview"""
         def update_ui():
@@ -516,9 +519,12 @@ class PlaylistApp:
         if now - self.last_speed_update < 0.5: # Throttle to 2fps
             return
         self.last_speed_update = now
-        # Only update speed display if not showing ETA
+        # Only update speed display if not showing ETA or completion
         current_text = self.speed_label.cget("text")
-        if not current_text.startswith("預估時間:") and current_text != "完成":
+        if (not current_text.startswith("剩餘時間:") and 
+            not current_text.startswith("預估時間:") and 
+            current_text != "下載完成" and
+            not current_text.startswith("準備下載")):
             self.root.after(0, lambda: self.speed_label.config(text=f"下載速度: {speed_text}"))
 
     def _process_log_queue(self):
@@ -595,37 +601,47 @@ class PlaylistApp:
 
         for url in urls:
             name = url_names.get(url, url)
-            # Try both .m3u and .m3u8 extensions
-            pl_file = None
-            for ext in ['.m3u', '.m3u8']:
-                test_file = os.path.join(playlists_path, f"{name}{ext}")
-                if os.path.exists(test_file):
-                    pl_file = test_file
-                    break
-            
             status_text = ""
             is_synced_today = last_updated.get(url) == today
             
-            if pl_file and os.path.exists(pl_file):
-                # Playlist file exists - check completeness
-                is_complete, missing, total = report.get(pl_file, (True, 0, 0))
-                
-                if is_complete:
-                    if is_synced_today:
-                        status_text = f"✅ {name}"
-                    else:
-                        status_text = f"📦 {name} ({_('local_complete')})"
+            # For single tracks, check if MP3 file exists instead of playlist file
+            if "track/" in url:
+                # Single track - check for MP3 file
+                mp3_file = os.path.join(library_path, f"{name}.mp3")
+                if os.path.exists(mp3_file):
+                    status_text = f"✅ {name}" if is_synced_today else f"📦 {name} ({_('local_complete')})"
                 else:
-                    if is_synced_today:
-                        status_text = f"🔄 {name} ({_('incomplete_warning_title')}, {_('missing_songs', missing)})"
-                    else:
-                        status_text = f"⚠️ {name} ({_('wait_download')}, {_('missing_songs', missing)})"
+                    status_text = f"🔄 {name}" if is_synced_today else f"⏳ {name} ({_('wait_download')})"
             else:
-                # No playlist file exists yet - show waiting status
-                if is_synced_today:
-                    status_text = f"🔄 {name} ({_('synced_today')})"
+                # For playlists/albums/artists, check playlist file
+                # Try both .m3u and .m3u8 extensions
+                pl_file = None
+                for ext in ['.m3u', '.m3u8']:
+                    test_file = os.path.join(playlists_path, f"{name}{ext}")
+                    if os.path.exists(test_file):
+                        pl_file = test_file
+                        break
+                
+                if pl_file and os.path.exists(pl_file):
+                    # Playlist file exists - check completeness
+                    is_complete, missing, total = report.get(pl_file, (True, 0, 0))
+                    
+                    if is_complete:
+                        if is_synced_today:
+                            status_text = f"✅ {name}"
+                        else:
+                            status_text = f"📦 {name} ({_('local_complete')})"
+                    else:
+                        if is_synced_today:
+                            status_text = f"🔄 {name} ({_('incomplete_warning_title')}, {_('missing_songs', missing)})"
+                        else:
+                            status_text = f"⚠️ {name} ({_('wait_download')}, {_('missing_songs', missing)})"
                 else:
-                    status_text = f"⏳ {name} ({_('wait_sync')})"
+                    # No playlist file exists yet - show waiting status
+                    if is_synced_today:
+                        status_text = f"🔄 {name} ({_('synced_today')})"
+                    else:
+                        status_text = f"⏳ {name} ({_('wait_sync')})"
             
             # Display in appropriate listbox based on URL type
             if url in self.pl_urls:
@@ -796,8 +812,9 @@ class PlaylistApp:
         pl_sel = self.pl_listbox.curselection()
         al_sel = self.al_listbox.curselection()
         ar_sel = self.ar_listbox.curselection()
+        st_sel = self.st_listbox.curselection()
         
-        if not pl_sel and not al_sel and not ar_sel: return
+        if not pl_sel and not al_sel and not ar_sel and not st_sel: return
         
         urls = self.config.get('spotify_urls', [])
         url_names = self.config.get('url_names', {})
@@ -809,15 +826,20 @@ class PlaylistApp:
         elif al_sel:
             idx = al_sel[0]
             url = self.al_urls[idx]
-        else:
+        elif ar_sel:
             idx = ar_sel[0]
             url = self.ar_urls[idx]
+        else:
+            idx = st_sel[0]
+            url = self.st_urls[idx]
 
         if url in urls:
+            # Get name before removing from url_names
+            name = url_names.get(url)
+            
             urls.remove(url)
             
             # Also remove name mapping if it exists
-            url_names = self.config.get('url_names', {})
             if url in url_names:
                 del url_names[url]
             
@@ -831,7 +853,6 @@ class PlaylistApp:
             self.update_stats_ui()
             
             # Delete corresponding M3U/M3U8 file if it exists
-            name = url_names.get(url)
             if name:
                 for ext in ['.m3u8', '.m3u']:
                     pl_file = os.path.join(self.config['playlists_path'], f"{name}{ext}")
@@ -858,6 +879,8 @@ class PlaylistApp:
         self.cancel_btn.config(state="normal")
         self.pause_event.set()
         self.stop_event.clear()
+        # Clear song status tree when starting new update
+        self.clear_song_status()
         threading.Thread(target=self._update_thread, daemon=True).start()
 
     def run_cancel(self):
