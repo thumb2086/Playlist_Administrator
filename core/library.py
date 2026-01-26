@@ -829,13 +829,26 @@ def get_detailed_stats(config, audio_files=None):
     total_size_mb = total_size_bytes / (1024 * 1024)
     
     # Recently added (by mtime)
-    audio_files_sorted = sorted(audio_files, key=lambda x: os.path.getmtime(x), reverse=True)
+    # Filter out files that don't exist before sorting
+    existing_audio_files = [f for f in audio_files if os.path.exists(f)]
+    
+    def safe_getmtime(filepath):
+        try:
+            return os.path.getmtime(filepath)
+        except (OSError, IOError):
+            return 0
+    
+    audio_files_sorted = sorted(existing_audio_files, key=safe_getmtime, reverse=True)
     recent_5 = []
     for f in audio_files_sorted[:5]:
-        mtime = os.path.getmtime(f)
-        import datetime
-        date_str = datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-        recent_5.append((os.path.basename(f), date_str))
+        try:
+            mtime = os.path.getmtime(f)
+            import datetime
+            date_str = datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
+            recent_5.append((os.path.basename(f), date_str))
+        except (OSError, IOError):
+            # Skip files that can't be accessed
+            continue
         
     # 2. Duplicate/Savings Stats
     pl_files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \

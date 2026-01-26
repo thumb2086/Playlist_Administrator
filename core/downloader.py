@@ -68,11 +68,8 @@ def download_lyrics(song_name, output_path, log_func):
         # Generate multiple search queries for better coverage
         search_queries = [clean_query]
         
-        if ' - ' in clean_query:
-            parts = clean_query.split(' - ', 1)
-            if len(parts) == 2:
-                search_queries.append(parts[1].strip()) # Title only
-                search_queries.append(parts[0].strip()) # Artist only
+        # REMOVED: Splitting by ' - ' and searching for parts caused incorrect matches 
+        # (e.g. searching for title only can return a completely different song)
         
         alt_query = re.sub(r'[^\w\s]', ' ', clean_query)
         alt_query = re.sub(r'\s+', ' ', alt_query).strip()

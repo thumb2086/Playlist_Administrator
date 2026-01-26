@@ -26,7 +26,8 @@ def load_config():
         'enable_retroactive_lyrics': True,  # Allow users to disable lyrics fetching
         'max_threads': 4,
         'setup_completed': False,
-        'retry_failed_lyrics': False  # Default to skip failed lyrics
+        'retry_failed_lyrics': False,  # Default to skip failed lyrics
+        'lyrics_offsets': {}  # Per-song lyrics timing adjustments
     }
     for key, value in defaults.items():
         config.setdefault(key, value)

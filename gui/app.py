@@ -62,26 +62,37 @@ class PlaylistApp:
             
         top = tk.Toplevel(self.root)
         top.title("Welcome / 歡迎")
-        top.geometry("300x150")
+        top.geometry("500x450")
         top.resizable(False, False)
         top.transient(self.root)
         top.grab_set()
+        top.state('normal')  # 確保視窗正常顯示
+        top.lift()           # 提升到最前面
+        top.focus_force()    # 強制取得焦點
         
-        # Center
-        top.update_idletasks()
-        width = top.winfo_width()
-        height = top.winfo_height()
-        x = (top.winfo_screenwidth() // 2) - (width // 2)
-        y = (top.winfo_screenheight() // 2) - (height // 2)
-        top.geometry(f'{width}x{height}+{x}+{y}')
+        # Center - 使用固定的尺寸值
+        screen_width = top.winfo_screenwidth()
+        screen_height = top.winfo_screenheight()
+        x = (screen_width // 2) - (500 // 2)  # 500 是視窗寬度
+        y = (screen_height // 2) - (450 // 2)  # 450 是視窗高度
+        top.geometry(f'500x450+{x}+{y}')
         
-        tk.Label(top, text="Please select your language\n請選擇您的語言", font=("Microsoft JhengHei", 12)).pack(pady=20)
+        # 確保視窗可見並取得焦點
+        top.deiconify()  # 確保視窗不是最小化狀態
+        top.lift()
+        top.focus_force()
         
-        btn_frame = tk.Frame(top)
-        btn_frame.pack(fill="x", pady=10)
+        main_frame = tk.Frame(top, padx=20, pady=20)
+        main_frame.pack(fill="both", expand=True)
         
-        tk.Button(btn_frame, text="English", command=lambda: set_lang('en'), width=10).pack(side="left", padx=20, expand=True)
-        tk.Button(btn_frame, text="繁體中文", command=lambda: set_lang('zh-TW'), width=10).pack(side="right", padx=20, expand=True)
+        tk.Label(main_frame, text="Welcome! / 歡迎使用!", font=("Microsoft JhengHei", 20, "bold"), fg="#2196F3").pack(pady=(20, 10))
+        tk.Label(main_frame, text="Please select your language\n請選擇您的語言", font=("Microsoft JhengHei", 12), fg="#666").pack(pady=10)
+        
+        btn_frame = tk.Frame(main_frame)
+        btn_frame.pack(fill="x", pady=30)
+        
+        tk.Button(btn_frame, text="English", command=lambda: set_lang('en'), font=("Microsoft JhengHei", 12), height=3, width=15, bg="#E0E0E0").pack(side="left", padx=20, expand=True)
+        tk.Button(btn_frame, text="繁體中文", command=lambda: set_lang('zh-TW'), font=("Microsoft JhengHei", 12, "bold"), height=3, width=15, bg="#d0f0c0").pack(side="right", padx=20, expand=True)
         
         # Block until closed
         self.root.wait_window(top)
@@ -138,7 +149,7 @@ class PlaylistApp:
         self.notebook.add(self.tab_library, text=_('tab_library'))
         
         # Library Layout - Split View
-        self.library_paned = tk.PanedWindow(self.tab_library, orient=tk.VERTICAL, sashwidth=4, bg="#d9d9d9", sashrelief=tk.FLAT)
+        self.library_paned = tk.PanedWindow(self.tab_library, orient=tk.VERTICAL, sashwidth=0, bg="#d9d9d9", sashrelief=tk.FLAT)
         self.library_paned.pack(fill="both", expand=True)
         
         # Top Pane (Lists & Actions)
@@ -179,10 +190,10 @@ class PlaylistApp:
         tk.Label(pl_side, text="歌單 (Playlists)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
         
         self.pl_listbox = tk.Listbox(pl_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
-        pl_scroll = tk.Scrollbar(pl_side, orient="vertical", command=self.pl_listbox.yview)
-        pl_scroll.pack(side="right", fill="y")
+        # pl_scroll = tk.Scrollbar(pl_side, orient="vertical", command=self.pl_listbox.yview)
+        # pl_scroll.pack(side="right", fill="y")
         self.pl_listbox.pack(side="left", fill="both", expand=True)
-        self.pl_listbox.config(yscrollcommand=pl_scroll.set)
+        # self.pl_listbox.config(yscrollcommand=pl_scroll.set)
 
         # Middle: Albums
         al_side = tk.Frame(list_container)
@@ -190,10 +201,10 @@ class PlaylistApp:
         tk.Label(al_side, text="專輯 (Albums)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
         
         self.al_listbox = tk.Listbox(al_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
-        al_scroll = tk.Scrollbar(al_side, orient="vertical", command=self.al_listbox.yview)
-        al_scroll.pack(side="right", fill="y")
+        # al_scroll = tk.Scrollbar(al_side, orient="vertical", command=self.al_listbox.yview)
+        # al_scroll.pack(side="right", fill="y")
         self.al_listbox.pack(side="left", fill="both", expand=True)
-        self.al_listbox.config(yscrollcommand=al_scroll.set)
+        # self.al_listbox.config(yscrollcommand=al_scroll.set)
 
         # Right side: Artists
         ar_side = tk.Frame(list_container)
@@ -201,10 +212,10 @@ class PlaylistApp:
         tk.Label(ar_side, text="藝人 (Artists)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
 
         self.ar_listbox = tk.Listbox(ar_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
-        ar_scroll = tk.Scrollbar(ar_side, orient="vertical", command=self.ar_listbox.yview)
-        ar_scroll.pack(side="right", fill="y")
+        # ar_scroll = tk.Scrollbar(ar_side, orient="vertical", command=self.ar_listbox.yview)
+        # ar_scroll.pack(side="right", fill="y")
         self.ar_listbox.pack(side="left", fill="both", expand=True)
-        self.ar_listbox.config(yscrollcommand=ar_scroll.set)
+        # self.ar_listbox.config(yscrollcommand=ar_scroll.set)
         
         # New: Single Tracks side
         st_side = tk.Frame(list_container)
@@ -212,10 +223,10 @@ class PlaylistApp:
         tk.Label(st_side, text=_('single_tracks_pl'), font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
 
         self.st_listbox = tk.Listbox(st_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
-        st_scroll = tk.Scrollbar(st_side, orient="vertical", command=self.st_listbox.yview)
-        st_scroll.pack(side="right", fill="y")
+        # st_scroll = tk.Scrollbar(st_side, orient="vertical", command=self.st_listbox.yview)
+        # st_scroll.pack(side="right", fill="y")
         self.st_listbox.pack(side="left", fill="both", expand=True)
-        self.st_listbox.config(yscrollcommand=st_scroll.set)
+        # self.st_listbox.config(yscrollcommand=st_scroll.set)
         
         # Bind Listbox selection for player (automatically switch to Player tab)
         self.pl_listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
@@ -287,6 +298,16 @@ class PlaylistApp:
         self.vol_lbl = tk.Label(vol_frame, text=_('player_volume', 70), font=("Microsoft JhengHei", 10), width=10)
         self.vol_lbl.pack(side="left")
         
+        # Lyrics Offset Controls
+        offset_frame = tk.Frame(player_controls)
+        offset_frame.pack(side="top", pady=10)
+        
+        tk.Label(offset_frame, text="歌詞時間:", font=("Microsoft JhengHei", 10)).pack(side="left", padx=5)
+        tk.Button(offset_frame, text="← -0.5s", command=lambda: self.adjust_lyrics_offset(-0.5), width=8, font=("Microsoft JhengHei", 9)).pack(side="left", padx=5)
+        self.offset_lbl = tk.Label(offset_frame, text="偏移: 0.0s", font=("Microsoft JhengHei", 10, "bold"), fg="#FF9800", width=12)
+        self.offset_lbl.pack(side="left", padx=5)
+        tk.Button(offset_frame, text="+0.5s →", command=lambda: self.adjust_lyrics_offset(0.5), width=8, font=("Microsoft JhengHei", 9)).pack(side="left", padx=5)
+        
         # --- Pygame Setup ---
         import pygame
         import os
@@ -294,6 +315,11 @@ class PlaylistApp:
         os.environ['SDL_VIDEODRIVER'] = 'dummy'
         pygame.init()
         pygame.mixer.init()
+        pygame.mixer.music.set_volume(0.7) # Set initial volume
+        
+        # Load lyrics offsets from config
+        self.lyrics_offsets = self.config.get('lyrics_offsets', {})
+        
         if pygame.display.get_init():
             pygame.display.set_mode((1, 1))
         self.is_playing = False
@@ -577,14 +603,11 @@ class PlaylistApp:
                     pl_file = test_file
                     break
             
-            if not pl_file:
-                # If no file found, skip this URL
-                continue
-            
             status_text = ""
             is_synced_today = last_updated.get(url) == today
             
-            if os.path.exists(pl_file):
+            if pl_file and os.path.exists(pl_file):
+                # Playlist file exists - check completeness
                 is_complete, missing, total = report.get(pl_file, (True, 0, 0))
                 
                 if is_complete:
@@ -598,12 +621,13 @@ class PlaylistApp:
                     else:
                         status_text = f"⚠️ {name} ({_('wait_download')}, {_('missing_songs', missing)})"
             else:
-                # No playlist file exists - check if it's an artist that should have one
+                # No playlist file exists yet - show waiting status
                 if is_synced_today:
                     status_text = f"🔄 {name} ({_('synced_today')})"
                 else:
                     status_text = f"⏳ {name} ({_('wait_sync')})"
             
+            # Display in appropriate listbox based on URL type
             if url in self.pl_urls:
                 self.pl_listbox.insert(tk.END, status_text)
             elif url in self.al_urls:
@@ -645,24 +669,32 @@ class PlaylistApp:
                 size_str = f"{total_size_mb/1024:.2f} GB" if total_size_mb > 1024 else f"{total_size_mb:.1f} MB"
                 saving_str = f"{savings/1024:.2f} GB" if savings > 1024 else f"{savings:.1f} MB"
                 
-                self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', total_songs, size_str)))
-                self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', dupes)))
-                self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', saving_str)))
-                
-                if recent:
-                    recent_text = _('recent_added', " | ".join([f"{name[:15]}... ({date})" for name, date in recent]))
-                    self.root.after(0, lambda: self.recent_lbl.config(text=recent_text))
-                else:
-                    self.root.after(0, lambda: self.recent_lbl.config(text=_('recent_added', _('no_data'))))
+                try:
+                    self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', total_songs, size_str)))
+                    self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', dupes)))
+                    self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', saving_str)))
+                    
+                    if recent:
+                        recent_text = _('recent_added', " | ".join([f"{name[:15]}... ({date})" for name, date in recent]))
+                        self.root.after(0, lambda: self.recent_lbl.config(text=recent_text))
+                    else:
+                        self.root.after(0, lambda: self.recent_lbl.config(text=_('recent_added', _('no_data'))))
+                except RuntimeError:
+                    # Ignore cleanup errors if main loop is gone
+                    pass
             except Exception as e:
                 import traceback
                 traceback.print_exc()
                 print(f"Error updating stats: {e}")
                 # Ensure UI doesn't get stuck on "Loading..."
-                self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', 0, "Error")))
-                self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', 0)))
-                self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', 0)))
-                self.root.after(0, lambda: self.recent_lbl.config(text=_('recent_added', _('no_data'))))
+                try:
+                    self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', 0, "Error")))
+                    self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', 0)))
+                    self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', 0)))
+                    self.root.after(0, lambda: self.recent_lbl.config(text=_('recent_added', _('no_data'))))
+                except RuntimeError:
+                    # Ignore "main thread is not in main loop" during shutdown
+                    pass
 
         threading.Thread(target=_bg_update, daemon=True).start()
 
@@ -1142,12 +1174,21 @@ class PlaylistApp:
                 
             pygame.mixer.music.load(song_path)
             pygame.mixer.music.set_endevent(pygame.USEREVENT + 1)
+            
+            # Set volume from slider to ensure consistency
+            vol = self.vol_var.get() / 100.0
+            pygame.mixer.music.set_volume(vol)
+            
             pygame.mixer.music.play()
             self.is_playing = True
             self.play_btn.config(text="⏸")
-            song_name = os.path.basename(song_path)
-            self.now_playing_lbl.config(text=_('player_now_playing', song_name))
-            
+            self.current_playing = song_path # Track current song for lyrics offset
+            self.now_playing_lbl.config(text=_('player_now_playing', os.path.basename(song_path)))
+        
+            # Update offset label
+            current_offset = self.lyrics_offsets.get(song_path, 0.0)
+            self.offset_lbl.config(text=f"偏移: {current_offset:+.1f}s")
+        
             # Load and parse lyrics
             self.load_lyrics(song_path)
             self.refresh_lyrics()
@@ -1178,6 +1219,32 @@ class PlaylistApp:
         
         if not self.current_lyrics:
             self.lyrics_lbl.config(text=_('player_no_lyrics'))
+    
+    def adjust_lyrics_offset(self, delta):
+        """Adjust lyrics timing offset for current song by delta seconds"""
+        if not self.current_playing:
+            return
+        
+        # Get current offset or 0.0
+        current_offset = self.lyrics_offsets.get(self.current_playing, 0.0)
+        new_offset = current_offset + delta
+        
+        # Round to 1 decimal place
+        new_offset = round(new_offset, 1)
+        
+        # Update offset
+        self.lyrics_offsets[self.current_playing] = new_offset
+        
+        # Save to config
+        self.config['lyrics_offsets'] = self.lyrics_offsets
+        from utils.config import save_config
+        save_config(self.config)
+        
+        # Update UI
+        self.offset_lbl.config(text=f"偏移: {new_offset:+.1f}s")
+        
+        # Log
+        self.log(f"歌詞偏移已調整: {new_offset:+.1f}s")
 
     def refresh_lyrics(self):
         import pygame
@@ -1204,11 +1271,24 @@ class PlaylistApp:
         if curr_ms < 0:
             self.lyrics_update_job = self.root.after(200, self.refresh_lyrics)
             return
+        
+        # Only update lyrics if we have lyrics loaded
+        if not self.current_lyrics:
+            # No lyrics available - keep the "no lyrics" message
+            self.lyrics_update_job = self.root.after(200, self.refresh_lyrics)
+            return
+        
+        # Apply lyrics offset for current song
+        offset_ms = 0
+        if self.current_playing:
+            offset_s = self.lyrics_offsets.get(self.current_playing, 0.0)
+            offset_ms = int(offset_s * 1000)
 
         # Find the current line of lyrics
         current_text = ""
+        adjusted_curr_ms = curr_ms + offset_ms
         for i in range(len(self.current_lyrics)):
-            if self.current_lyrics[i][0] <= curr_ms:
+            if self.current_lyrics[i][0] <= adjusted_curr_ms:
                 current_text = self.current_lyrics[i][1]
             else:
                 break
