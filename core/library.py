@@ -214,8 +214,8 @@ def move_unsorted_songs(config, log_func):
     songs_in_playlists = set()
     for pl_file in all_playlist_files:
         base = os.path.basename(pl_file)
-        # Skip the unsorted playlists themselves
-        if any(x in base for x in ["_未分類", "_Unsorted"]): continue
+        # Skip the unsorted/single tracks playlists themselves
+        if any(x in base for x in ["_未分類", "_Unsorted", "Single Tracks", "單曲"]): continue
         songs_in_playlists.update(parse_playlist(pl_file))
     
     # Build tokens for comparison
@@ -286,8 +286,24 @@ def move_unsorted_songs(config, log_func):
         
     # 4. Create/Update Unsorted Playlist
     # Use a localized name for the playlist
+    # If it's explicitly a single track from user, we might want to call it "Single Tracks"
     pl_name = "_" + _('removed_songs_pl')
     m3u_path = os.path.join(playlists_path, f"{pl_name}.m3u8")
+    
+    # Check if we should also handle manual single tracks (songs in Music/Single Tracks)
+    single_tracks_dir = os.path.join(library_path, "Single Tracks")
+    single_tracks_pl = os.path.join(playlists_path, "Single Tracks.m3u8")
+    
+    if os.path.exists(single_tracks_dir):
+        st_files = [f for f in os.listdir(single_tracks_dir) if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
+        if st_files:
+            with open(single_tracks_pl, 'w', encoding='utf-8-sig', newline='') as f:
+                f.write("#EXTM3U\r\n")
+                for base in sorted(st_files):
+                    name_no_ext = os.path.splitext(base)[0]
+                    rel_path = f"../Music/Single Tracks/{base}"
+                    f.write(f"#EXTINF:-1,{name_no_ext}\r\n")
+                    f.write(f"{rel_path}\r\n")
     
     # Cleanup old legacy name if it exists
     old_m3u_path = os.path.join(playlists_path, "_Unsorted_Songs.m3u8")
@@ -365,7 +381,16 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     log_func(_('indexed_songs', len(audio_files_cache)))
     
     songs_to_download = [] # List of {'name': s, 'playlist': pl}
+    songs_missing_lyrics = [] # List of (song_name, existing_path)
     
+    # Pre-scan existing files for missing lyrics
+    for audio_path in audio_files_cache:
+        lrc_path = os.path.splitext(audio_path)[0] + ".lrc"
+        if not os.path.exists(lrc_path):
+            # Extract song name from filename
+            song_name = os.path.splitext(os.path.basename(audio_path))[0]
+            songs_missing_lyrics.append((song_name, audio_path))
+
     for pl_file in files:
         if stats and stats.stop_event and stats.stop_event.is_set():
              log_func(_('task_stopped'))
@@ -379,11 +404,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                   return
 
              existing_path = find_song_in_library(song_name, library_index)
-             
-             if existing_path:
-                 # Renaming logic can be simplified or removed if filenames are consistent
-                 pass # Assuming filenames are now managed correctly upon download
-             else:
+             if not existing_path:
                  # Check if already in list to avoid duplicates across diff playlists
                  if not any(d['name'] == song_name for d in songs_to_download):
                      songs_to_download.append({'name': song_name, 'playlist': pl_name})
@@ -547,22 +568,157 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 if progress_func: 
                     progress_func(current_dl, total_missing, None)
             
-            if current_dl < total_missing:  
                 delay = random.uniform(3, 8)
                 time.sleep(delay)
         
-        # FINAL STEP: Analyze and move unsorted songs (Option A+B)
+    # PHASE 3: Retroactive Lyrics Download (Only run if enabled and there are existing songs missing lyrics)
+    if songs_missing_lyrics and config.get('enable_retroactive_lyrics', True):
+        from core.downloader import download_lyrics
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import json
+        import hashlib
+        
+        log_func(_('retroactive_lyrics', len(songs_missing_lyrics)))
+        total_lyrics_to_fetch = len(songs_missing_lyrics)
+        lyrics_fetched_count = 0
+        consecutive_failures = 0
+        max_consecutive_failures = 10  # Skip to next phase after too many failures
+        
+        # Load failed lyrics cache
+        failed_cache_file = os.path.join(config.get('base_path', ''), 'data', 'failed_lyrics.json')
+        failed_cache = {}
         try:
-            move_unsorted_songs(config, log_func)
-        except: pass
-    else:
+            if os.path.exists(failed_cache_file):
+                with open(failed_cache_file, 'r', encoding='utf-8') as f:
+                    failed_cache = json.load(f)
+        except:
+            failed_cache = {}
+        
+        # Filter out songs that were previously marked as failed
+        filtered_songs = []
+        for name, path in songs_missing_lyrics:
+            # Create a unique key for the song (based on name)
+            song_key = hashlib.md5(name.encode('utf-8')).hexdigest()
+            # Check if we should retry or skip
+            should_retry = config.get('retry_failed_lyrics', False)
+            
+            if should_retry or song_key not in failed_cache:
+                filtered_songs.append((name, path))
+            else:
+                log_func(f"  ⏭️ [Lyrics Skipped] {name} (previously failed)")
+        
+        if not filtered_songs:
+            log_func("  ℹ️ 所有缺少歌詞的歌曲都已標記為失敗，跳過歌詞補抓")
+        else:
+            log_func(f"  ℹ️ 跳過 {len(songs_missing_lyrics) - len(filtered_songs)} 首先前失敗的歌曲")
+            songs_missing_lyrics = filtered_songs
+            total_lyrics_to_fetch = len(songs_missing_lyrics)
+        
+        # Create song status tracking
+        song_status = {}
+        for i, (name, path) in enumerate(songs_missing_lyrics):
+            song_status[i] = {
+                'name': name,
+                'status': '⏳ 等待中',
+                'order': i + 1
+            }
+            # Initialize song status in UI
+            if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                stats.app.update_song_status(i, '⏳ 等待中', name)
+        
+        # Multi-threading settings
+        max_workers = config.get('max_threads', 4)
+        results_lock = threading.Lock()
+        
+        def process_single_song(song_data):
+            nonlocal lyrics_fetched_count, consecutive_failures, failed_cache, song_status
+            
+            i, (name, path) = song_data
+            if stats and stats.stop_event and stats.stop_event.is_set():
+                return None, None
+            
+            if hasattr(stats, 'pause_event') and stats.pause_event:
+                stats.pause_event.wait()
+            
+            # Update status to processing
+            with results_lock:
+                song_status[i]['status'] = '🔍 搜尋中'
+                if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                    stats.app.update_song_status(i, '🔍 搜尋中', name)
+            
+            lrc_path = os.path.splitext(path)[0] + ".lrc"
+            success = download_lyrics(name, lrc_path, lambda msg: None)  # Suppress individual logs
+            
+            with results_lock:
+                if success:
+                    lyrics_fetched_count += 1
+                    consecutive_failures = 0
+                    song_status[i]['status'] = '✅ 成功'
+                    if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                        stats.app.update_song_status(i, '✅ 成功', name)
+                    return f"  ✅ [Lyrics] {name}", i + 1
+                else:
+                    # Mark as failed in cache
+                    song_key = hashlib.md5(name.encode('utf-8')).hexdigest()
+                    failed_cache[song_key] = {
+                        'name': name,
+                        'timestamp': time.time(),
+                        'reason': 'not_found'
+                    }
+                    
+                    consecutive_failures += 1
+                    song_status[i]['status'] = '❌ 失敗'
+                    if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                        stats.app.update_song_status(i, '❌ 失敗', name)
+                    if consecutive_failures >= max_consecutive_failures:
+                        return f"  ⚠️ [Lyrics] 連續 {max_consecutive_failures} 次失敗，跳過剩餘歌詞下載", None
+                    return f"  ❌ [Lyrics] {name}", i + 1
+        
+        # Process songs with multi-threading
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_index = {
+                executor.submit(process_single_song, (i, song_data)): i 
+                for i, song_data in enumerate(songs_missing_lyrics)
+            }
+            
+            # Collect results as they complete
+            completed_count = 0
+            
+            for future in as_completed(future_to_index):
+                if consecutive_failures >= max_consecutive_failures:
+                    break
+                    
+                result, progress = future.result()
+                completed_count += 1
+                
+                # Show simple progress every 50 songs
+                if completed_count % 50 == 0 or completed_count == total_lyrics_to_fetch:
+                    log_func(f"� 歌詞下載進度: {completed_count}/{total_lyrics_to_fetch} (成功: {lyrics_fetched_count})")
+        
+        # Final summary
+        if lyrics_fetched_count > 0:
+            log_func(f"🎉 歌詞補抓完成: 成功 {lyrics_fetched_count} / {total_lyrics_to_fetch} 首")
+        
+        # Save failed cache
+        try:
+            os.makedirs(os.path.dirname(failed_cache_file), exist_ok=True)
+            with open(failed_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(failed_cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            log_func(f"  ⚠️ 無法儲存失敗歌詞快取: {e}")
+    elif songs_missing_lyrics and not config.get('enable_retroactive_lyrics', True):
+        log_func(f" -> 跳過歌詞補抓 ({len(songs_missing_lyrics)} 首歌曲缺少歌詞，但已停用自動補抓功能)")
+    
+    if total_missing == 0:
         log_func(_('lib_up_to_date'))
-        # Even if up to date, check for unsorted (e.g. user manually removed from Spotify)
-        try:
-            move_unsorted_songs(config, log_func)
-        except: pass
-        if progress_func: progress_func(100, 100) 
+        if progress_func: progress_func(100, 100)
 
+    # FINAL STEP: Analyze and move unsorted songs
+    try:
+        move_unsorted_songs(config, log_func)
+    except: pass
     log_func(_('update_complete'))
 
 def get_playlist_completeness_report(playlists, library_path, audio_files_cache=None):

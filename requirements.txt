@@ -5,3 +5,6 @@ ffmpeg-python
 zhconv
 pyinstaller
 mutagen
+pygame
+syncedlyrics
+urllib3

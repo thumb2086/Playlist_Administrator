@@ -22,7 +22,11 @@ def load_config():
         'language': 'zh-TW',
         'spotify_urls': [],
         'url_names': {},
-        'last_updated': {}
+        'last_updated': {},
+        'enable_retroactive_lyrics': True,  # Allow users to disable lyrics fetching
+        'max_threads': 4,
+        'setup_completed': False,
+        'retry_failed_lyrics': False  # Default to skip failed lyrics
     }
     for key, value in defaults.items():
         config.setdefault(key, value)

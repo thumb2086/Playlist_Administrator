@@ -13,7 +13,7 @@ class PlaylistApp:
     def __init__(self, root):
         self.root = root
         self.root.title(_('app_title'))
-        self.root.geometry("1100x930")
+        self.root.geometry("1100x800")
         
         self.config = load_config()
 
@@ -42,8 +42,64 @@ class PlaylistApp:
         self.refresh_url_list()
         self.update_stats_ui()
         
+        # First Run Check
+        if not self.config.get('setup_completed', False):
+            self.first_run_wizard()
+        
         # Proactively fetch names on startup for URLs without names
         threading.Thread(target=self.proactive_name_fetch, daemon=True).start()
+
+    def first_run_wizard(self):
+        """Prompt for language on first run"""
+        def set_lang(lang):
+            self.config['language'] = lang
+            self.config['setup_completed'] = True
+            save_config(self.config)
+            I18N.set_language(lang)
+            self.update_ui_text()
+            top.destroy()
+            # If base path not set, it will be handled by regular logic in init or next loop
+            
+        top = tk.Toplevel(self.root)
+        top.title("Welcome / 歡迎")
+        top.geometry("300x150")
+        top.resizable(False, False)
+        top.transient(self.root)
+        top.grab_set()
+        
+        # Center
+        top.update_idletasks()
+        width = top.winfo_width()
+        height = top.winfo_height()
+        x = (top.winfo_screenwidth() // 2) - (width // 2)
+        y = (top.winfo_screenheight() // 2) - (height // 2)
+        top.geometry(f'{width}x{height}+{x}+{y}')
+        
+        tk.Label(top, text="Please select your language\n請選擇您的語言", font=("Microsoft JhengHei", 12)).pack(pady=20)
+        
+        btn_frame = tk.Frame(top)
+        btn_frame.pack(fill="x", pady=10)
+        
+        tk.Button(btn_frame, text="English", command=lambda: set_lang('en'), width=10).pack(side="left", padx=20, expand=True)
+        tk.Button(btn_frame, text="繁體中文", command=lambda: set_lang('zh-TW'), width=10).pack(side="right", padx=20, expand=True)
+        
+        # Block until closed
+        self.root.wait_window(top)
+
+    def open_settings_window(self):
+        from gui.settings import SettingsWindow
+        
+        def on_settings_close(lang_changed=False, path_changed=False):
+            if lang_changed:
+                self.update_ui_text()
+                self.refresh_url_list()
+                self.update_stats_ui()
+            if path_changed:
+                self.log(_('base_folder_changed'))
+                self.refresh_url_list()
+                self.update_stats_ui()
+                
+        SettingsWindow(self.root, self.config, on_settings_close)
 
     def proactive_name_fetch(self):
         from core.spotify import get_spotify_name
@@ -65,23 +121,41 @@ class PlaylistApp:
             save_config(self.config)
 
     def create_widgets(self):
-        # 0. Language Section
-        lang_frame = tk.Frame(self.root)
-        lang_frame.pack(fill="x", padx=10, pady=(5, 0))
+        # Top Bar (Settings Button only)
+        top_bar = tk.Frame(self.root)
+        top_bar.pack(fill="x", padx=10, pady=(5, 0))
         
-        tk.Label(lang_frame, text="Language:").pack(side="left", padx=5)
-        self.lang_var = tk.StringVar(value=self.config.get('language', 'zh-TW'))
-        lang_cb = ttk.Combobox(lang_frame, textvariable=self.lang_var, values=['zh-TW', 'en'], state="readonly", width=10)
-        lang_cb.pack(side="left", padx=5)
-        lang_cb.bind("<<ComboboxSelected>>", self.change_language)
+        # Settings Button (Right aligned)
+        self.settings_btn = tk.Button(top_bar, text="⚙️ 設定 (Settings)", command=self.open_settings_window, font=("Microsoft JhengHei", 9))
+        self.settings_btn.pack(side="right", padx=5)
 
-        # Base Path Settings Button
-        self.settings_btn = tk.Button(lang_frame, text=_('set_base_folder_btn'), command=self.change_base_path, font=("Microsoft JhengHei", 9))
-        self.settings_btn.pack(side="right", padx=10)
+        # Tabs container (Root)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # 1. URL Section
-        self.url_frame = tk.LabelFrame(self.root, text=_('step_1_title'), font=("Microsoft JhengHei", 10, "bold"))
-        self.url_frame.pack(fill="x", padx=10, pady=5)
+        # Tab 1: Library
+        self.tab_library = tk.Frame(self.notebook)
+        self.notebook.add(self.tab_library, text=_('tab_library'))
+        
+        # Library Layout - Split View
+        self.library_paned = tk.PanedWindow(self.tab_library, orient=tk.VERTICAL, sashwidth=4, bg="#d9d9d9", sashrelief=tk.FLAT)
+        self.library_paned.pack(fill="both", expand=True)
+        
+        # Top Pane (Lists & Actions)
+        self.library_top_frame = tk.Frame(self.library_paned)
+        self.library_paned.add(self.library_top_frame, height=500)
+        
+        # Bottom Pane (Logs & Progress)
+        self.library_bottom_frame = tk.Frame(self.library_paned)
+        self.library_paned.add(self.library_bottom_frame)
+
+        # Tab 2: Player
+        self.tab_player = tk.Frame(self.notebook)
+        self.notebook.add(self.tab_player, text=_('tab_player'))
+
+        # 1. URL Section (In Tab 1 Top Pane)
+        self.url_frame = tk.LabelFrame(self.library_top_frame, text=_('step_1_title'), font=("Microsoft JhengHei", 10, "bold"))
+        self.url_frame.pack(fill="both", expand=True, padx=10, pady=5)
         
         self.url_entry = tk.Entry(self.url_frame, font=("Microsoft JhengHei", 10))
         self.url_entry.pack(side="top", fill="x", padx=10, pady=5)
@@ -104,10 +178,10 @@ class PlaylistApp:
         pl_side.pack(side="left", fill="both", expand=True, padx=(0, 5))
         tk.Label(pl_side, text="歌單 (Playlists)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
         
-        self.pl_listbox = tk.Listbox(pl_side, height=12, font=("Microsoft JhengHei", 10), exportselection=False)
-        self.pl_listbox.pack(fill="both", expand=True)
+        self.pl_listbox = tk.Listbox(pl_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
         pl_scroll = tk.Scrollbar(pl_side, orient="vertical", command=self.pl_listbox.yview)
         pl_scroll.pack(side="right", fill="y")
+        self.pl_listbox.pack(side="left", fill="both", expand=True)
         self.pl_listbox.config(yscrollcommand=pl_scroll.set)
 
         # Middle: Albums
@@ -115,25 +189,42 @@ class PlaylistApp:
         al_side.pack(side="left", fill="both", expand=True, padx=5)
         tk.Label(al_side, text="專輯 (Albums)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
         
-        self.al_listbox = tk.Listbox(al_side, height=12, font=("Microsoft JhengHei", 10), exportselection=False)
-        self.al_listbox.pack(fill="both", expand=True)
+        self.al_listbox = tk.Listbox(al_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
         al_scroll = tk.Scrollbar(al_side, orient="vertical", command=self.al_listbox.yview)
         al_scroll.pack(side="right", fill="y")
+        self.al_listbox.pack(side="left", fill="both", expand=True)
         self.al_listbox.config(yscrollcommand=al_scroll.set)
 
         # Right side: Artists
         ar_side = tk.Frame(list_container)
-        ar_side.pack(side="left", fill="both", expand=True, padx=(5, 0))
+        ar_side.pack(side="left", fill="both", expand=True, padx=5)
         tk.Label(ar_side, text="藝人 (Artists)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
 
-        self.ar_listbox = tk.Listbox(ar_side, height=12, font=("Microsoft JhengHei", 10), exportselection=False)
-        self.ar_listbox.pack(fill="both", expand=True)
+        self.ar_listbox = tk.Listbox(ar_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
         ar_scroll = tk.Scrollbar(ar_side, orient="vertical", command=self.ar_listbox.yview)
         ar_scroll.pack(side="right", fill="y")
+        self.ar_listbox.pack(side="left", fill="both", expand=True)
         self.ar_listbox.config(yscrollcommand=ar_scroll.set)
+        
+        # New: Single Tracks side
+        st_side = tk.Frame(list_container)
+        st_side.pack(side="left", fill="both", expand=True, padx=(5, 0))
+        tk.Label(st_side, text=_('single_tracks_pl'), font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
 
-        # 2. Action Section
-        self.action_frame = tk.LabelFrame(self.root, text=_('step_2_title'), font=("Microsoft JhengHei", 10, "bold"))
+        self.st_listbox = tk.Listbox(st_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
+        st_scroll = tk.Scrollbar(st_side, orient="vertical", command=self.st_listbox.yview)
+        st_scroll.pack(side="right", fill="y")
+        self.st_listbox.pack(side="left", fill="both", expand=True)
+        self.st_listbox.config(yscrollcommand=st_scroll.set)
+        
+        # Bind Listbox selection for player (automatically switch to Player tab)
+        self.pl_listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
+        self.al_listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
+        self.ar_listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
+        self.st_listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
+
+        # 2. Action Section (In Tab 1 Top Pane)
+        self.action_frame = tk.LabelFrame(self.library_top_frame, text=_('step_2_title'), font=("Microsoft JhengHei", 10, "bold"))
         self.action_frame.pack(fill="x", padx=10, pady=5)
         
         self.update_btn = tk.Button(self.action_frame, text=_('update_all_btn'), command=self.run_update, bg="#d0f0c0", height=2, font=("Microsoft JhengHei", 11, "bold"))
@@ -147,9 +238,73 @@ class PlaylistApp:
         
         self.export_btn = tk.Button(self.action_frame, text=_('export_usb_btn'), command=self.open_export_window, bg="#ffd0d0", height=2, font=("Microsoft JhengHei", 11, "bold"))
         self.export_btn.pack(side="left", fill="x", expand=True, padx=5, pady=5)
+
+        # 2.5 Player Section (In Tab 2)
+        # Use a big full-width frame for player
+        player_main_container = tk.Frame(self.tab_player)
+        player_main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.player_frame = tk.LabelFrame(player_main_container, text=_('player_title'), font=("Microsoft JhengHei", 10, "bold"))
+        self.player_frame.pack(fill="both", expand=True)
         
-        # 3. Statistics Section (Fixed)
-        self.stats_frame = tk.LabelFrame(self.root, text=_('stats_title'), font=("Microsoft JhengHei", 10, "bold"))
+        # Huge Lyrics Display at the Top
+        self.lyrics_container = tk.Frame(self.player_frame, bg="#000000", height=400)
+        self.lyrics_container.pack(fill="both", expand=True, padx=20, pady=20)
+        self.lyrics_container.pack_propagate(False)
+        
+        self.lyrics_lbl = tk.Label(self.lyrics_container, text=_('player_no_lyrics'), font=("Microsoft JhengHei", 32, "bold"), fg="#00FF00", bg="#000000", wraplength=900)
+        self.lyrics_lbl.pack(expand=True, fill="both")
+
+        player_controls = tk.Frame(self.player_frame)
+        player_controls.pack(fill="x", padx=10, pady=20)
+        
+        self.now_playing_lbl = tk.Label(self.player_frame, text=_('player_now_playing', _('no_data')), font=("Microsoft JhengHei", 12), fg="#2196F3", anchor="center")
+        self.now_playing_lbl.pack(fill="x", padx=10, pady=(0, 10))
+
+        control_buttons = tk.Frame(player_controls)
+        control_buttons.pack(side="top")
+
+        self.prev_btn = tk.Button(control_buttons, text="⏮", command=self.play_prev, width=8, height=2, font=("", 12))
+        self.prev_btn.pack(side="left", padx=10)
+        
+        self.play_btn = tk.Button(control_buttons, text="▶", command=self.toggle_playback, width=12, height=2, font=("", 14, "bold"))
+        self.play_btn.pack(side="left", padx=10)
+        
+        self.next_btn = tk.Button(control_buttons, text="⏭", command=self.play_next, width=8, height=2, font=("", 12))
+        self.next_btn.pack(side="left", padx=10)
+        
+        self.shuffle_var = tk.BooleanVar(value=False)
+        self.shuffle_btn = tk.Checkbutton(player_controls, text=_('player_shuffle'), variable=self.shuffle_var, font=("Microsoft JhengHei", 11))
+        self.shuffle_btn.pack(side="top", pady=10)
+        
+        vol_frame = tk.Frame(player_controls)
+        vol_frame.pack(side="top", fill="x", padx=100)
+
+        self.vol_var = tk.DoubleVar(value=70)
+        self.vol_scale = tk.Scale(vol_frame, from_=0, to=100, orient="horizontal", variable=self.vol_var, command=self.change_volume, showvalue=False)
+        self.vol_scale.pack(side="left", fill="x", expand=True, padx=10)
+        
+        self.vol_lbl = tk.Label(vol_frame, text=_('player_volume', 70), font=("Microsoft JhengHei", 10), width=10)
+        self.vol_lbl.pack(side="left")
+        
+        # --- Pygame Setup ---
+        import pygame
+        import os
+        # Need video system initialized for events (auto-next), use dummy for headless
+        os.environ['SDL_VIDEODRIVER'] = 'dummy'
+        pygame.init()
+        pygame.mixer.init()
+        if pygame.display.get_init():
+            pygame.display.set_mode((1, 1))
+        self.is_playing = False
+        self.current_playlist_songs = []
+        self.original_playlist_order = []
+        self.current_song_idx = -1
+        self.current_lyrics = []  # List of (time_ms, text)
+        self.lyrics_update_job = None
+        
+        # 3. Statistics Section (In Tab 1 Top Pane)
+        self.stats_frame = tk.LabelFrame(self.library_top_frame, text=_('stats_title'), font=("Microsoft JhengHei", 10, "bold"))
         self.stats_frame.pack(fill="x", padx=10, pady=5)
         
         stats_container = tk.Frame(self.stats_frame)
@@ -167,8 +322,8 @@ class PlaylistApp:
         self.recent_lbl = tk.Label(self.stats_frame, text=_('recent_added', ""), font=("Microsoft JhengHei", 9), fg="#666")
         self.recent_lbl.pack(side="top", anchor="w", padx=15, pady=(0, 5))
         
-        # Progress Bar
-        progress_frame = tk.Frame(self.root)
+        # Progress Bar (Inside Library Bottom Pane)
+        progress_frame = tk.Frame(self.library_bottom_frame)
         progress_frame.pack(fill="x", padx=20, pady=5)
 
         self.progress_var = tk.DoubleVar()
@@ -178,26 +333,87 @@ class PlaylistApp:
         self.progress_label = tk.Label(progress_frame, text="", font=("Microsoft JhengHei", 9), anchor="e", width=15)
         self.progress_label.pack(side="right", padx=5)
         
-        # Speed Display
-        speed_frame = tk.Frame(self.root)
+        # Speed Display (Inside Library Bottom Pane)
+        speed_frame = tk.Frame(self.library_bottom_frame)
         speed_frame.pack(fill="x", padx=20, pady=(0, 5))
         
         self.speed_label = tk.Label(speed_frame, text="準備就緒", font=("Microsoft JhengHei", 9), fg="#666", anchor="w")
         self.speed_label.pack(fill="x")
         
-        # 3. Log Section
-        self.log_frame = tk.LabelFrame(self.root, text=_('log_title'), font=("Microsoft JhengHei", 10, "bold"))
-        self.log_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        # 3. Log and Song Status Section (Inside Library Bottom Pane)
+        bottom_container = tk.Frame(self.library_bottom_frame)
+        bottom_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
-        self.log_text = scrolledtext.ScrolledText(self.log_frame, state='disabled', bg="black", fg="white", font=("Consolas", 10))
+        # Left side: Error Log (smaller)
+        self.log_frame = tk.LabelFrame(bottom_container, text=_('log_title') + " (錯誤訊息)", font=("Microsoft JhengHei", 10, "bold"))
+        self.log_frame.pack(side="left", fill="both", expand=True, padx=(0, 5), pady=0)
+        
+        self.log_text = scrolledtext.ScrolledText(self.log_frame, state='disabled', bg="black", fg="white", font=("Consolas", 10), height=10)
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Right side: Song Status List
+        self.song_status_frame = tk.LabelFrame(bottom_container, text="歌曲狀態", font=("Microsoft JhengHei", 10, "bold"))
+        self.song_status_frame.pack(side="right", fill="both", expand=True, padx=(5, 0), pady=0)
+        
+        # Create treeview for song status
+        columns = ('狀態', '歌曲名稱')
+        self.song_status_tree = ttk.Treeview(self.song_status_frame, columns=columns, show='tree headings', height=12)
+        self.song_status_tree.heading('#0', text='序號')
+        self.song_status_tree.heading('狀態', text='狀態')
+        self.song_status_tree.heading('歌曲名稱', text='歌曲名稱')
+        
+        # Configure column widths
+        self.song_status_tree.column('#0', width=60)
+        self.song_status_tree.column('狀態', width=80)
+        self.song_status_tree.column('歌曲名稱', width=300)
+        
+        # Add scrollbar
+        song_scroll = ttk.Scrollbar(self.song_status_frame, orient="vertical", command=self.song_status_tree.yview)
+        song_scroll.pack(side="right", fill="y")
+        self.song_status_tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        self.song_status_tree.config(yscrollcommand=song_scroll.set)
+        
+        # Initialize song status data
+        self.song_status_data = {}
 
     def log(self, message, immediate=False):
-        self.log_queue.append(str(message))
-        if self.log_update_job is None:
-            # For important progress messages, use shorter delay
-            delay = 50 if immediate and ("剩" in str(message) or "left" in str(message.lower())) else 200
-            self.log_update_job = self.root.after(delay, self._process_log_queue)
+        # Filter log messages - only show errors and important messages
+        msg_str = str(message)
+        is_error = any(keyword in msg_str for keyword in ['❌', '🚫', '🔌', '⚠️', 'Error', 'error', '錯誤', '失敗'])
+        is_important = any(keyword in msg_str for keyword in ['---', '統計完成', '🎉', '歌詞補抓完成', '✅', '成功', '已更新', 'Download complete', '->'])
+        
+        if is_error or is_important:
+            self.log_queue.append(msg_str)
+            if self.log_update_job is None:
+                # For important progress messages, use shorter delay
+                delay = 50 if immediate and ("剩" in msg_str or "left" in msg_str.lower()) else 200
+                self.log_update_job = self.root.after(delay, self._process_log_queue)
+    
+    def update_song_status(self, song_index, status, song_name):
+        """Update song status in the treeview"""
+        def update_ui():
+            try:
+                # Update or add song in treeview
+                if song_index in self.song_status_data:
+                    item = self.song_status_data[song_index]
+                    self.song_status_tree.item(item, values=(status, song_name))
+                else:
+                    item = self.song_status_tree.insert('', 'end', text=str(song_index + 1), values=(status, song_name))
+                    self.song_status_data[song_index] = item
+            except Exception as e:
+                print(f"Error updating song status: {e}")
+        
+        # Schedule UI update from main thread
+        self.root.after(0, update_ui)
+    
+    def clear_song_status(self):
+        """Clear all song status data"""
+        def clear_ui():
+            for item in self.song_status_tree.get_children():
+                self.song_status_tree.delete(item)
+            self.song_status_data.clear()
+        
+        self.root.after(0, clear_ui)
 
     def update_progress(self, current, total, eta=None):
         now = time.time()
@@ -292,22 +508,7 @@ class PlaylistApp:
         self.log_text.config(state='disabled')
         self.log_queue.clear()
 
-    def change_base_path(self):
-        if prompt_and_set_base_path(self.config):
-            ensure_dirs(self.config)
-            # Refresh UI that depends on paths
-            self.refresh_url_list()
-            self.update_stats_ui()
-            self.log(_('base_folder_changed'))
 
-    def change_language(self, event):
-        new_lang = self.lang_var.get()
-        self.config['language'] = new_lang
-        save_config(self.config)
-        I18N.set_language(new_lang)
-        self.update_ui_text()
-        self.refresh_url_list()
-        self.update_stats_ui()
 
     def update_ui_text(self):
         self.root.title(_('app_title'))
@@ -322,12 +523,24 @@ class PlaylistApp:
         self.export_btn.config(text=_('export_usb_btn'))
         self.stats_frame.config(text=_('stats_title'))
         self.log_frame.config(text=_('log_title'))
-        self.settings_btn.config(text=_('set_base_folder_btn'))
+        self.settings_btn.config(text="⚙️ " + _('set_base_folder_btn')) # Reuse key for now or add new one
+        self.player_frame.config(text=_('player_title'))
+        self.vol_lbl.config(text=_('player_volume', int(self.vol_var.get())))
 
     def refresh_url_list(self, audio_cache=None):
+        # Save current selections and scroll positions
+        lists = [self.pl_listbox, self.al_listbox, self.ar_listbox, self.st_listbox]
+        saves = []
+        for lb in lists:
+            saves.append({
+                'selection': lb.curselection(),
+                'yview': lb.yview()
+            })
+
         self.pl_listbox.delete(0, tk.END)
         self.al_listbox.delete(0, tk.END)
         self.ar_listbox.delete(0, tk.END)
+        self.st_listbox.delete(0, tk.END)
         url_names = self.config.get('url_names', {})
         last_updated = self.config.get('last_updated', {})
         
@@ -341,9 +554,10 @@ class PlaylistApp:
         
         urls = self.config.get('spotify_urls', [])
         
-        self.pl_urls = [u for u in urls if "artist/" not in u and "album/" not in u]  # 只有播放清單
+        self.pl_urls = [u for u in urls if "artist/" not in u and "album/" not in u and "track/" not in u]  # 只有播放清單
         self.al_urls = [u for u in urls if "album/" in u]  # 只有專輯
         self.ar_urls = [u for u in urls if "artist/" in u]  # 只有藝人
+        self.st_urls = [u for u in urls if "track/" in u]  # 只有單曲
         
         pl_files = []
         # 直接獲取所有存在的播放清單檔案，不依賴 URL 列表
@@ -394,8 +608,20 @@ class PlaylistApp:
                 self.pl_listbox.insert(tk.END, status_text)
             elif url in self.al_urls:
                 self.al_listbox.insert(tk.END, status_text)
+            elif url in self.st_urls:
+                self.st_listbox.insert(tk.END, status_text)
             else:
                 self.ar_listbox.insert(tk.END, status_text)
+
+        # Restore positions and selections
+        for i, lb in enumerate(lists):
+            s = saves[i]
+            # Restore selection
+            for idx in s['selection']:
+                if idx < lb.size():
+                    lb.selection_set(idx)
+            # Restore scroll position
+            lb.yview_moveto(s['yview'][0])
 
     def reset_update_status(self):
         self.config['last_updated'] = {}
@@ -429,7 +655,14 @@ class PlaylistApp:
                 else:
                     self.root.after(0, lambda: self.recent_lbl.config(text=_('recent_added', _('no_data'))))
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"Error updating stats: {e}")
+                # Ensure UI doesn't get stuck on "Loading..."
+                self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', 0, "Error")))
+                self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', 0)))
+                self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', 0)))
+                self.root.after(0, lambda: self.recent_lbl.config(text=_('recent_added', _('no_data'))))
 
         threading.Thread(target=_bg_update, daemon=True).start()
 
@@ -607,6 +840,7 @@ class PlaylistApp:
         stats = UpdateStats() # Initialize stats object
         stats.pause_event = self.pause_event 
         stats.stop_event = self.stop_event
+        stats.app = self  # Add app reference for UI updates
         
         def post_dl_throttle_callback(cache):
             self.songs_since_last_refresh += 1
@@ -762,7 +996,8 @@ class PlaylistApp:
         tk.Label(win, text=_('export_win_label')).pack(pady=5)
         
         playlists_path = self.config['playlists_path']
-        files = glob.glob(os.path.join(playlists_path, "*.m3u")) + \
+        files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
+                glob.glob(os.path.join(playlists_path, "*.m3u")) + \
                 glob.glob(os.path.join(playlists_path, "*.txt"))
         
         # New: Check completeness first
@@ -831,3 +1066,202 @@ class PlaylistApp:
             export_usb_logic(self.config, selected_files, self.log)
         except Exception as e:
              self.log(_('export_error', e))
+
+    # --- Player Logic ---
+    def on_listbox_select(self, event):
+        widget = event.widget
+        selection = widget.curselection()
+        if not selection: return
+        
+        idx = selection[0]
+        url = None
+        if widget == self.pl_listbox: url = self.pl_urls[idx]
+        elif widget == self.al_listbox: url = self.al_urls[idx]
+        elif widget == self.ar_listbox: url = self.ar_urls[idx]
+        elif widget == self.st_listbox: url = self.st_urls[idx]
+        
+        if not url: return
+        
+        name = self.config.get('url_names', {}).get(url)
+        if not name: return
+        
+        # Load playlist into player
+        threading.Thread(target=self.load_playlist_into_player, args=(name,), daemon=True).start()
+        
+        # Automatically switch to Player tab
+        try:
+            self.notebook.select(self.tab_player)
+        except: pass
+
+    def load_playlist_into_player(self, pl_name):
+        from core.library import parse_playlist
+        # Try .m3u8 then .m3u
+        pl_file = None
+        for ext in ['.m3u8', '.m3u']:
+            test_file = os.path.join(self.config['playlists_path'], f"{pl_name}{ext}")
+            if os.path.exists(test_file):
+                pl_file = test_file
+                break
+        
+        if not pl_file: return
+        
+        song_names = parse_playlist(pl_file)
+        if not song_names: return
+        
+        # Find actual file paths
+        from core.library import build_library_index, find_song_in_library
+        library_path = self.config['library_path']
+        search_pattern = os.path.join(library_path, "**", "*")
+        all_files = glob.glob(search_pattern, recursive=True)
+        audio_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
+        lib_index = build_library_index(audio_cache)
+        
+        valid_songs = []
+        for s in song_names:
+            path = find_song_in_library(s, lib_index)
+            if path and os.path.exists(path):
+                valid_songs.append(path)
+        
+        if valid_songs:
+            self.original_playlist_order = list(valid_songs)
+            self.current_playlist_songs = list(valid_songs)
+            
+            if self.shuffle_var.get():
+                import random
+                random.shuffle(self.current_playlist_songs)
+            
+            self.current_song_idx = 0
+            self.root.after(0, lambda: self.play_song(self.current_playlist_songs[0]))
+
+    def play_song(self, song_path):
+        try:
+            import pygame
+            if self.lyrics_update_job:
+                self.root.after_cancel(self.lyrics_update_job)
+                self.lyrics_update_job = None
+                
+            pygame.mixer.music.load(song_path)
+            pygame.mixer.music.set_endevent(pygame.USEREVENT + 1)
+            pygame.mixer.music.play()
+            self.is_playing = True
+            self.play_btn.config(text="⏸")
+            song_name = os.path.basename(song_path)
+            self.now_playing_lbl.config(text=_('player_now_playing', song_name))
+            
+            # Load and parse lyrics
+            self.load_lyrics(song_path)
+            self.refresh_lyrics()
+        except Exception as e:
+            self.log(f"Playback Error: {e}")
+
+    def load_lyrics(self, song_path):
+        self.current_lyrics = []
+        lrc_path = os.path.splitext(song_path)[0] + ".lrc"
+        if os.path.exists(lrc_path):
+            try:
+                import re
+                with open(lrc_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        # Match [mm:ss.xx] or [mm:ss:xx] or [mm:ss]
+                        match = re.match(r'\[(\d+):(\d+)([:.]\d+)?\](.*)', line)
+                        if match:
+                            m, s, ms, text = match.groups()
+                            time_ms = int(m) * 60000 + int(s) * 1000
+                            if ms:
+                                ms_val = ms.replace(':', '').replace('.', '')
+                                if len(ms_val) == 2: time_ms += int(ms_val) * 10
+                                elif len(ms_val) == 3: time_ms += int(ms_val)
+                            self.current_lyrics.append((time_ms, text.strip()))
+                self.current_lyrics.sort()
+            except:
+                pass
+        
+        if not self.current_lyrics:
+            self.lyrics_lbl.config(text=_('player_no_lyrics'))
+
+    def refresh_lyrics(self):
+        import pygame
+        # Check if song ended
+        ended = False
+        for event in pygame.event.get():
+            if event.type == pygame.USEREVENT + 1:
+                ended = True
+                break
+        
+        if ended:
+            self.play_next()
+            return
+
+        if not pygame.mixer.music.get_busy():
+            if self.is_playing:
+                # Unexpected stop or naturally ended without event caught
+                self.play_next()
+                return
+            self.lyrics_update_job = self.root.after(500, self.refresh_lyrics)
+            return
+
+        curr_ms = pygame.mixer.music.get_pos()
+        if curr_ms < 0:
+            self.lyrics_update_job = self.root.after(200, self.refresh_lyrics)
+            return
+
+        # Find the current line of lyrics
+        current_text = ""
+        for i in range(len(self.current_lyrics)):
+            if self.current_lyrics[i][0] <= curr_ms:
+                current_text = self.current_lyrics[i][1]
+            else:
+                break
+        
+        if self.lyrics_lbl.cget("text") != current_text:
+            self.lyrics_lbl.config(text=current_text)
+            
+        self.lyrics_update_job = self.root.after(200, self.refresh_lyrics)
+
+    def toggle_playback(self):
+        import pygame
+        if not self.current_playlist_songs: return
+        
+        if self.is_playing:
+            pygame.mixer.music.pause()
+            self.is_playing = False
+            self.play_btn.config(text="▶")
+        else:
+            pygame.mixer.music.unpause()
+            self.is_playing = True
+            self.play_btn.config(text="⏸")
+
+    def play_next(self):
+        if not self.current_playlist_songs: return
+        
+        # Check if shuffle status changed since last play
+        if self.shuffle_var.get() and len(self.current_playlist_songs) > 1:
+            # If shuffle is ON but matched original, randomize
+            if self.current_playlist_songs == self.original_playlist_order:
+                import random
+                random.shuffle(self.current_playlist_songs)
+                self.current_song_idx = 0
+        elif not self.shuffle_var.get():
+            # If shuffle is OFF but list is shuffled, restore
+            if self.current_playlist_songs != self.original_playlist_order:
+                current_song = self.current_playlist_songs[self.current_song_idx]
+                self.current_playlist_songs = list(self.original_playlist_order)
+                # Find current song in original to maintain continuity
+                try:
+                    self.current_song_idx = self.current_playlist_songs.index(current_song)
+                except ValueError:
+                    self.current_song_idx = 0
+
+        self.current_song_idx = (self.current_song_idx + 1) % len(self.current_playlist_songs)
+        self.play_song(self.current_playlist_songs[self.current_song_idx])
+
+    def play_prev(self):
+        if not self.current_playlist_songs: return
+        self.current_song_idx = (self.current_song_idx - 1) % len(self.current_playlist_songs)
+        self.play_song(self.current_playlist_songs[self.current_song_idx])
+
+    def change_volume(self, val):
+        import pygame
+        vol = float(val) / 100
+        pygame.mixer.music.set_volume(vol)
+        self.vol_lbl.config(text=_('player_volume', int(float(val))))

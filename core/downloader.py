@@ -41,6 +41,118 @@ class YdlLogger:
 class TaskAbortedException(Exception):
     pass
 
+def download_lyrics(song_name, output_path, log_func):
+    """Downloads synced lyrics (.lrc) for a song using direct Lrclib API with Traditional Chinese conversion"""
+    try:
+        import urllib.request
+        import urllib.parse
+        import json
+        import time
+        import random
+        import re
+        from zhconv import convert
+        import ssl
+        
+        # Advanced cleaning: Remove common suffixes that confuse lyrics search
+        clean_query = song_name
+        suffixes = [
+            r'\s*\(.*?\)', r'\s*\[.*?\]', r'\s*【.*?】', 
+            r'\s*-?\s*Official\s*Video', r'\s*-?\s*Music\s*Video', 
+            r'\s*-?\s*TV\s*Version', r'\s*-?\s*MV', r'\s*-?\s*Lyrics',
+            r'\s*-?\s*HD', r'\s*-?\s*4K'
+        ]
+        for s in suffixes:
+            clean_query = re.sub(s, '', clean_query, flags=re.IGNORECASE)
+        clean_query = clean_query.strip()
+        
+        # Generate multiple search queries for better coverage
+        search_queries = [clean_query]
+        
+        if ' - ' in clean_query:
+            parts = clean_query.split(' - ', 1)
+            if len(parts) == 2:
+                search_queries.append(parts[1].strip()) # Title only
+                search_queries.append(parts[0].strip()) # Artist only
+        
+        alt_query = re.sub(r'[^\w\s]', ' ', clean_query)
+        alt_query = re.sub(r'\s+', ' ', alt_query).strip()
+        if alt_query != clean_query:
+            search_queries.append(alt_query)
+        
+        # Direct API function
+        def fetch_lrc(query, timeout=10):
+            url = f"https://lrclib.net/api/search?q={urllib.parse.quote(query)}"
+            req = urllib.request.Request(url, headers={'User-Agent': 'PlaylistAdministrator/2.0'})
+            
+            # Create a custom context to ignore SSL verification if needed (though API usually fine)
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                if not isinstance(data, list):
+                    return None
+                    
+                # Pick best match: prefer synced lyrics
+                best_match = None
+                for track in data:
+                    if track.get('syncedLyrics'):
+                        best_match = track['syncedLyrics']
+                        break
+                    if not best_match and track.get('plainLyrics'):
+                        best_match = track['plainLyrics']
+                        
+                return best_match
+
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                # Progressive delay
+                if attempt > 0:
+                    backoff = (2 ** attempt) + random.uniform(1, 3)
+                    log_func(f"  ⚠️ [Network] {song_name} - Retrying in {backoff:.1f}s...")
+                    time.sleep(backoff)
+
+                for idx, query in enumerate(search_queries):
+                    # Reduce timeout slightly on retries to fail fast and try next
+                    lrc_text = fetch_lrc(query, timeout=10 + attempt * 5)
+                    
+                    if lrc_text:
+                        # CONVERT TO TRADITIONAL CHINESE
+                        lrc_text = convert(lrc_text, 'zh-tw')
+                        
+                        with open(output_path, "w", encoding="utf-8") as f:
+                            f.write(lrc_text)
+                        return True
+                    
+                    # Small delay between query variations to be nice to API
+                    time.sleep(0.5)
+                
+                # If we get here, no lyrics found for any query in this attempt
+                # If it's the last attempt, we failed
+                if attempt == max_retries - 1:
+                    log_func(f"  ℹ️ [Lrclib Not Found] {song_name}")
+                    return False
+                    
+            except Exception as e:
+                error_msg = str(e).lower()
+                is_net_error = any(k in error_msg for k in ['timeout', 'timed out', 'reset', 'aborted', 'eof', 'ssl'])
+                
+                if is_net_error:
+                    if attempt == max_retries - 1:
+                        log_func(f"  🔌 [Network Failed] {song_name}: {error_msg[:50]}")
+                    continue
+                else:
+                    log_func(f"  ❌ [Lyrics Error] {song_name}: {str(e)[:50]}")
+                    return False
+
+    except Exception as e:
+        log_func(f"  ❌ [Lyrics Critical] {song_name}: {str(e)[:100]}")
+        return False
+    return False
+
 def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None, progress_callback=None, current_dl=0):
     """Downloads song in specified format (mp3 or flac)"""
     
@@ -321,12 +433,25 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     
                     if os.path.exists(final_path):
                         log_func(f" -> {os.path.basename(final_path)}")
+                        # Download lyrics
+                        lrc_path = os.path.splitext(final_path)[0] + ".lrc"
+                        if not os.path.exists(lrc_path):
+                            download_lyrics(song_name, lrc_path, log_func)
                         return final_path
                     
                     if os.path.exists(filename):
                         log_func(f" -> {os.path.basename(filename)}")
+                        # Download lyrics
+                        lrc_path = os.path.splitext(filename)[0] + ".lrc"
+                        if not os.path.exists(lrc_path):
+                            download_lyrics(song_name, lrc_path, log_func)
                         all_candidates_failed = False  # Mark as successful
                         return filename
+                    
+                    # Download lyrics for final_path even if it doesn't exist yet (it will be created by PP)
+                    lrc_path = os.path.splitext(final_path)[0] + ".lrc"
+                    if not os.path.exists(lrc_path):
+                        download_lyrics(song_name, lrc_path, log_func)
                     
                     all_candidates_failed = False  # Mark as successful
                     return final_path

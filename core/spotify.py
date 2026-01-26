@@ -24,6 +24,10 @@ def get_spotify_name(sp_url):
         try:
             sp_id = sp_url.split('?')[0].split('playlist/')[-1]
         except: return None
+    elif "track/" in sp_url:
+        try:
+            sp_id = sp_url.split('?')[0].split('track/')[-1]
+        except: return None
     else: 
         sp_id = sp_url.strip()
     
@@ -33,6 +37,8 @@ def get_spotify_name(sp_url):
         type_path = "artist"
     elif is_album:
         type_path = "album"
+    elif "track/" in sp_url:
+        type_path = "track"
     else:
         type_path = "playlist"
     
@@ -111,6 +117,12 @@ def scrape_via_spotify_embed(config, stats, log_func):
                 clean_url = sp_url.split('?')[0]
                 sp_id = clean_url.split('playlist/')[-1]
             except: pass
+        elif "track/" in sp_url:
+            try:
+                # Remove query params
+                clean_url = sp_url.split('?')[0]
+                sp_id = clean_url.split('track/')[-1]
+            except: pass
         else:
              sp_id = sp_url.strip()
 
@@ -122,6 +134,8 @@ def scrape_via_spotify_embed(config, stats, log_func):
             type_path = "artist"
         elif is_album:
             type_path = "album"
+        elif "track/" in sp_url:
+            type_path = "track"
         else:
             type_path = "playlist"
             
