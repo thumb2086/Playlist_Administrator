@@ -8,3 +8,5 @@ mutagen
 pygame
 syncedlyrics
 urllib3
+streamlit
+watchdog

@@ -98,7 +98,7 @@ def scrape_via_spotify_embed(config, stats, log_func):
         # Skip if already updated today
         if last_updated.get(sp_url) == today:
             name = config.get('url_names', {}).get(sp_url, sp_url)
-            log_func(_('skip_synced', name))
+            # log_func(_('skip_synced', name)) # Suppressed to reduce noise
             # Even if skipped, ensure the playlist name exists in changes dict for report consistency
             if stats and name not in stats.playlist_changes:
                 stats.playlist_changes[name] = {'added': [], 'removed': []}

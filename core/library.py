@@ -3,8 +3,102 @@ import glob
 import time
 import shutil
 import random
+import requests
+from bs4 import BeautifulSoup
 from utils.helpers import sanitize_filename, normalize_name
 from utils.config import ensure_dirs
+from core.spotify import get_spotify_name
+
+def get_playlist_type(spotify_url):
+    """Determines the type of Spotify URL (Playlist, Album, Artist)"""
+    if "playlist/" in spotify_url:
+        return "Playlist"
+    elif "album/" in spotify_url:
+        return "Album"
+    elif "artist/" in spotify_url:
+        return "Artist"
+    elif "track/" in spotify_url:
+        return "Track"
+    else:
+        return "Unknown"
+
+def load_playlists_data(config):
+    """
+    Scans the playlists directory and returns a list of playlist data for the UI.
+    Returns: List[Dict] with keys: '啟用', '類型', '名稱', '連結', '狀態'
+    """
+    playlists_path = config.get('playlists_path')
+    if not playlists_path:
+        return []
+    
+    playlists_path = os.path.normpath(playlists_path)
+    if not os.path.exists(playlists_path):
+        return []
+
+    library_path = config.get('library_path')
+    
+    # 1. Gather all m3u8 files
+    m3u8_files = glob.glob(os.path.join(playlists_path, "*.m3u8"))
+    
+    # 2. Get info from config
+    spotify_urls = config.get('spotify_urls', [])
+    url_names = config.get('url_names', {})
+    
+    # Map name back to URL
+    name_to_url = {v: k for k, v in url_names.items()}
+    
+    # 3. Build report for completeness
+    report = get_playlist_completeness_report(m3u8_files, library_path)
+    
+    playlist_data = []
+    
+    # Process m3u8 files from config/scraped first
+    processed_names = set()
+    
+    # Early normalize library_path for completeness report
+    library_path = os.path.normpath(library_path) if library_path else library_path
+    
+    for sp_url in spotify_urls:
+        name = url_names.get(sp_url)
+        if not name:
+            name = f"未命名歌單 ({sp_url.split('/')[-1][:8]}...)"
+            
+        m3u_file = os.path.join(playlists_path, f"{sanitize_filename(name)}.m3u8")
+        is_complete = "Unknown"
+        status_text = "未同步"
+        
+        if os.path.exists(m3u_file):
+            comp, missing, total = report.get(m3u_file, (False, 0, 0))
+            is_complete = comp
+            status_text = "已主動同步" if comp else f"缺 {missing} 首歌"
+        
+        playlist_data.append({
+            "啟用": True,
+            "類型": get_playlist_type(sp_url),
+            "名稱": name,
+            "連結": sp_url,
+            "狀態": status_text
+        })
+        processed_names.add(name)
+
+    # Add other m3u8 files found in the folder that aren't in the config (local playlists)
+    for m3u_file in m3u8_files:
+        name = os.path.splitext(os.path.basename(m3u_file))[0]
+        if name in processed_names or name.startswith('_'): # Skip internal ones like _Unsorted
+            continue
+            
+        comp, missing, total = report.get(m3u_file, (False, 0, 0))
+        status_text = "本地完整" if comp else f"缺 {missing} 首歌"
+        
+        playlist_data.append({
+            "啟用": False,
+            "類型": "Local",
+            "名稱": name,
+            "連結": "",
+            "狀態": status_text
+        })
+        
+    return playlist_data
 
 class UpdateStats:
     def __init__(self):
@@ -195,7 +289,7 @@ def rename_explicit_files(library_path, log_func):
     return count
 
 def move_unsorted_songs(config, log_func):
-    """ Moves songs not in any playlist to _Unsorted folder and creates a playlist for them """
+    """ Creates playlist for songs not in any playlist (without moving files) """
     from utils.i18n import _
     log_func(_('moving_unsorted'))
     
@@ -224,7 +318,7 @@ def move_unsorted_songs(config, log_func):
         t = tuple(get_normalized_tokens(s))
         if t: playlist_tokens.add(t)
         
-    # 2. Identify orphan files in Music root
+    # 2. Identify orphan files in Music root and subdirectories
     search_pattern = os.path.join(library_path, "**", "*")
     all_library_files = [os.path.normpath(f) for f in glob.glob(search_pattern, recursive=True) if os.path.isfile(f)]
     
@@ -241,50 +335,7 @@ def move_unsorted_songs(config, log_func):
         if file_tokens not in playlist_tokens:
             orphans.append(f)
             
-    # 3. Move files to _Unsorted dir
-    if orphans and not os.path.exists(unsorted_dir):
-        os.makedirs(unsorted_dir, exist_ok=True)
-        
-    moved_count = 0
-    for f in orphans:
-        try:
-            dest = os.path.join(unsorted_dir, os.path.basename(f))
-            if os.path.normpath(f).lower() == os.path.normpath(dest).lower():
-                continue
-                
-            if os.path.exists(dest):
-                os.remove(f) 
-            else:
-                os.rename(f, dest)
-            moved_count += 1
-        except: pass
-
-    # 3.5 Move files BACK from _Unsorted if they are now in a playlist
-    recovered_count = 0
-    if os.path.exists(unsorted_dir):
-        unsorted_files = [os.path.join(unsorted_dir, f) for f in os.listdir(unsorted_dir) if os.path.isfile(os.path.join(unsorted_dir, f))]
-        for f in unsorted_files:
-            if not f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')): continue
-            
-            filename_no_ext = os.path.splitext(os.path.basename(f))[0]
-            file_tokens = tuple(get_normalized_tokens(filename_no_ext))
-            
-            if file_tokens in playlist_tokens:
-                try:
-                    dest = os.path.join(library_path, os.path.basename(f))
-                    if not os.path.exists(dest):
-                        os.rename(f, dest)
-                        recovered_count += 1
-                    else:
-                        # Already exists in root, just delete from unsorted
-                        os.remove(f)
-                        recovered_count += 1
-                except: pass
-    
-    if recovered_count > 0:
-        log_func(_('reorganized_unsorted', recovered_count))
-        
-    # 4. Create/Update Unsorted Playlist
+    # 3. Create playlist for unsorted songs (without moving files)
     # Use a localized name for the playlist
     # If it's explicitly a single track from user, we might want to call it "Single Tracks"
     pl_name = "_" + _('removed_songs_pl')
@@ -311,33 +362,41 @@ def move_unsorted_songs(config, log_func):
         try: os.remove(old_m3u_path)
         except: pass
     
-    if os.path.exists(unsorted_dir):
-        files_in_dir = os.listdir(unsorted_dir)
-        audio_orphans = [f for f in files_in_dir if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
-        
-        if audio_orphans:
-            try:
-                os.makedirs(playlists_path, exist_ok=True)
-                with open(m3u_path, 'w', encoding='utf-8-sig', newline='') as f:
-                    f.write("#EXTM3U\r\n")
-                    for base in sorted(audio_orphans):
-                        name_no_ext = os.path.splitext(base)[0]
-                        # Relative path from Playlists folder to Music/_Unsorted folder
-                        rel_path = f"../Music/_Unsorted/{base}"
-                        f.write(f"#EXTINF:-1,{name_no_ext}\r\n")
-                        f.write(f"{rel_path}\r\n")
-                
-                if moved_count > 0:
-                    log_func(_('unsorted_done', moved_count))
-                else:
-                    log_func(f" -> 已更新 {len(audio_orphans)} 首未分類歌曲的播放清單")
-            except Exception as e:
-                log_func(f" [DEBUG] 寫入歌單失敗: {e}")
-        elif os.path.exists(m3u_path):
+    # Create playlist for unsorted songs (keep files in original location)
+    if orphans:
+        try:
+            os.makedirs(playlists_path, exist_ok=True)
+            with open(m3u_path, 'w', encoding='utf-8-sig', newline='') as f:
+                f.write("#EXTM3U\r\n")
+                for file_path in sorted(orphans):
+                    # Get relative path from playlists folder to the audio file
+                    abs_file_path = os.path.normpath(os.path.abspath(file_path))
+                    abs_playlists_path = os.path.normpath(os.path.abspath(playlists_path))
+                    
+                    # Calculate relative path
+                    try:
+                        rel_path = os.path.relpath(abs_file_path, abs_playlists_path)
+                        # Convert to forward slashes for M3U compatibility
+                        rel_path = rel_path.replace('\\', '/')
+                    except:
+                        # Fallback to absolute path if relative path fails
+                        rel_path = abs_file_path
+                    
+                    name_no_ext = os.path.splitext(os.path.basename(file_path))[0]
+                    f.write(f"#EXTINF:-1,{name_no_ext}\r\n")
+                    f.write(f"{rel_path}\r\n")
+            
+            log_func(f" -> 已為 {len(orphans)} 首未分類歌曲創建播放清單")
+        except Exception as e:
+            log_func(f"  ⚠️ 創建未分類播放清單失敗: {e}")
+    else:
+        # Remove empty playlist if no unsorted songs
+        if os.path.exists(m3u_path):
             try: os.remove(m3u_path)
             except: pass
+        log_func(" -> 沒有未分類歌曲")
     
-    return moved_count
+    return len(orphans)
 
 def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None, speed_display_callback=None):
     from core.spotify import scrape_via_spotify_embed
@@ -349,6 +408,22 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     playlists_path = config['playlists_path']
     audio_format = config.get('audio_format', 'mp3')
     from utils.i18n import _
+    
+    # Get DAB Music credentials if available
+    dab_credentials = None
+    use_dab_lossless = config.get('dab_use_lossless', False)
+    use_dab_metadata = config.get('dab_use_metadata', False)
+    
+    if use_dab_lossless or use_dab_metadata:
+        dab_credentials = {
+            'email': config.get('dab_email', ''),
+            'password': config.get('dab_password', '')
+        }
+        if not dab_credentials['email'] or not dab_credentials['password']:
+            log_func('⚠️ DAB Music credentials not configured. Using YouTube only.')
+            use_dab_lossless = False
+            use_dab_metadata = False
+            dab_credentials = None
 
     # 1. Maintenance & Cleanup
     log_func(_('scanning_lib'))
@@ -546,7 +621,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     else:
                         progress_with_overall_eta(overall_progress, total_missing, None)
             
-            res = download_song(song_name, library_path, audio_format, log_func, audio_files_cache, stats, None, song_progress_callback, current_dl)
+            res = download_song(song_name, library_path, audio_format, log_func, audio_files_cache, stats, None, song_progress_callback, current_dl, use_dab_lossless, use_dab_metadata, dab_credentials, config)
             if res and os.path.exists(res):
                 # Update status to success
                 if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
@@ -720,6 +795,12 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 result, progress = future.result()
                 completed_count += 1
                 
+                # Update status in UI from main thread after future completes
+                if progress is not None:
+                    idx = progress - 1
+                    if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                        stats.app.update_song_status(idx, song_status[idx]['status'], song_status[idx]['name'])
+                
                 # Show simple progress every 50 songs
                 if completed_count % 50 == 0 or completed_count == total_lyrics_to_fetch:
                     log_func(f"� 歌詞下載進度: {completed_count}/{total_lyrics_to_fetch} (成功: {lyrics_fetched_count})")
@@ -746,6 +827,30 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     try:
         move_unsorted_songs(config, log_func)
     except: pass
+    
+    # METADATA ENRICHMENT STEP: Enrich metadata for existing files
+    if config.get('enable_metadata_enrichment', False):
+        try:
+            from core.metadata_enricher import create_metadata_enricher
+            enricher = create_metadata_enricher(config)
+            
+            def metadata_progress(current, total):
+                if progress_func:
+                    # Convert to percentage for display
+                    percentage = (current / total) * 100 if total > 0 else 0
+                    progress_func(percentage, 100)
+            
+            enriched_count = enricher.enrich_library_metadata(library_path, log_func, metadata_progress)
+            enricher.cleanup()
+            
+            if enriched_count > 0:
+                log_func(f'🎉 Enriched metadata for {enriched_count} files')
+            else:
+                log_func('ℹ️ No files needed metadata enrichment')
+                
+        except Exception as e:
+            log_func(f'⚠️ Metadata enrichment failed: {str(e)}')
+    
     log_func(_('update_complete'))
 
 def get_playlist_completeness_report(playlists, library_path, audio_files_cache=None):
@@ -848,6 +953,7 @@ def export_usb_logic(config, selected_playlists, log_func):
             log_func(f"請手動開啟資料夾: {abs_export_path}")
     else:
         log_func(_('open_dir_error', abs_export_path))
+
 
 def get_detailed_stats(config, audio_files=None):
     """
