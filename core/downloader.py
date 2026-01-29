@@ -3,6 +3,12 @@ import re
 import yt_dlp
 from utils.helpers import sanitize_filename
 from core.library import find_song_in_library
+from core.dab_downloader import create_dab_downloader
+from core.metadata_enricher import create_metadata_enricher # Added import
+from mutagen.flac import FLAC
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON
+from mutagen.mp4 import MP4
+from mutagen.easyid3 import EasyID3
 
 def strip_ansi(text):
     """Removes ANSI escape sequences from strings"""
@@ -40,6 +46,145 @@ class YdlLogger:
 
 class TaskAbortedException(Exception):
     pass
+
+def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enrich_metadata=False):
+    """Add metadata to downloaded audio file"""
+    try:
+        if enrich_metadata and config:
+            # Use metadata enricher for more detailed metadata
+            try:
+                enricher = create_metadata_enricher(config)
+                # Assuming enricher.enrich_file can take a song name and file path
+                # It should then find and apply metadata from external sources (e.g., MusicBrainz)
+                log_func(f"  ✨ [Metadata Enriching] {song_name}...")
+                success = enricher.enrich_file_metadata(file_path, song_name, log_func)
+                enricher.cleanup() # Clean up any session/cache
+                if success:
+                    log_func(f"  ✅ [Metadata Enriched] {song_name}")
+                    return True
+                else:
+                    log_func(f"  ⚠️ [Metadata Enricher] Failed to enrich {song_name}, falling back to basic metadata.")
+            except Exception as e:
+                log_func(f"  ⚠️ [Metadata Enricher Error] {str(e)}, falling back to basic metadata.")
+
+        # Fallback to basic metadata from yt-dlp info
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        # Extract metadata from YouTube info
+        title = info.get('title', '')
+        artist = info.get('uploader', '')
+        album = info.get('album', '')
+        duration = info.get('duration', 0)
+        upload_date = info.get('upload_date', '')
+        description = info.get('description', '')
+        
+        # Try to extract artist and title from song_name if not available
+        if not artist or not title:
+            if ' - ' in song_name:
+                parts = song_name.split(' - ', 1)
+                if len(parts) == 2:
+                    if not artist:
+                        artist = parts[0].strip()
+                    if not title:
+                        title = parts[1].strip()
+            else:
+                if not title:
+                    title = song_name
+        
+        # Format upload date as year
+        year = upload_date[:4] if upload_date and len(upload_date) >= 4 else ''
+        
+        # Extract genre from description or tags
+        genre = ''
+        if info.get('tags'):
+            genre_tags = [tag for tag in info['tags'] if 'music' in tag.lower() or 'genre' in tag.lower()]
+            if genre_tags:
+                genre = genre_tags[0]
+        
+        if file_ext == '.flac':
+            # Handle FLAC files
+            audio = FLAC(file_path)
+            if title:
+                audio['TITLE'] = title
+            if artist:
+                audio['ARTIST'] = artist
+            if album:
+                audio['ALBUM'] = album
+            if year:
+                audio['DATE'] = year
+            if genre:
+                audio['GENRE'] = genre
+            if duration:
+                audio['LENGTH'] = str(duration)
+            
+            # Add source information
+            audio['SOURCE'] = 'YouTube'
+            audio['COMMENT'] = f'Downloaded via Playlist Administrator'
+            
+            audio.save()
+            
+        elif file_ext in ['.mp3', '.mp2', '.mp1']:
+            # Handle MP3 files
+            try:
+                audio = EasyID3(file_path)
+            except:
+                audio = ID3(file_path)
+            
+            if title:
+                if isinstance(audio, EasyID3):
+                    audio['title'] = title
+                else:
+                    audio.add(TIT2(encoding=3, text=title))
+            
+            if artist:
+                if isinstance(audio, EasyID3):
+                    audio['artist'] = artist
+                else:
+                    audio.add(TPE1(encoding=3, text=artist))
+            
+            if album:
+                if isinstance(audio, EasyID3):
+                    audio['album'] = album
+                else:
+                    audio.add(TALB(encoding=3, text=album))
+            
+            if year:
+                if isinstance(audio, EasyID3):
+                    audio['date'] = year
+                else:
+                    audio.add(TDRC(encoding=3, text=year))
+            
+            if genre:
+                if isinstance(audio, EasyID3):
+                    audio['genre'] = genre
+                else:
+                    audio.add(TCON(encoding=3, text=genre))
+            
+            audio.save()
+            
+        elif file_ext in ['.m4a', '.mp4']:
+            # Handle M4A/MP4 files
+            audio = MP4(file_path)
+            
+            if title:
+                audio['\xa9nam'] = title
+            if artist:
+                audio['\xa9ART'] = artist
+            if album:
+                audio['\xa9alb'] = album
+            if year:
+                audio['\xa9day'] = year
+            if genre:
+                audio['\xa9gen'] = genre
+            
+            audio.save()
+        
+        log_func(f"  🏷️ [Metadata Added] {title}")
+        return True
+        
+    except Exception as e:
+        log_func(f"  ⚠️ [Metadata Error] {str(e)}")
+        return False
 
 def download_lyrics(song_name, output_path, log_func):
     """Downloads synced lyrics (.lrc) for a song using direct Lrclib API with Traditional Chinese conversion"""
@@ -150,8 +295,43 @@ def download_lyrics(song_name, output_path, log_func):
         return False
     return False
 
-def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None, progress_callback=None, current_dl=0):
+def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None, progress_callback=None, current_dl=0, use_dab_lossless=False, use_dab_metadata=False, dab_credentials=None, config=None):
     """Downloads song in specified format (mp3 or flac)"""
+    
+    # If DAB Music is requested and credentials are provided
+    if use_dab and dab_credentials:
+        try:
+            dab_downloader = create_dab_downloader(dab_credentials['email'], dab_credentials['password'])
+            success = dab_downloader.download_song(
+                song_name, library_path, log_func, file_list, stats, 
+                progress_callback, current_dl
+            )
+            dab_downloader.logout()
+            if success:
+                # If DAB download was successful, we should enrich its metadata if requested
+                if use_dab_metadata and config:
+                    log_func(f"  ✨ [DAB Download Success] Attempting metadata enrichment for {song_name}")
+                    try:
+                        enricher = create_metadata_enricher(config)
+                        # Assuming dab_downloader.download_song returns the final path
+                        # We need the path to the downloaded file for enrichment
+                        # For now, let's assume the song is in library_path
+                        # A better approach might be for dab_downloader.download_song to return the path
+                        # For now, we'll try to find it
+                        final_path = find_song_in_library(song_name, file_list) # this will be after download, need refresh file_list
+                        if final_path:
+                            enricher.enrich_file_metadata(final_path, song_name, log_func)
+                            log_func(f"  ✅ [Metadata Enriched] {song_name}")
+                        else:
+                            log_func(f"  ⚠️ [Metadata Enricher] Could not find downloaded DAB file for enrichment: {song_name}")
+                        enricher.cleanup()
+                    except Exception as e:
+                        log_func(f"  ⚠️ [DAB Metadata Enricher Error] {str(e)}")
+                return True
+            else:
+                log_func(f"  ⚠️ [DAB Failed] Falling back to YouTube for {song_name}")
+        except Exception as e:
+            log_func(f"  ⚠️ [DAB Error] {str(e)}. Falling back to YouTube for {song_name}")
     
     # Progress tracking state
     import time
@@ -438,6 +618,8 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     
                     if os.path.exists(final_path):
                         log_func(f" -> {os.path.basename(final_path)}")
+                        # Add metadata
+                        add_metadata_to_file(final_path, info, song_name, log_func, config, enrich_metadata)
                         # Download lyrics
                         lrc_path = os.path.splitext(final_path)[0] + ".lrc"
                         if not os.path.exists(lrc_path):
@@ -446,6 +628,8 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     
                     if os.path.exists(filename):
                         log_func(f" -> {os.path.basename(filename)}")
+                        # Add metadata
+                        add_metadata_to_file(filename, info, song_name, log_func, config, enrich_metadata)
                         # Download lyrics
                         lrc_path = os.path.splitext(filename)[0] + ".lrc"
                         if not os.path.exists(lrc_path):
@@ -457,6 +641,10 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     lrc_path = os.path.splitext(final_path)[0] + ".lrc"
                     if not os.path.exists(lrc_path):
                         download_lyrics(song_name, lrc_path, log_func)
+                    
+                    # Add metadata after download is complete
+                    if os.path.exists(final_path):
+                        add_metadata_to_file(final_path, info, song_name, log_func, config, enrich_metadata)
                     
                     all_candidates_failed = False  # Mark as successful
                     return final_path

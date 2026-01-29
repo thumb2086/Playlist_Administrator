@@ -12,4 +12,6 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
+    # To run the new Streamlit UI:
+    # streamlit run streamlit_app.py
     main()

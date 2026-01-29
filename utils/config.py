@@ -27,7 +27,12 @@ def load_config():
         'max_threads': 4,
         'setup_completed': False,
         'retry_failed_lyrics': False,  # Default to skip failed lyrics
-        'lyrics_offsets': {}  # Per-song lyrics timing adjustments
+        'lyrics_offsets': {},  # Per-song lyrics timing adjustments
+        'dab_use_lossless': False,
+        'dab_use_metadata': False,
+        'dab_email': "",
+        'dab_password': "",
+        'auto_metadata': False
     }
     for key, value in defaults.items():
         config.setdefault(key, value)
@@ -43,10 +48,10 @@ def load_config():
 
 def derive_paths(config):
     base_path = config['base_path']
-    config['library_path'] = os.path.join(base_path, 'Music')
+    config['library_path'] = os.path.normpath(os.path.join(base_path, 'Music'))
     # Use subfolder for playlists as requested by user
-    config['playlists_path'] = os.path.join(base_path, 'Playlists')
-    config['export_path'] = os.path.join(base_path, 'USB_Output')
+    config['playlists_path'] = os.path.normpath(os.path.join(base_path, 'Playlists'))
+    config['export_path'] = os.path.normpath(os.path.join(base_path, 'USB_Output'))
 
 def prompt_and_set_base_path(config):
     from utils.i18n import _
