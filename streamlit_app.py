@@ -113,8 +113,6 @@ def initialize_session_state():
         st.session_state['settings']['threads'] = st.session_state['settings']['max_threads']
     if 'auto_lyrics' not in st.session_state['settings']:
         st.session_state['settings']['auto_lyrics'] = st.session_state['settings']['enable_retroactive_lyrics']
-    if 'auto_metadata' not in st.session_state['settings']:
-        st.session_state['settings']['auto_metadata'] = st.session_state['settings'].get('enable_metadata_enrichment', False)
     
     # Normalize other paths
     st.session_state['settings']['export_path'] = os.path.normpath(st.session_state['settings']['export_path'])
@@ -144,7 +142,7 @@ def save_settings():
         'dab_email': s.get('dab_email'),
         'dab_password': s.get('dab_password'),
         'enable_retroactive_lyrics': s.get('auto_lyrics'),
-        'enable_metadata_enrichment': s.get('auto_metadata'), # Corrected mapping
+        'auto_metadata': s.get('auto_metadata'),
         'language': s.get('language', 'zh-TW'),
         'spotify_urls': s.get('spotify_urls', []),
         'url_names': s.get('url_names', {})
@@ -217,118 +215,55 @@ if page == "🏠 儀表板 (Dashboard)":
     status_table_placeholder = st.empty()
     status_table_placeholder.info("等待任務開始... (點擊下方按鈕開始)")
     
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button("🔽 開始下載 / 更新 (Sync)", type="primary", use_container_width=True):
+    col_btn, col_log = st.columns([1, 1])
+    with col_btn:
+        if st.button("開始下載 / 更新 (Start)", type="primary", width='stretch'):
             with st.status("正在執行同步更新...", expanded=True) as status_indicator:
                 stats = UpdateStats()
                 bridge = StatusBridge(status_table_placeholder)
                 stats.app = bridge # Provide bridge to backend
                 
+                log_history = []
                 def log_func(msg, immediate=False):
+                    log_history.append(f"{time.strftime('%H:%M:%S')} {msg}")
+                    # Update status indicator text
                     status_indicator.write(msg)
+                    # We could also use another placeholder for log history if needed
+                
+                def progress_func(current, total, eta=None):
+                    pass 
                 
                 update_library_logic(
                     st.session_state['settings'], 
                     stats, 
-                    log_func
+                    log_func,
+                    progress_func=progress_func
                 )
                 
                 st.success(f"✅ 同步完成！下載了 {len(stats.songs_downloaded)} 首歌。")
+                # Refresh data after download
                 st.session_state.playlist_data = pd.DataFrame(load_playlists_data(st.session_state['settings']))
+        
+        st.button("暫停任務 (Pause)", width='stretch')
 
-    with col_btn2:
-        if st.button("🪄 僅修復 Metadata / 歌詞", use_container_width=True):
-            with st.status("正在執行補全任務...", expanded=True) as status_indicator:
-                # 只跑後處理邏輯
-                from core.downloader import download_lyrics
-                from core.metadata_enricher import create_metadata_enricher
-                
-                lib_path = os.path.join(st.session_state['settings']['base_folder'], "Music")
-                
-                # 1. 歌詞補全
-                if st.session_state['settings'].get('auto_lyrics'):
-                    status_indicator.write("🔍 正在掃描缺失歌詞...")
-                    # 這裡簡化調用，實際可從 library.py 抽取
-                    search_pattern = os.path.join(lib_path, "**", "*")
-                    audio_files = [f for f in glob.glob(search_pattern, recursive=True) if f.lower().endswith(('.mp3', '.flac', '.m4a'))]
-                    missing_lrc = [f for f in audio_files if not os.path.exists(os.path.splitext(f)[0] + ".lrc")]
-                    
-                    status_indicator.write(f"Found {len(missing_lrc)} files missing lyrics.")
-                    for f in missing_lrc:
-                        name = os.path.splitext(os.path.basename(f))[0]
-                        status_indicator.write(f"Fetching lyrics for: {name}")
-                        download_lyrics(name, os.path.splitext(f)[0] + ".lrc", lambda x: None)
-                
-                # 2. Metadata 補全
-                if st.session_state['settings'].get('auto_metadata'):
-                    status_indicator.write("🔍 正在修復 Metadata...")
-                    enricher = create_metadata_enricher(st.session_state['settings'])
-                    enricher.enrich_library_metadata(lib_path, lambda msg: status_indicator.write(msg))
-                
-                st.success("✅ 修復完成！")
-
-    st.divider()
+    with col_log:
+        st.caption("📋 系統日誌 (System Logs)")
+        # This will be updated by log_func if we add a placeholder, 
+        # but for now let's use a simpler approach or just show completion stats.
+        st.info("任務執行時，詳細日誌會顯示在同步狀態欄位中。")
 
 # ==========================================
 # 📝 頁面 2: 連結管理
 # ==========================================
 elif page == "📝 連結管理":
-    st.header("管理 Spotify 連結")
-    
-    # --- 批量匯入區 ---
-    with st.expander("➕ 批量匯入連結", expanded=False):
-        import re
-        bulk_urls = st.text_area("在此貼入一個或多個 Spotify 網址 (每行一個)", height=150, help="支援 Playlist, Album, Artist 連結")
-        if st.button("🚀 執行匯入", use_container_width=True):
-            urls = [u.strip() for u in bulk_urls.split('\n') if u.strip() and "spotify.com" in u]
-            if urls:
-                # 獲取現有連結以防重複
-                current_urls = st.session_state.playlist_data['連結'].tolist() if not st.session_state.playlist_data.empty else []
-                new_rows = []
-                for url in urls:
-                    if url not in current_urls:
-                        # 嘗試取得名稱（若網址包含名稱資訊或呼叫 API）
-                        name = "新歌單 " + url.split('/')[-1][:8]
-                        new_rows.append({
-                            "啟用": True,
-                            "類型": get_playlist_type(url),
-                            "名稱": name,
-                            "連結": url,
-                            "狀態": "待同步"
-                        })
-                
-                if new_rows:
-                    st.session_state.playlist_data = pd.concat([st.session_state.playlist_data, pd.DataFrame(new_rows)], ignore_index=True)
-                    # 同步到 settings
-                    active_playlists = st.session_state.playlist_data[st.session_state.playlist_data['啟用'] & (st.session_state.playlist_data['連結'] != "")]
-                    st.session_state['settings']['spotify_urls'] = active_playlists['連結'].tolist()
-                    st.session_state['settings']['url_names'] = {row['連結']: row['名稱'] for _, row in active_playlists.iterrows()}
-                    save_settings()
-                    st.success(f"成功匯入 {len(new_rows)} 個連結！")
-                    st.rerun()
-                else:
-                    st.info("所有連結都已存在或無效。")
-            else:
-                st.warning("請輸入有效的 Spotify 網址。")
-
-    st.divider()
-
-    # --- 列表操作區 ---
-    col_act, col_r = st.columns([3, 1])
-    with col_act:
-        c1, c2, c3 = st.columns(3)
-        if c1.button("✅ 全部啟用", use_container_width=True):
-            st.session_state.playlist_data['啟用'] = True
-            save_settings()
-            st.rerun()
-        if c2.button("❌ 全部停用", use_container_width=True):
-            st.session_state.playlist_data['啟用'] = False
-            save_settings()
-            st.rerun()
-        if c3.button("🗑️ 移除無效連結", use_container_width=True):
-            st.session_state.playlist_data = st.session_state.playlist_data[st.session_state.playlist_data['連結'] != ""]
-            save_settings()
+    col_h, col_r = st.columns([4, 1])
+    with col_h:
+        st.header("管理 Spotify 連結")
+        st.caption("勾選「啟用」以納入下載排程。")
+    with col_r:
+        st.write("") # Padding
+        if st.button("🔄 重新整理", width='stretch', help="重新掃描硬碟與設定檔中的歌單"):
+            st.session_state.playlist_data = pd.DataFrame(load_playlists_data(st.session_state['settings']))
             st.rerun()
 
     edited_df = st.data_editor(
@@ -341,20 +276,18 @@ elif page == "📝 連結管理":
             "狀態": st.column_config.TextColumn("同步狀態", disabled=True, width="medium")
         },
         num_rows="dynamic",
-        use_container_width=True,
-        height=500,
-        key="playlist_editor"
+        width='stretch',
+        height=500
     )
     
-    # 自動儲存邏輯：如果編輯器有變動
     if not edited_df.equals(st.session_state.playlist_data):
         st.session_state.playlist_data = edited_df
-        # 同步 settings
+        # Update spotify_urls and url_names based on edited_df
         active_playlists = edited_df[edited_df['啟用'] & (edited_df['連結'] != "")]
         st.session_state['settings']['spotify_urls'] = active_playlists['連結'].tolist()
         st.session_state['settings']['url_names'] = {row['連結']: row['名稱'] for _, row in active_playlists.iterrows()}
-        save_settings()
-        st.rerun()
+        # Suggest saving
+        st.info("💡 連結清單已變動，請記得點擊「儲存設定」。")
 
 # ==========================================
 # 📤 頁面 3: 匯出同步
