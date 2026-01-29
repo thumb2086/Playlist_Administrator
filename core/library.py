@@ -781,10 +781,16 @@ def export_usb_logic(config, selected_playlists, log_func):
     export_path = config['export_path']
     library_path = config['library_path']
     
+    # Define sub-export paths for different qualities
+    export_path_flac = os.path.join(export_path, "FLAC_Quality")
+    export_path_mp3 = os.path.join(export_path, "MP3_Quality")
+    
+    # Cleanup main export directory
     if os.path.exists(export_path):
         shutil.rmtree(export_path)
         time.sleep(0.5)
-    os.makedirs(export_path)
+    os.makedirs(export_path_flac, exist_ok=True)
+    os.makedirs(export_path_mp3, exist_ok=True)
     
     if not selected_playlists:
         log_func(_('no_pl_selected'))
@@ -792,35 +798,54 @@ def export_usb_logic(config, selected_playlists, log_func):
 
     search_pattern = os.path.join(library_path, "**", "*")
     all_files = glob.glob(search_pattern, recursive=True)
-    audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
+    
+    # Group audio files by quality
+    audio_files_flac = [f for f in all_files if f.lower().endswith('.flac')]
+    audio_files_mp3 = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.wav', '.webm'))]
 
     for pl_file in selected_playlists:
         if not os.path.exists(pl_file): continue
         
         pl_name = os.path.splitext(os.path.basename(pl_file))[0]
-        dest_folder = os.path.join(export_path, pl_name)
-        if not os.path.exists(dest_folder):
-            os.makedirs(dest_folder)
-            
         songs = parse_playlist(pl_file)
         log_func(_('exporting_pl', pl_name))
         
-        count = 0
-        for song_name in songs:
-            src = find_song_in_library(song_name, audio_files_cache)
-            if src and os.path.exists(src):
-                try:
-                    shutil.copy2(src, dest_folder)
-                    count += 1
-                except Exception as e:
-                    log_func(_('copy_error', e))
+        # Create playlist subfolders in both quality directories
+        dest_flac = os.path.join(export_path_flac, pl_name)
+        dest_mp3 = os.path.join(export_path_mp3, pl_name)
         
-        log_func(_('exported_count', count, len(songs)))
+        count_flac = 0
+        count_mp3 = 0
+        
+        for song_name in songs:
+            # 1. Try to find FLAC version first
+            src_flac = find_song_in_library(song_name, audio_files_flac)
+            if src_flac and os.path.exists(src_flac):
+                os.makedirs(dest_flac, exist_ok=True)
+                shutil.copy2(src_flac, dest_flac)
+                count_flac += 1
+            
+            # 2. Try to find MP3/Standard version
+            src_mp3 = find_song_in_library(song_name, audio_files_mp3)
+            if src_mp3 and os.path.exists(src_mp3):
+                os.makedirs(dest_mp3, exist_ok=True)
+                shutil.copy2(src_mp3, dest_mp3)
+                count_mp3 += 1
+        
+        log_func(f" -> {pl_name}: 匯出 {count_flac} 首 FLAC, {count_mp3} 首 MP3")
         
     log_func(_('export_done_open'))
     abs_export_path = os.path.abspath(export_path)
     if os.path.exists(abs_export_path):
-        os.startfile(abs_export_path)
+        # On Linux, os.startfile doesn't exist. Use xdg-open or similar
+        try:
+            if os.name == 'nt':
+                os.startfile(abs_export_path)
+            else:
+                import subprocess
+                subprocess.run(['xdg-open', abs_export_path], check=False)
+        except:
+            log_func(f"請手動開啟資料夾: {abs_export_path}")
     else:
         log_func(_('open_dir_error', abs_export_path))
 
