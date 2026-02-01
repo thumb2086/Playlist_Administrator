@@ -326,12 +326,9 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     log_func(f"  ✨ [DAB Download Success] Attempting metadata enrichment for {song_name}")
                     try:
                         enricher = create_metadata_enricher(config)
-                        # Assuming dab_downloader.download_song returns the final path
-                        # We need the path to the downloaded file for enrichment
-                        # For now, let's assume the song is in library_path
-                        # A better approach might be for dab_downloader.download_song to return the path
-                        # For now, we'll try to find it
-                        final_path = find_song_in_library(song_name, file_list) # this will be after download, need refresh file_list
+                        # Refresh file_list to include newly downloaded FLAC
+                        from core.library import find_song_prefer_flac
+                        final_path = find_song_prefer_flac(song_name, file_list)
                         if final_path:
                             enricher.enrich_file_metadata(final_path, song_name, log_func)
                             log_func(f"  ✅ [Metadata Enriched] {song_name}")
@@ -345,6 +342,9 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                 log_func(f"  ⚠️ [DAB Failed] Falling back to YouTube for {song_name}")
         except Exception as e:
             log_func(f"  ⚠️ [DAB Error] {str(e)}. Falling back to YouTube for {song_name}")
+    
+    # Force FLAC format when DAB lossless is enabled, even if we fall back to YouTube
+    effective_audio_format = 'flac' if use_dab_lossless else audio_format
     
     # Progress tracking state
     import time
@@ -457,7 +457,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
             log_func("  ✅ Download complete, converting...")
     
     # Check if we already have it - use prefer_flac logic when downloading FLAC
-    if audio_format == 'flac':
+    if effective_audio_format == 'flac':
         from core.library import find_song_prefer_flac
         existing = find_song_prefer_flac(song_name, file_list)
         if existing and existing.lower().endswith('.flac'):
@@ -467,7 +467,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         existing = find_song_in_library(song_name, file_list)
         if existing:
             ext = os.path.splitext(existing)[1].lower().replace('.', '')
-            if ext == audio_format:
+            if ext == effective_audio_format:
                 return existing
 
     clean_name = sanitize_filename(song_name)
@@ -482,8 +482,8 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         'extract_audio': True,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
-            'preferredcodec': audio_format,
-            'preferredquality': '0' if audio_format == 'flac' else '320',
+            'preferredcodec': effective_audio_format,
+            'preferredquality': '0' if effective_audio_format == 'flac' else '320',
         }],
         'logger': YdlLogger(log_func, stats),
         'progress_hooks': [progress_hook],
@@ -626,8 +626,8 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                                 'extract_audio': True,
                                 'postprocessors': [{
                                     'key': 'FFmpegExtractAudio',
-                                    'preferredcodec': audio_format,
-                                    'preferredquality': '0' if audio_format == 'flac' else '320',
+                                    'preferredcodec': effective_audio_format,
+                                    'preferredquality': '0' if effective_audio_format == 'flac' else '320',
                                 }],
                                 'logger': YdlLogger(log_func, stats),
                                 'progress_hooks': [progress_hook],
@@ -666,7 +666,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                                     'extract_audio': True,
                                     'postprocessors': [{
                                         'key': 'FFmpegExtractAudio',
-                                        'preferredcodec': audio_format,
+                                        'preferredcodec': effective_audio_format,
                                         'preferredquality': '192',  # 降低品質要求
                                     }],
                                     'logger': YdlLogger(log_func, stats),
@@ -746,7 +746,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                         log_func(f"  [Filename Error] {current_query}: Cannot prepare filename - {str(e)}")
                         break
                     base, ext = os.path.splitext(filename)
-                    final_path = base + "." + audio_format
+                    final_path = base + "." + effective_audio_format
                     
                     if os.path.exists(final_path):
                         log_func(f" -> {os.path.basename(final_path)}")

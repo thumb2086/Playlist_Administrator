@@ -290,6 +290,12 @@ class MetadataEnricher:
                 file_path = file_info['path']
                 song_name = os.path.splitext(file_info['filename'])[0]
                 
+                # Show progress every 5 files or for small batches every file
+                progress_interval = 5 if total_files > 20 else 1
+                if (i + 1) % progress_interval == 0 or (i + 1) == total_files:
+                    success_rate = (successful_enrichments / (i + 1) * 100) if (i + 1) > 0 else 0
+                    log_func(f"🎵 Metadata 補充進度: {i + 1}/{total_files} (成功: {successful_enrichments}, 成功率: {success_rate:.1f}%)")
+                
                 success = self.enrich_file_metadata(file_path, song_name, log_func)
                 if success:
                     successful_enrichments += 1

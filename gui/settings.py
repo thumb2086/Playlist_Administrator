@@ -87,12 +87,20 @@ class SettingsWindow:
         # Audio Format Selection
         tk.Label(lf_feat, text="下載音質 (Audio Quality):", font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
         
-        self.audio_format_var = tk.StringVar(value=self.config.get('audio_format', 'mp3'))
+        # Load legacy format or new list format
+        current_formats = self.config.get('audio_formats', [])
+        if not current_formats:
+            # Migration: use legacy 'audio_format' if 'audio_formats' is empty
+            current_formats = [self.config.get('audio_format', 'mp3')]
+
+        self.mp3_var = tk.BooleanVar(value='mp3' in current_formats)
+        self.flac_var = tk.BooleanVar(value='flac' in current_formats)
+        
         format_frame = tk.Frame(lf_feat)
         format_frame.pack(fill="x", pady=5)
         
-        tk.Radiobutton(format_frame, text="MP3 (320kbps)", variable=self.audio_format_var, value="mp3", font=("Microsoft JhengHei", 9)).pack(side="left", padx=10)
-        tk.Radiobutton(format_frame, text="FLAC (無損音質)", variable=self.audio_format_var, value="flac", font=("Microsoft JhengHei", 9)).pack(side="left", padx=10)
+        tk.Checkbutton(format_frame, text="MP3 (320kbps)", variable=self.mp3_var, font=("Microsoft JhengHei", 9)).pack(side="left", padx=10)
+        tk.Checkbutton(format_frame, text="FLAC (無損音質)", variable=self.flac_var, font=("Microsoft JhengHei", 9)).pack(side="left", padx=10)
         
         tk.Label(lf_feat, text="", font=("Microsoft JhengHei", 8)).pack(anchor="w", padx=5, pady=(5, 0))  # Spacer
         
@@ -150,8 +158,17 @@ class SettingsWindow:
         new_dab_email = self.dab_email_var.get()
         new_dab_password = self.dab_password_var.get()
         new_metadata_enrichment = self.metadata_enrichment_var.get()
-        new_audio_format = self.audio_format_var.get()
         
+        # Construct audio formats list
+        new_audio_formats = []
+        if self.mp3_var.get(): new_audio_formats.append('mp3')
+        if self.flac_var.get(): new_audio_formats.append('flac')
+        
+        # Fallback if nothing selected (default to mp3)
+        if not new_audio_formats:
+            new_audio_formats = ['mp3']
+            messagebox.showinfo("提示", "未選擇音質，預設為 MP3")
+            
         lang_changed = new_lang != self.config.get('language')
         path_changed = new_path != self.config.get('base_path')
         
@@ -169,8 +186,10 @@ class SettingsWindow:
              self.config['use_dab_music'] = True
         else:
              self.config['use_dab_music'] = False
+             
         self.config['enable_metadata_enrichment'] = new_metadata_enrichment
-        self.config['audio_format'] = new_audio_format
+        self.config['audio_formats'] = new_audio_formats
+        self.config['audio_format'] = new_audio_formats[0] # Legacy compatibility
         
         # Special handling for path change
         if path_changed:

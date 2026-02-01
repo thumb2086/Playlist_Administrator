@@ -50,10 +50,15 @@ class DABDownloader:
             os.makedirs(lossless_dir, exist_ok=True)
             output_path = os.path.join(lossless_dir, f"{safe_title}.flac")
             
-            # Check if file already exists
-            if os.path.exists(output_path):
-                log_func(f"  ✅ [Already Exists] {safe_title}.flac")
-                return output_path
+            # Check if file already exists in the entire library, not just Lossless folder
+            existing_flac = None
+            if file_list:
+                from core.library import find_song_prefer_flac
+                existing_flac = find_song_prefer_flac(song_name, file_list)
+            
+            if existing_flac and existing_flac.lower().endswith('.flac'):
+                log_func(f"  ✅ [Already Exists] {os.path.basename(existing_flac)}")
+                return existing_flac
             
             # Create directory if it doesn't exist
             os.makedirs(library_path, exist_ok=True)

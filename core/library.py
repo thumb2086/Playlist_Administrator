@@ -588,6 +588,52 @@ def find_song_prefer_flac(song_name, library_source):
     # Then return any other format
     return found_files[0]
 
+def find_song_exact_format(song_name, target_extension, library_source):
+    """ 
+    Find song in library that strictly matches the target extension (e.g., '.mp3', '.flac')
+    Returns the path if found, else None.
+    """
+    query_tokens = tuple(get_normalized_tokens(song_name))
+    if not query_tokens:
+        return None
+    
+    found_files = []
+    
+    # Check if library_source is a dictionary (index) or list (file list)
+    if isinstance(library_source, dict):
+        # FAST PATH: Dictionary Lookup
+        paths = library_source.get(query_tokens)
+        if paths:
+            if isinstance(paths, list):
+                found_files = paths
+            else:
+                found_files = [paths]
+    elif isinstance(library_source, list):
+        # SLOW PATH: Linear Scan
+        audio_files = library_source
+        for file_path in audio_files:
+            filename = os.path.basename(file_path)
+            name_no_ext = os.path.splitext(filename)[0]
+            file_tokens = tuple(get_normalized_tokens(name_no_ext))
+            if file_tokens == query_tokens:
+                found_files.append(file_path)
+    else:
+        return None
+        
+    if not found_files:
+        return None
+        
+    # Check for exact extension match
+    target_ext = target_extension.lower()
+    if not target_ext.startswith('.'):
+        target_ext = '.' + target_ext
+        
+    for file_path in found_files:
+        if file_path.lower().endswith(target_ext):
+            return file_path
+            
+    return None
+
 def rename_explicit_files(library_path, log_func):
     """ Renames files starting with 'E' prefix and standardizes all filenames to be safe for players """
     import re
@@ -754,7 +800,12 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     # 0. Initialize
     library_path = config['library_path']
     playlists_path = config['playlists_path']
-    audio_format = config.get('audio_format', 'mp3')
+    
+    # Get audio formats (support list or legacy single string)
+    audio_formats = config.get('audio_formats', [])
+    if not audio_formats:
+        audio_formats = [config.get('audio_format', 'mp3')]
+        
     from utils.i18n import _
     
     # Get DAB Music credentials if available
@@ -803,7 +854,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     library_index = build_library_index(audio_files_cache)
     log_func(_('indexed_songs', len(audio_files_cache)))
     
-    songs_to_download = [] # List of {'name': s, 'playlist': pl}
+    songs_to_download = [] # List of {'name': s, 'playlist': pl, 'needed_formats': []}
     songs_missing_lyrics = [] # List of (song_name, existing_path)
     
     # Pre-scan existing files for missing lyrics
@@ -814,7 +865,6 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             song_name = os.path.splitext(os.path.basename(audio_path))[0]
             songs_missing_lyrics.append((song_name, audio_path))
 
-    # First Pass: Filename Index Check (Fast)
     # First Pass: Filename Index Check (Fast)
     for pl_file in files:
         if stats and stats.stop_event and stats.stop_event.is_set():
@@ -828,23 +878,24 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                   log_func(_('task_stopped'))
                   return
 
-             # Use prefer_flac logic when downloading FLAC
-             found = False
+             # Check which formats are missing
+             missing_formats = []
+             for fmt in audio_formats:
+                 if not find_song_exact_format(song_name, fmt, library_index):
+                     missing_formats.append(fmt)
              
-             if audio_format == 'flac':
-                 existing_path = find_song_prefer_flac(song_name, library_index)
-                 # Only consider as existing if we have FLAC
-                 if existing_path and existing_path.lower().endswith('.flac'):
-                     found = True
-             else:
-                 existing_path = find_song_in_library(song_name, library_index)
-                 if existing_path:
-                     found = True
-             
-             if not found:
+             if missing_formats:
                  # Check if already in list to avoid duplicates across diff playlists
-                 if not any(d['name'] == song_name for d in songs_to_download):
-                     songs_to_download.append({'name': song_name, 'playlist': pl_name})
+                 # Use a composite check: match name AND merge missing formats if needed
+                 existing_entry = next((item for item in songs_to_download if item['name'] == song_name), None)
+                 
+                 if existing_entry:
+                     # Merge missing formats (union)
+                     current_missing = set(existing_entry['needed_formats'])
+                     new_missing = set(missing_formats)
+                     existing_entry['needed_formats'] = list(current_missing.union(new_missing))
+                 else:
+                     songs_to_download.append({'name': song_name, 'playlist': pl_name, 'needed_formats': missing_formats})
     
     # Second Pass: Deep Metadata Scan (Slower but necessary for renamed files)
     if songs_to_download:
@@ -856,18 +907,27 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         still_missing = []
         for item in songs_to_download:
             song_name = item['name']
+            needed_formats = item['needed_formats']
             
-            # Check against metadata index
+            # Check against metadata index - returns a path if found
             found_path = find_song_in_library(song_name, library_index, metadata_index=metadata_index)
             
             if found_path:
-                # Found it via metadata!
-                 pass 
-            else:
+                # Found a file via metadata! Check its extension.
+                ext = os.path.splitext(found_path)[1].lower().lstrip('.')
+                
+                # If the found file matches one of the needed formats, remove it
+                if ext in needed_formats:
+                    # Create a new list without the found format
+                    needed_formats = [fmt for fmt in needed_formats if fmt != ext]
+                    item['needed_formats'] = needed_formats
+            
+            # If we still need formats (either didn't find anything, or found one but needed others)
+            if needed_formats:
                 still_missing.append(item)
                 
         if len(songs_to_download) != len(still_missing):
-            log_func(f"  ✅ 透過 Metadata 找回 {len(songs_to_download) - len(still_missing)} 首歌")
+            log_func(f"  ✅ 透過 Metadata 找回 {len(songs_to_download) - len(still_missing)} 首歌 (部分或全部格式)")
             
         songs_to_download = still_missing
 
@@ -948,7 +1008,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             if hasattr(stats, 'pause_event') and stats.pause_event:
                  stats.pause_event.wait()
             
-            # Update status to downloading
+            # Update status to downloading (generic)
             if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
                 stats.app.update_song_status(i, '🔽 下載中', song_name)
                  
@@ -982,21 +1042,13 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     progress_with_overall_eta(overall_progress, total_missing, eta_seconds)
                 else:
                     # For first song, try to use current song's ETA as rough estimate
-                    if eta and isinstance(eta, (int, float)) and eta > 0:
-                        # Rough estimate: current song ETA * remaining songs
-                        remaining_songs = total_missing - current_dl
-                        overall_eta = eta * remaining_songs
-                        progress_with_overall_eta(overall_progress, total_missing, overall_eta)
-                    elif total and total > 0 and current > 0:
-                        # If we have current song progress, estimate based on current song's progress rate
-                        song_progress_ratio = current / total
-                        if song_progress_ratio > 0:
-                            # Estimate total time for current song based on elapsed time and progress
-                            elapsed_time = time.time() - song_start_time
-                            estimated_total_song_time = elapsed_time / song_progress_ratio
-                            remaining_song_time = estimated_total_song_time - elapsed_time
-                            # Rough estimate: remaining time for current song + time for remaining songs
-                            remaining_songs = total_missing - current_dl - 1  # Exclude current song
+                    if current and current > 0 and song_start_time:
+                        current_duration = time.time() - song_start_time
+                        if current_duration > 1: # Wait for stable speed
+                            # Estimate total time for this song
+                            est_total_song_time = current_duration / (current/total)
+                            remaining_song_time = est_total_song_time - current_duration
+                            
                             if remaining_songs > 0:
                                 # Estimate 2 minutes per remaining song as fallback
                                 estimated_remaining_time = remaining_song_time + (remaining_songs * 120)
@@ -1008,8 +1060,24 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     else:
                         progress_with_overall_eta(overall_progress, total_missing, None)
             
-            res = download_song(song_name, library_path, audio_format, log_func, audio_files_cache, stats, None, song_progress_callback, current_dl, use_dab_lossless, use_dab_metadata, dab_credentials, config)
-            if res and os.path.exists(res):
+            needed_formats = item.get('needed_formats', [audio_format])
+            all_formats_success = True
+            downloaded_paths = []
+            
+            for fmt in needed_formats:
+                # Update UI to show specific format
+                if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                    stats.app.update_song_status(i, f'🔽 {fmt.upper()}', song_name)
+                    
+                res = download_song(song_name, library_path, fmt, log_func, audio_files_cache, stats, None, song_progress_callback, current_dl, use_dab_lossless, use_dab_metadata, dab_credentials, config)
+                
+                if res and os.path.exists(res):
+                    downloaded_paths.append(res)
+                    audio_files_cache.append(res)
+                else:
+                    all_formats_success = False
+            
+            if all_formats_success and downloaded_paths:
                 # Update status to success
                 if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
                     stats.app.update_song_status(i, '✅ 完成', song_name)
@@ -1024,7 +1092,6 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 if pl_name not in stats.playlist_updates:
                     stats.playlist_updates[pl_name] = []
                 stats.playlist_updates[pl_name].append(song_name)
-                audio_files_cache.append(res)
                 successful_downloads += 1
                 
                 if post_download_callback:
@@ -1188,9 +1255,11 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
                         stats.app.update_song_status(idx, song_status[idx]['status'], song_status[idx]['name'])
                 
-                # Show simple progress every 50 songs
-                if completed_count % 50 == 0 or completed_count == total_lyrics_to_fetch:
-                    log_func(f"� 歌詞下載進度: {completed_count}/{total_lyrics_to_fetch} (成功: {lyrics_fetched_count})")
+                # Show progress every 10 songs or every 5 songs for small batches
+                progress_interval = 10 if total_lyrics_to_fetch > 50 else 5
+                if completed_count % progress_interval == 0 or completed_count == total_lyrics_to_fetch:
+                    success_rate = (lyrics_fetched_count / completed_count * 100) if completed_count > 0 else 0
+                    log_func(f"🎵 歌詞補抓進度: {completed_count}/{total_lyrics_to_fetch} (成功: {lyrics_fetched_count}, 成功率: {success_rate:.1f}%)")
         
         # Final summary
         if lyrics_fetched_count > 0:
@@ -1250,25 +1319,28 @@ def get_playlist_completeness_report(files, library_path):
     audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
     library_index = build_library_index(audio_files_cache)
     
-    # Get current audio format preference
+    # Get current audio format preference (support multiple formats)
     from utils.config import load_config
     config = load_config()
-    audio_format = config.get('audio_format', 'mp3')
+    audio_formats = config.get('audio_formats', [])
+    if not audio_formats:
+        # Fallback to legacy single format
+        audio_formats = [config.get('audio_format', 'mp3')]
     
     report = {}
     for pl_file in files:
         songs = parse_playlist(pl_file)
         missing = 0
         for song_name in songs:
-            # Use prefer_flac logic when audio_format is flac
-            if audio_format == 'flac':
-                existing = find_song_prefer_flac(song_name, library_index)
-                # Only consider as complete if we have FLAC
-                if not existing or not existing.lower().endswith('.flac'):
-                    missing += 1
-            else:
-                if not find_song_in_library(song_name, library_index):
-                    missing += 1
+            is_song_complete = True
+            for fmt in audio_formats:
+                # Check strict existence of each format
+                if not find_song_exact_format(song_name, fmt, library_index):
+                    is_song_complete = False
+                    break
+            
+            if not is_song_complete:
+                missing += 1
         
         report[pl_file] = (missing == 0, missing, len(songs))
     
@@ -1318,11 +1390,28 @@ def export_usb_logic(config, selected_playlists, log_func, export_quality='origi
         
         count = 0
         converted_files = []  # Track converted files for cleanup
+        failed_quality = []   # Track songs that couldn't meet quality requirements
         
         for song_name in songs:
             src = find_song_in_library(song_name, audio_files_cache)
             if src and os.path.exists(src):
                 try:
+                    # Check source format and validate conversion requirements
+                    src_ext = os.path.splitext(src)[1].lower()
+                    
+                    # Validate conversion requirements
+                    if export_quality == 'flac' and src_ext != '.flac':
+                        # MP3 to FLAC conversion is not allowed (lossy to lossless)
+                        log_func(f"  ❌ [Quality Error] {song_name}: 無法將 {src_ext[1:].upper()} 轉換為 FLAC (有損轉無損不被允許)")
+                        failed_quality.append(song_name)
+                        continue
+                    elif export_quality == 'mp3' and src_ext == '.flac':
+                        # FLAC to MP3 conversion is allowed (lossless to lossy)
+                        log_func(f"  🔄 [Quality Conversion] {song_name}: FLAC 轉換為 MP3 (320kbps)")
+                    elif export_quality != 'original' and src_ext == f'.{export_quality}':
+                        # Already in target format
+                        log_func(f"  ✅ [Quality Match] {song_name}: 已經是 {export_quality.upper()} 格式")
+                    
                     # Handle conversion if needed
                     if export_quality != 'original':
                         final_src, was_converted = convert_audio_if_needed(src, export_quality, log_func)
@@ -1344,6 +1433,9 @@ def export_usb_logic(config, selected_playlists, log_func, export_quality='origi
                     
                 except Exception as e:
                     log_func(_('copy_error', e))
+            else:
+                log_func(f"  ❌ [Not Found] {song_name}: 檔案不存在")
+                failed_quality.append(song_name)
         
         # Clean up temporary converted files
         for temp_file in converted_files:
@@ -1354,6 +1446,13 @@ def export_usb_logic(config, selected_playlists, log_func, export_quality='origi
                 pass  # Ignore cleanup errors
         
         log_func(_('exported_count', count, len(songs)))
+        
+        # Report quality conversion failures
+        if failed_quality:
+            log_func(f"  ⚠️ 品質不符: {len(failed_quality)} 首歌曲無法匯出為指定品質")
+            if export_quality == 'flac':
+                log_func(f"     提示: FLAC 需要原始檔案為 FLAC 格式，MP3 無法轉換為 FLAC")
+                log_func(f"     建議: 請選擇 '保持原始品質' 或 '轉換為 MP3'，或確保音樂庫中有 FLAC 版本")
         
     log_func(_('export_done_open'))
     abs_export_path = os.path.abspath(export_path)
