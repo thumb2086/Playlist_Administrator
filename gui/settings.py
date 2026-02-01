@@ -7,7 +7,7 @@ class SettingsWindow:
     def __init__(self, parent, config, on_close_callback=None):
         self.top = tk.Toplevel(parent)
         self.top.title("設定 (Settings)")
-        self.top.geometry("500x650")
+        self.top.geometry("500x850")
         self.top.resizable(False, False)
         
         # Modal window behavior
@@ -80,9 +80,21 @@ class SettingsWindow:
         scale = tk.Scale(thread_frame, from_=1, to=16, orient="horizontal", variable=self.thread_var, showvalue=False, command=self.update_thread_lbl)
         scale.pack(side="left", fill="x", expand=True, padx=5)
 
-        # 4. Features Section (Lyrics)
+        # 4. Features Section (Lyrics & Quality)
         lf_feat = tk.LabelFrame(container, text="功能 (Features)", font=("Microsoft JhengHei", 10, "bold"), padx=10, pady=10)
         lf_feat.pack(fill="x", pady=(0, 15))
+        
+        # Audio Format Selection
+        tk.Label(lf_feat, text="下載音質 (Audio Quality):", font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
+        
+        self.audio_format_var = tk.StringVar(value=self.config.get('audio_format', 'mp3'))
+        format_frame = tk.Frame(lf_feat)
+        format_frame.pack(fill="x", pady=5)
+        
+        tk.Radiobutton(format_frame, text="MP3 (320kbps)", variable=self.audio_format_var, value="mp3", font=("Microsoft JhengHei", 9)).pack(side="left", padx=10)
+        tk.Radiobutton(format_frame, text="FLAC (無損音質)", variable=self.audio_format_var, value="flac", font=("Microsoft JhengHei", 9)).pack(side="left", padx=10)
+        
+        tk.Label(lf_feat, text="", font=("Microsoft JhengHei", 8)).pack(anchor="w", padx=5, pady=(5, 0))  # Spacer
         
         self.lyrics_var = tk.BooleanVar(value=self.config.get('enable_retroactive_lyrics', True))
         tk.Checkbutton(lf_feat, text="自動補抓歌詞 (Auto Lyrics)", variable=self.lyrics_var, font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
@@ -94,8 +106,8 @@ class SettingsWindow:
         lf_dab = tk.LabelFrame(container, text="DAB Music (無損音質)", font=("Microsoft JhengHei", 10, "bold"), padx=10, pady=10)
         lf_dab.pack(fill="x", pady=(0, 15))
         
-        self.use_dab_var = tk.BooleanVar(value=self.config.get('use_dab_music', False))
-        tk.Checkbutton(lf_dab, text="使用 DAB Music (優先無損音質)", variable=self.use_dab_var, font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
+        # self.use_dab_var = tk.BooleanVar(value=self.config.get('use_dab_music', False))
+        # tk.Checkbutton(lf_dab, text="使用 DAB Music (優先無損音質)", variable=self.use_dab_var, font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
         
         tk.Label(lf_dab, text="Email:", font=("Microsoft JhengHei", 9)).pack(anchor="w", padx=5, pady=(10, 0))
         self.dab_email_var = tk.StringVar(value=self.config.get('dab_email', ''))
@@ -134,10 +146,11 @@ class SettingsWindow:
         new_threads = self.thread_var.get()
         new_lyrics = self.lyrics_var.get()
         new_retry = self.retry_var.get()
-        new_use_dab = self.use_dab_var.get()
+
         new_dab_email = self.dab_email_var.get()
         new_dab_password = self.dab_password_var.get()
         new_metadata_enrichment = self.metadata_enrichment_var.get()
+        new_audio_format = self.audio_format_var.get()
         
         lang_changed = new_lang != self.config.get('language')
         path_changed = new_path != self.config.get('base_path')
@@ -148,10 +161,16 @@ class SettingsWindow:
         self.config['max_threads'] = new_threads
         self.config['enable_retroactive_lyrics'] = new_lyrics
         self.config['retry_failed_lyrics'] = new_retry
-        self.config['use_dab_music'] = new_use_dab
         self.config['dab_email'] = new_dab_email
         self.config['dab_password'] = new_dab_password
+
+        # Auto-enable DAB Music if credentials are provided
+        if new_dab_email and new_dab_password:
+             self.config['use_dab_music'] = True
+        else:
+             self.config['use_dab_music'] = False
         self.config['enable_metadata_enrichment'] = new_metadata_enrichment
+        self.config['audio_format'] = new_audio_format
         
         # Special handling for path change
         if path_changed:

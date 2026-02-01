@@ -1,0 +1,243 @@
+"""
+File Renamer Utility
+Renames music files based on their metadata to Artist - Title format
+Supports batch processing of existing files
+"""
+
+import os
+import re
+from pathlib import Path
+from mutagen.flac import FLAC
+from mutagen.id3 import ID3
+from mutagen.easyid3 import EasyID3
+from mutagen.mp4 import MP4
+from utils.helpers import sanitize_filename
+
+class FileRenamer:
+    """Utility to rename music files based on metadata"""
+    
+    def __init__(self, library_path: str, log_func=None):
+        self.library_path = library_path
+        self.log_func = log_func or self._default_log
+        
+    def _default_log(self, message: str):
+        """Default logging function"""
+        print(message)
+    
+    def extract_metadata(self, file_path: str) -> dict:
+        """Extract metadata from audio file"""
+        try:
+            file_ext = Path(file_path).suffix.lower()
+            metadata = {}
+            
+            if file_ext == '.flac':
+                audio = FLAC(file_path)
+                metadata = {
+                    'title': audio.get('TITLE', [''])[0],
+                    'artist': audio.get('ARTIST', [''])[0],
+                    'album': audio.get('ALBUM', [''])[0],
+                    'date': audio.get('DATE', [''])[0]
+                }
+            elif file_ext in ['.mp3', '.mp2', '.mp1']:
+                try:
+                    audio = EasyID3(file_path)
+                    metadata = {
+                        'title': audio.get('title', [''])[0],
+                        'artist': audio.get('artist', [''])[0],
+                        'album': audio.get('album', [''])[0],
+                        'date': audio.get('date', [''])[0]
+                    }
+                except:
+                    # Fallback to ID3 if EasyID3 fails
+                    audio = ID3(file_path)
+                    metadata = {
+                        'title': '',
+                        'artist': '',
+                        'album': '',
+                        'date': ''
+                    }
+                    # Extract from ID3 tags
+                    if 'TIT2' in audio:
+                        metadata['title'] = str(audio['TIT2'])
+                    if 'TPE1' in audio:
+                        metadata['artist'] = str(audio['TPE1'])
+                    if 'TALB' in audio:
+                        metadata['album'] = str(audio['TALB'])
+                    if 'TDRC' in audio:
+                        metadata['date'] = str(audio['TDRC'])
+            elif file_ext in ['.m4a', '.mp4']:
+                audio = MP4(file_path)
+                metadata = {
+                    'title': audio.get('\xa9nam', [''])[0],
+                    'artist': audio.get('\xa9ART', [''])[0],
+                    'album': audio.get('\xa9alb', [''])[0],
+                    'date': audio.get('\xa9day', [''])[0]
+                }
+            else:
+                self.log_func(f"  ⚠️ [Unsupported Format] {file_path}")
+                return None
+                
+            return metadata
+            
+        except Exception as e:
+            self.log_func(f"  ❌ [Metadata Error] {file_path}: {str(e)}")
+            return None
+    
+    def generate_new_filename(self, metadata: dict, file_ext: str) -> str:
+        """Generate new filename based on metadata"""
+        artist = metadata.get('artist', '').strip()
+        title = metadata.get('title', '').strip()
+        
+        # 如果有完整的 metadata（歌手和歌名都有），檔案只叫歌名
+        if artist and title:
+            new_name = title
+        elif title:
+            # 如果只有歌名，檔案就叫歌名
+            new_name = title
+        elif artist:
+            # 如果只有歌手，檔案就叫歌手
+            new_name = artist
+        else:
+            # 如果都沒有，返回 None（無法生成新檔名）
+            return None
+        
+        # Sanitize filename
+        new_name = sanitize_filename(new_name)
+        return f"{new_name}{file_ext}"
+    
+    def rename_file(self, file_path: str, dry_run: bool = True) -> dict:
+        """Rename a single file based on its metadata"""
+        result = {
+            'success': False,
+            'old_path': file_path,
+            'new_path': None,
+            'metadata': None,
+            'message': ''
+        }
+        
+        try:
+            # Extract metadata
+            metadata = self.extract_metadata(file_path)
+            if not metadata:
+                result['message'] = "Could not extract metadata"
+                return result
+            
+            result['metadata'] = metadata
+            
+            # Generate new filename
+            file_ext = Path(file_path).suffix.lower()
+            new_filename = self.generate_new_filename(metadata, file_ext)
+            
+            if not new_filename:
+                result['message'] = "Could not generate new filename"
+                return result
+            
+            # Get new path
+            new_path = Path(file_path).parent / new_filename
+            
+            # Check if new path is the same as old
+            if new_path == Path(file_path):
+                result['success'] = True
+                result['message'] = "Filename already correct"
+                return result
+            
+            # Check if new file already exists
+            if new_path.exists() and new_path != Path(file_path):
+                result['message'] = f"Target file already exists: {new_filename}"
+                return result
+            
+            result['new_path'] = str(new_path)
+            
+            if dry_run:
+                result['success'] = True
+                result['message'] = f"Would rename to: {new_filename}"
+            else:
+                # Perform actual rename
+                os.rename(file_path, new_path)
+                result['success'] = True
+                result['message'] = f"Renamed to: {new_filename}"
+                
+        except Exception as e:
+            result['message'] = f"Error: {str(e)}"
+        
+        return result
+    
+    def scan_library(self, recursive: bool = True) -> list:
+        """Scan library for audio files"""
+        audio_extensions = {'.mp3', '.flac', '.m4a', '.mp4', '.mp2', '.mp1'}
+        audio_files = []
+        
+        if recursive:
+            for root, dirs, files in os.walk(self.library_path):
+                for file in files:
+                    if Path(file).suffix.lower() in audio_extensions:
+                        audio_files.append(os.path.join(root, file))
+        else:
+            for file in os.listdir(self.library_path):
+                file_path = os.path.join(self.library_path, file)
+                if os.path.isfile(file_path) and Path(file).suffix.lower() in audio_extensions:
+                    audio_files.append(file_path)
+        
+        return sorted(audio_files)
+    
+    def batch_rename(self, dry_run: bool = True, recursive: bool = True) -> dict:
+        """Batch rename all files in library"""
+        results = {
+            'total_files': 0,
+            'processed': 0,
+            'renamed': 0,
+            'errors': 0,
+            'skipped': 0,
+            'details': []
+        }
+        
+        audio_files = self.scan_library(recursive)
+        results['total_files'] = len(audio_files)
+        
+        self.log_func(f"🔍 [Scanning] Found {len(audio_files)} audio files")
+        
+        for i, file_path in enumerate(audio_files, 1):
+            self.log_func(f"📁 [{i}/{len(audio_files)}] Processing: {os.path.basename(file_path)}")
+            
+            result = self.rename_file(file_path, dry_run)
+            results['details'].append(result)
+            results['processed'] += 1
+            
+            if result['success']:
+                if result['new_path'] and result['new_path'] != file_path:
+                    results['renamed'] += 1
+                    self.log_func(f"  ✅ {result['message']}")
+                else:
+                    results['skipped'] += 1
+                    self.log_func(f"  ℹ️ {result['message']}")
+            else:
+                results['errors'] += 1
+                self.log_func(f"  ❌ {result['message']}")
+        
+        return results
+    
+    def preview_changes(self, recursive: bool = True, limit: int = 50) -> list:
+        """Preview changes for first N files"""
+        audio_files = self.scan_library(recursive)[:limit]
+        preview = []
+        
+        for file_path in audio_files:
+            metadata = self.extract_metadata(file_path)
+            if metadata:
+                file_ext = Path(file_path).suffix.lower()
+                new_filename = self.generate_new_filename(metadata, file_ext)
+                
+                if new_filename and new_filename != os.path.basename(file_path):
+                    preview.append({
+                        'old_name': os.path.basename(file_path),
+                        'new_name': new_filename,
+                        'artist': metadata.get('artist', 'Unknown'),
+                        'title': metadata.get('title', 'Unknown'),
+                        'path': file_path
+                    })
+        
+        return preview
+
+def create_file_renamer(library_path: str, log_func=None) -> FileRenamer:
+    """Factory function to create FileRenamer instance"""
+    return FileRenamer(library_path, log_func)

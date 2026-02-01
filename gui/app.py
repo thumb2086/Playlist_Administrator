@@ -446,7 +446,7 @@ class PlaylistApp:
 
     def update_progress(self, current, total, eta=None):
         now = time.time()
-        if now - self.last_progress_update < 0.1 and current < total: # Throttle, but always show final update
+        if now - self.last_progress_update < 0.1 and current is not None and total is not None and current < total: # Throttle, but always show final update
             return
         self.last_progress_update = now
         
@@ -597,7 +597,7 @@ class PlaylistApp:
             pl_files.extend(glob.glob(os.path.join(playlists_path, f"*{ext}")))
         
         # Batch check completeness
-        report = get_playlist_completeness_report(pl_files, library_path, audio_files_cache=audio_cache)
+        report = get_playlist_completeness_report(pl_files, library_path)
 
         for url in urls:
             name = url_names.get(url, url)
@@ -1046,9 +1046,18 @@ class PlaylistApp:
     def open_export_window(self):
         win = tk.Toplevel(self.root)
         win.title(_('export_win_title'))
-        win.geometry("500x550")
+        win.geometry("500x600")
         
         tk.Label(win, text=_('export_win_label')).pack(pady=5)
+        
+        # Quality Selection Section
+        quality_frame = tk.LabelFrame(win, text=_('export_quality_label'), font=("Microsoft JhengHei", 10, "bold"), padx=10, pady=10)
+        quality_frame.pack(fill='x', padx=10, pady=5)
+        
+        self.export_quality_var = tk.StringVar(value="original")
+        tk.Radiobutton(quality_frame, text=_('export_quality_original'), variable=self.export_quality_var, value="original", font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
+        tk.Radiobutton(quality_frame, text=_('export_quality_mp3'), variable=self.export_quality_var, value="mp3", font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
+        tk.Radiobutton(quality_frame, text=_('export_quality_flac'), variable=self.export_quality_var, value="flac", font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
         
         playlists_path = self.config['playlists_path']
         files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
@@ -1112,13 +1121,14 @@ class PlaylistApp:
                 return
 
         selected_files = [self.export_files_map[i] for i in selections]
+        export_quality = self.export_quality_var.get()
         win.destroy()
         
-        threading.Thread(target=self._export_thread_selective, args=(selected_files,), daemon=True).start()
+        threading.Thread(target=self._export_thread_selective, args=(selected_files, export_quality), daemon=True).start()
 
-    def _export_thread_selective(self, selected_files):
+    def _export_thread_selective(self, selected_files, export_quality):
         try:
-            export_usb_logic(self.config, selected_files, self.log)
+            export_usb_logic(self.config, selected_files, self.log, export_quality=export_quality)
         except Exception as e:
              self.log(_('export_error', e))
 

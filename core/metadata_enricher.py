@@ -286,7 +286,11 @@ class MetadataEnricher:
                 if progress_callback:
                     progress_callback(i, total_files)
                 
-                success = self.enrich_file_metadata(file_info, log_func)
+                # Extract path and song name
+                file_path = file_info['path']
+                song_name = os.path.splitext(file_info['filename'])[0]
+                
+                success = self.enrich_file_metadata(file_path, song_name, log_func)
                 if success:
                     successful_enrichments += 1
                 

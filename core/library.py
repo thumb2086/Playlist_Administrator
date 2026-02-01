@@ -202,16 +202,25 @@ def get_normalized_tokens(text):
     # Handles 'feat.', 'ft.', 'vs', 'vs.', '&', ',', ' x '
     text = re.sub(r'\s*(feat|ft|vs)\.?\s*|\s*[&,x]\s*', ' ', text)
 
-    # 4. Remove content in brackets (e.g., (Live), [Remix], 【MV】)
-    # Also removes the brackets themselves
-    text = re.sub(r"[\(\[【][^\)\]】]*[\)\]】]", " ", text)
+    # 4. Remove content in brackets for common markers, but preserve meaningful content
+    # Only remove patterns like (Live), [Remix], 【MV】, 【Official】, 【Lyric Video】 etc.
+    text = re.sub(r"[\(\[【](?:live|remix|mv|official|lyrics? video|lyric video|動態歌詞版|歌詞版)[^\)\]】]*[\)\]】]", " ", text, flags=re.IGNORECASE)
+    
+    # For other brackets, just remove the brackets but keep the content
+    text = re.sub(r"[\(\[【]", " ", text)
+    text = re.sub(r"[\)\]】]", " ", text)
 
-    # 5. Replace all non-alphanumeric characters (excluding Chinese and Japanese) with spaces
+    # 5. Add spaces between Latin letters and Chinese characters to improve tokenization
+    # This helps separate "BIDO曾愷妤" into "BIDO 曾愷妤"
+    text = re.sub(r'([a-zA-Z])([\u4e00-\u9fff])', r'\1 \2', text)
+    text = re.sub(r'([\u4e00-\u9fff])([a-zA-Z])', r'\1 \2', text)
+
+    # 6. Replace all non-alphanumeric characters (excluding Chinese and Japanese) with spaces
     # This will also handle underscores and other symbols
     # Include Japanese Hiragana (\u3040-\u309f) and Katakana (\u30a0-\u30ff)
     text = re.sub(r"[^a-z0-9\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]+", " ", text)
 
-    # 6. Split into tokens, remove empty strings, and sort
+    # 7. Split into tokens, remove empty strings, and sort
     return sorted([t for t in text.split() if t])
 
 def build_library_index(audio_files):
@@ -222,31 +231,362 @@ def build_library_index(audio_files):
         # The key is a tuple of sorted tokens, making it order-independent
         tokens_tuple = tuple(get_normalized_tokens(name_no_ext))
         if tokens_tuple:
-            index[tokens_tuple] = file_path
+            # Store list of files for collision handling (duplicates)
+            if tokens_tuple not in index:
+                index[tokens_tuple] = []
+            index[tokens_tuple].append(file_path)
     return index
 
-def find_song_in_library(song_name, library_source):
-    """ Tries to find a song using either a pre-built library index (dict) or a file list (list). """
+
+
+def build_metadata_index(audio_files, log_func=None):
+    """
+    Reads metadata from all files and builds an index:
+    tuple(normalized_title_tokens) -> list[file_path]
+     This is an O(N) operation to be done once, instead of O(N) per missing song.
+    """
+    try:
+        from mutagen.flac import FLAC
+        from mutagen.id3 import ID3, EasyID3
+        from mutagen.mp4 import MP4
+        from pathlib import Path
+    except ImportError:
+        return {}
+
+    index = {}
+    count = 0
+    
+    # Only scan if check enabled
+    if not audio_files:
+        return index
+
+    for file_path in audio_files:
+        try:
+            if not os.path.exists(file_path): continue
+            
+            file_ext = Path(file_path).suffix.lower()
+            metadata_title = None
+            
+            if file_ext == '.flac':
+                try:
+                    audio = FLAC(file_path)
+                    metadata_title = audio.get('TITLE', [None])[0]
+                except: pass
+            elif file_ext in ['.mp3', '.mp2', '.mp1']:
+                try:
+                    try:
+                        audio = EasyID3(file_path)
+                        metadata_title = audio.get('title', [None])[0]
+                    except:
+                        audio = ID3(file_path)
+                        if 'TIT2' in audio:
+                            metadata_title = str(audio['TIT2'])
+                except: pass
+            elif file_ext in ['.m4a', '.mp4']:
+                try:
+                    audio = MP4(file_path)
+                    metadata_title = audio.get('\xa9nam', [None])[0]
+                except: pass
+            
+            if metadata_title:
+                tokens = tuple(get_normalized_tokens(metadata_title))
+                if tokens:
+                    if tokens not in index:
+                        index[tokens] = []
+                    index[tokens].append(file_path)
+                    count += 1
+                        
+        except Exception:
+            continue
+            
+    if log_func and count > 0:
+        pass 
+        
+    return index
+
+def find_song_in_library(song_name, library_source, metadata_index=None, artist=None):
+    """ 
+    Tries to find a song using either a pre-built library index (dict) or a file list (list). 
+    Supports verifying artist if provided (fuzzy match on metadata or path).
+    """
     query_tokens = tuple(get_normalized_tokens(song_name))
     if not query_tokens:
         return None
     
+    # If explicit artist provided, we use it.
+    # Otherwise, try to extract from "Artist - Title" format in the query itself.
+    target_artist = artist
+    
+    title_part = song_name
+    if ' - ' in song_name:
+         parts = song_name.split(' - ', 1)
+         if len(parts) == 2:
+             if not target_artist:
+                 target_artist = parts[0].strip()
+             title_part = parts[1].strip()
+    
+    title_tokens = tuple(get_normalized_tokens(title_part))
+    
+    # Helper to check if a candidate file matches the artist
+    def verify_artist(file_path, target_artist):
+        if not target_artist: return True # No artist to check -> accept match
+        
+        target_tokens = set(get_normalized_tokens(target_artist))
+        if not target_tokens: return True
+        
+        # 1. Check Metadata
+        try:
+            from mutagen.flac import FLAC
+            from mutagen.id3 import EasyID3
+            from mutagen.mp4 import MP4
+            
+            meta_artist = None
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext == '.flac':
+                a = FLAC(file_path)
+                meta_artist = a.get('ARTIST', [None])[0]
+            elif ext == '.mp3':
+                a = EasyID3(file_path)
+                meta_artist = a.get('artist', [None])[0]
+            elif ext == '.m4a':
+                a = MP4(file_path)
+                meta_artist = a.get('\xa9ART', [None])[0]
+                
+            if meta_artist:
+                meta_tokens = set(get_normalized_tokens(meta_artist))
+                # Intersection check
+                if target_tokens & meta_tokens:
+                    return True
+        except: pass
+        
+        # 2. Check File Path (FolderName often is Artist, or Filename is Artist - Title)
+        # e.g. Music/Artist Name/Song.mp3 OR Music/Artist - Song.mp3
+        path_str = os.path.normpath(file_path).lower()
+        path_parts = path_str.split(os.sep)
+        
+        # Check standard parts (folders)
+        for part in path_parts:
+            part_tokens = set(get_normalized_tokens(part))
+            if target_tokens & part_tokens:
+                 return True
+                 
+        return False
+
+    candidates = []
+
     # Check if library_source is a dictionary (index) or list (file list)
     if isinstance(library_source, dict):
-        # Fast O(1) lookup using the index
-        return library_source.get(query_tokens)
+        # Flatten logic helper
+        def collect_candidates(key_tokens):
+            if not key_tokens: return
+            paths = library_source.get(key_tokens)
+            if paths:
+                # Handle both new list format and legacy string format just in case
+                if isinstance(paths, list):
+                    candidates.extend(paths)
+                else:
+                    candidates.append(paths)
+
+        # 1. Exact full match
+        collect_candidates(query_tokens)
+        
+        # 2. Title-only match (renamed files)
+        if not candidates and title_tokens:
+            collect_candidates(title_tokens)
+        
+        # 3. Subset matching (slow fallback if no direct hits)
+        if not candidates and title_tokens:
+             for index_tokens, paths in library_source.items():
+                if len(title_tokens) > 0 and all(token in index_tokens for token in title_tokens):
+                    coverage = len(title_tokens) / len(index_tokens) if len(index_tokens) > 0 else 0
+                    if coverage >= 0.1:
+                         if isinstance(paths, list):
+                             candidates.extend(paths)
+                         else:
+                             candidates.append(paths)
+
     elif isinstance(library_source, list):
-        # Fallback to O(n) search for backward compatibility with downloader.py
+        # Legacy List Mode
+        # Fallback to O(n) search
         for file_path in library_source:
             filename = os.path.basename(file_path)
             name_no_ext = os.path.splitext(filename)[0]
             file_tokens = tuple(get_normalized_tokens(name_no_ext))
+            
             if file_tokens == query_tokens:
-                return file_path
+                candidates.append(file_path)
+                
+            elif title_tokens and file_tokens == title_tokens:
+                candidates.append(file_path)
+                
+            elif title_tokens:
+                 if len(title_tokens) > 0 and all(token in file_tokens for token in title_tokens):
+                     coverage = len(title_tokens) / len(file_tokens) if len(file_tokens) > 0 else 0
+                     if coverage >= 0.1:
+                         candidates.append(file_path)
+
+    # 3. Metadata Index Lookup (Pass 2)
+    current_best_candidate = None
+    
+    if metadata_index:
+        # Check full name vs metadata title
+        res_paths = metadata_index.get(query_tokens)
+        if res_paths: 
+             if isinstance(res_paths, list): candidates.extend(res_paths)
+             else: candidates.append(res_paths)
+        
+        # Check title vs metadata title
+        if title_tokens:
+            res_paths = metadata_index.get(title_tokens)
+            if res_paths: 
+                if isinstance(res_paths, list): candidates.extend(res_paths)
+                else: candidates.append(res_paths)
+            
+            # Fuzzy/Subset Check on Metadata Index
+            if not candidates:
+                for meta_tokens, paths in metadata_index.items():
+                    if not meta_tokens: continue
+                    is_match = False
+                    
+                    # Case A: Query is subset of Metadata
+                    if len(title_tokens) > 0 and len(meta_tokens) >= len(title_tokens):
+                        if all(token in meta_tokens for token in title_tokens):
+                             coverage = len(title_tokens) / len(meta_tokens)
+                             if coverage >= 0.3: is_match = True
+
+                    # Case B: Metadata is subset of Query
+                    elif len(meta_tokens) > 0 and len(title_tokens) >= len(meta_tokens):
+                        if all(token in title_tokens for token in meta_tokens):
+                             coverage = len(meta_tokens) / len(title_tokens)
+                             if coverage >= 0.5: is_match = True
+                    
+                    if is_match:
+                         if isinstance(paths, list): candidates.extend(paths)
+                         else: candidates.append(paths)
+
+    # --- FINAL SELECTION ---
+    if not candidates:
         return None
+    
+    # Remove duplicates while preserving order
+    unique_candidates = []
+    seen = set()
+    for c in candidates:
+        if c not in seen:
+            unique_candidates.append(c)
+            seen.add(c)
+    
+    # If artist is provided, filter or rank candidates
+    if target_artist:
+        verified_candidates = []
+        for c in unique_candidates:
+            if verify_artist(c, target_artist):
+                verified_candidates.append(c)
+        
+        if verified_candidates:
+            return verified_candidates[0] # Return best verified match
+            
+    # Default: Return first candidate found (legacy behavior)
+    return unique_candidates[0]
+
+def _search_by_metadata(title_tokens, file_list):
+    """Helper function to search files by metadata title - LEGACY SLOW FALLBACK"""
+    try:
+        from mutagen.flac import FLAC
+        from mutagen.id3 import ID3, EasyID3
+        from mutagen.mp4 import MP4
+        from pathlib import Path
+        
+        # Search by metadata title
+        for file_path in file_list:
+            try:
+                file_ext = Path(file_path).suffix.lower()
+                metadata_title = None
+                
+                if file_ext == '.flac':
+                    audio = FLAC(file_path)
+                    metadata_title = audio.get('TITLE', [None])[0]
+                elif file_ext in ['.mp3', '.mp2', '.mp1']:
+                    try:
+                        audio = EasyID3(file_path)
+                        metadata_title = audio.get('title', [None])[0]
+                    except:
+                        try:
+                            audio = ID3(file_path)
+                            if 'TIT2' in audio:
+                                metadata_title = str(audio['TIT2'])
+                        except:
+                            continue
+                elif file_ext in ['.m4a', '.mp4']:
+                    audio = MP4(file_path)
+                    metadata_title = audio.get('\xa9nam', [None])[0]
+                
+                if metadata_title:
+                    # Compare normalized tokens - use subset matching for flexibility
+                    metadata_tokens = tuple(get_normalized_tokens(metadata_title))
+                    
+                    # First try exact match
+                    if metadata_tokens == title_tokens:
+                        return file_path
+                    
+                    # Then try subset matching - all search tokens should be in metadata tokens
+                    if len(title_tokens) > 0:
+                        if all(token in metadata_tokens for token in title_tokens):
+                            # Additional check: ensure at least 30% of metadata tokens are covered
+                            # to avoid false positives with very short search terms
+                            coverage = len(title_tokens) / len(metadata_tokens) if len(metadata_tokens) > 0 else 0
+                            if coverage >= 0.3:  # At least 30% coverage
+                                return file_path
+                        
+            except Exception:
+                continue  # Skip files that can't be read
+                
+    except ImportError:
+        pass  # mutagen not available, skip metadata search
+        
+    return None
+
+def find_song_prefer_flac(song_name, library_source):
+    """ Find song in library, preferring FLAC over other formats """
+    query_tokens = tuple(get_normalized_tokens(song_name))
+    if not query_tokens:
+        return None
+    
+    found_files = []
+    
+    # Check if library_source is a dictionary (index) or list (file list)
+    if isinstance(library_source, dict):
+        # FAST PATH: Dictionary Lookup
+        # library_source is {tokens: [path1, path2, ...]}
+        paths = library_source.get(query_tokens)
+        if paths:
+            if isinstance(paths, list):
+                found_files = paths
+            else:
+                found_files = [paths]
+    
+    elif isinstance(library_source, list):
+        # SLOW PATH: Linear Scan (Legacy)
+        audio_files = library_source
+        for file_path in audio_files:
+            filename = os.path.basename(file_path)
+            name_no_ext = os.path.splitext(filename)[0]
+            file_tokens = tuple(get_normalized_tokens(name_no_ext))
+            if file_tokens == query_tokens:
+                found_files.append(file_path)
     else:
-        # Unsupported type
         return None
+    
+    if not found_files:
+        return None
+    
+    # Prefer FLAC first
+    for file_path in found_files:
+        if file_path.lower().endswith('.flac'):
+            return file_path
+    
+    # Then return any other format
+    return found_files[0]
 
 def rename_explicit_files(library_path, log_func):
     """ Renames files starting with 'E' prefix and standardizes all filenames to be safe for players """
@@ -275,7 +615,9 @@ def rename_explicit_files(library_path, log_func):
             new_path = os.path.join(dir_name, safe_name)
             if not os.path.exists(new_path):
                 try:
-                    os.rename(f, new_path)
+                    # Use shutil.move to handle cross-drive operations
+                    import shutil
+                    shutil.move(f, new_path)
                     count += 1
                 except: pass
             else:
@@ -378,7 +720,13 @@ def move_unsorted_songs(config, log_func):
                         rel_path = os.path.relpath(abs_file_path, abs_playlists_path)
                         # Convert to forward slashes for M3U compatibility
                         rel_path = rel_path.replace('\\', '/')
-                    except:
+                    except ValueError:
+                        # Cross-drive issue: use absolute path or fallback
+                        # Use forward slashes and remove drive letter for compatibility
+                        rel_path = abs_file_path.replace('\\', '/')
+                        if ':' in rel_path:
+                            # Remove drive letter for cross-drive compatibility
+                            rel_path = rel_path.split(':', 1)[1].lstrip('/\\')
                         # Fallback to absolute path if relative path fails
                         rel_path = abs_file_path
                     
@@ -466,6 +814,8 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             song_name = os.path.splitext(os.path.basename(audio_path))[0]
             songs_missing_lyrics.append((song_name, audio_path))
 
+    # First Pass: Filename Index Check (Fast)
+    # First Pass: Filename Index Check (Fast)
     for pl_file in files:
         if stats and stats.stop_event and stats.stop_event.is_set():
              log_func(_('task_stopped'))
@@ -478,11 +828,48 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                   log_func(_('task_stopped'))
                   return
 
-             existing_path = find_song_in_library(song_name, library_index)
-             if not existing_path:
+             # Use prefer_flac logic when downloading FLAC
+             found = False
+             
+             if audio_format == 'flac':
+                 existing_path = find_song_prefer_flac(song_name, library_index)
+                 # Only consider as existing if we have FLAC
+                 if existing_path and existing_path.lower().endswith('.flac'):
+                     found = True
+             else:
+                 existing_path = find_song_in_library(song_name, library_index)
+                 if existing_path:
+                     found = True
+             
+             if not found:
                  # Check if already in list to avoid duplicates across diff playlists
                  if not any(d['name'] == song_name for d in songs_to_download):
                      songs_to_download.append({'name': song_name, 'playlist': pl_name})
+    
+    # Second Pass: Deep Metadata Scan (Slower but necessary for renamed files)
+    if songs_to_download:
+        log_func(f"  🔍 初步掃描: 發現 {len(songs_to_download)} 首缺歌，正在進行深度 Metadata 比對...")
+        
+        # Build metadata index (Scan all files once)
+        metadata_index = build_metadata_index(audio_files_cache, log_func)
+        
+        still_missing = []
+        for item in songs_to_download:
+            song_name = item['name']
+            
+            # Check against metadata index
+            found_path = find_song_in_library(song_name, library_index, metadata_index=metadata_index)
+            
+            if found_path:
+                # Found it via metadata!
+                 pass 
+            else:
+                still_missing.append(item)
+                
+        if len(songs_to_download) != len(still_missing):
+            log_func(f"  ✅ 透過 Metadata 找回 {len(songs_to_download) - len(still_missing)} 首歌")
+            
+        songs_to_download = still_missing
 
     total_missing = len(songs_to_download)
     log_func(_('stats_complete', total_missing))
@@ -511,7 +898,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 if song_eta is not None and isinstance(song_eta, (int, float)):
                     # Use the provided ETA directly, even if small
                     eta_seconds = song_eta
-                elif current > 0 and total_downloaded_time > 0:
+                elif current and current > 0 and total_downloaded_time > 0:
                     # Calculate overall ETA based on progress and average time per song
                     avg_time_per_song = total_downloaded_time / max(1, current)
                     remaining_songs = total - current
@@ -530,7 +917,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     eta_sec = int(eta_seconds % 60)
                     overall_eta = f"{eta_min}:{eta_sec:02d}"
                 else:
-                    overall_eta = "即將完成" if current > 0 else None
+                    overall_eta = "即將完成" if current and current > 0 else None
                 
                 progress_func(current, total, overall_eta)
             else:
@@ -576,7 +963,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             def song_progress_callback(current, total, eta=None):
                 # Update overall progress with current song progress
                 # Use current_dl + (current/total) to show progress within current song
-                if total > 0:
+                if total and total > 0:
                     song_progress = current / total
                     overall_progress = current_dl + song_progress
                 else:
@@ -600,7 +987,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                         remaining_songs = total_missing - current_dl
                         overall_eta = eta * remaining_songs
                         progress_with_overall_eta(overall_progress, total_missing, overall_eta)
-                    elif total > 0 and current > 0:
+                    elif total and total > 0 and current > 0:
                         # If we have current song progress, estimate based on current song's progress rate
                         song_progress_ratio = current / total
                         if song_progress_ratio > 0:
@@ -837,7 +1224,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             def metadata_progress(current, total):
                 if progress_func:
                     # Convert to percentage for display
-                    percentage = (current / total) * 100 if total > 0 else 0
+                    percentage = (current / total) * 100 if total and total > 0 else 0
                     progress_func(percentage, 100)
             
             enriched_count = enricher.enrich_library_metadata(library_path, log_func, metadata_progress)
@@ -849,40 +1236,59 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 log_func('ℹ️ No files needed metadata enrichment')
                 
         except Exception as e:
-            log_func(f'⚠️ Metadata enrichment failed: {str(e)}')
+            log_func(f' Metadata enrichment failed: {str(e)}')
     
     log_func(_('update_complete'))
 
-def get_playlist_completeness_report(playlists, library_path, audio_files_cache=None):
-    """Returns a dict {pl_file: (is_complete, missing_count, total_count)}"""
-    report = {}
+def get_playlist_completeness_report(files, library_path):
+    """Returns a dict mapping file -> (is_complete, missing_count, total_count)"""
+    from utils.i18n import _
     
-    if audio_files_cache is None:
-        search_pattern = os.path.join(library_path, "**", "*")
-        all_files = glob.glob(search_pattern, recursive=True)
-        audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
-
-    # Build index for this report
+    # Build library index for fast lookup
+    search_pattern = os.path.join(library_path, "**", "*")
+    all_files = glob.glob(search_pattern, recursive=True)
+    audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
     library_index = build_library_index(audio_files_cache)
-
-    for pl_file in playlists:
+    
+    # Get current audio format preference
+    from utils.config import load_config
+    config = load_config()
+    audio_format = config.get('audio_format', 'mp3')
+    
+    report = {}
+    for pl_file in files:
         songs = parse_playlist(pl_file)
-        if not songs:
-            report[pl_file] = (True, 0, 0)
-            continue
-            
         missing = 0
         for song_name in songs:
-            if not find_song_in_library(song_name, library_index):
-                missing += 1
+            # Use prefer_flac logic when audio_format is flac
+            if audio_format == 'flac':
+                existing = find_song_prefer_flac(song_name, library_index)
+                # Only consider as complete if we have FLAC
+                if not existing or not existing.lower().endswith('.flac'):
+                    missing += 1
+            else:
+                if not find_song_in_library(song_name, library_index):
+                    missing += 1
         
         report[pl_file] = (missing == 0, missing, len(songs))
     
     return report
 
-def export_usb_logic(config, selected_playlists, log_func):
+def export_usb_logic(config, selected_playlists, log_func, export_quality='original'):
     from utils.i18n import _
+    from core.audio_converter import convert_audio_if_needed, check_ffmpeg_available
+    import tempfile
+    
     log_func(_('export_start'))
+    
+    # Check if conversion is needed and ffmpeg is available
+    if export_quality != 'original':
+        if not check_ffmpeg_available():
+            log_func('⚠️ FFmpeg not found. Keeping original quality.')
+            export_quality = 'original'
+        else:
+            log_func(f'🔄 Export quality: {export_quality.upper()}')
+    
     export_path = config['export_path']
     library_path = config['library_path']
     
@@ -911,14 +1317,41 @@ def export_usb_logic(config, selected_playlists, log_func):
         log_func(_('exporting_pl', pl_name))
         
         count = 0
+        converted_files = []  # Track converted files for cleanup
+        
         for song_name in songs:
             src = find_song_in_library(song_name, audio_files_cache)
             if src and os.path.exists(src):
                 try:
-                    shutil.copy2(src, dest_folder)
+                    # Handle conversion if needed
+                    if export_quality != 'original':
+                        final_src, was_converted = convert_audio_if_needed(src, export_quality, log_func)
+                        if was_converted:
+                            converted_files.append(final_src)
+                    else:
+                        final_src = src
+                    
+                    # Determine output filename based on target format
+                    if export_quality != 'original':
+                        base_name = os.path.splitext(os.path.basename(final_src))[0]
+                        dest_filename = f"{base_name}.{export_quality}"
+                    else:
+                        dest_filename = os.path.basename(final_src)
+                    
+                    dest_path = os.path.join(dest_folder, dest_filename)
+                    shutil.copy2(final_src, dest_path)
                     count += 1
+                    
                 except Exception as e:
                     log_func(_('copy_error', e))
+        
+        # Clean up temporary converted files
+        for temp_file in converted_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except:
+                pass  # Ignore cleanup errors
         
         log_func(_('exported_count', count, len(songs)))
         

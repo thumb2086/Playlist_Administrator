@@ -32,6 +32,8 @@ class YdlLogger:
             return
         if "does not support cookies" in msg:
             return
+        if "PO Token" in msg or "po_token" in msg:
+            return
         self.log_func(_('ytdlp_warn', strip_ansi(msg)))
     def error(self, msg):
         from utils.i18n import _
@@ -186,7 +188,7 @@ def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enri
         log_func(f"  ⚠️ [Metadata Error] {str(e)}")
         return False
 
-def download_lyrics(song_name, output_path, log_func):
+def download_lyrics(song_name, output_path, log_func, failed_cache=None):
     """Downloads synced lyrics (.lrc) for a song using direct Lrclib API with Traditional Chinese conversion"""
     try:
         import urllib.request
@@ -197,6 +199,11 @@ def download_lyrics(song_name, output_path, log_func):
         import re
         from zhconv import convert
         import ssl
+        
+        # Check if this song is in failed cache
+        if failed_cache and song_name in failed_cache:
+            log_func(f"  ℹ️ [Lyrics Skipped] {song_name} (previously failed)")
+            return False
         
         # Advanced cleaning: Remove common suffixes that confuse lyrics search
         clean_query = song_name
@@ -247,15 +254,12 @@ def download_lyrics(song_name, output_path, log_func):
                         
                 return best_match
 
-        max_retries = 3
+        max_retries = 1  # Only try once
         
         for attempt in range(max_retries):
             try:
-                # Progressive delay
-                if attempt > 0:
-                    backoff = (2 ** attempt) + random.uniform(1, 3)
-                    log_func(f"  ⚠️ [Network] {song_name} - Retrying in {backoff:.1f}s...")
-                    time.sleep(backoff)
+                # No progressive delay for single attempt
+                # No retry messages for single attempt
 
                 for idx, query in enumerate(search_queries):
                     # Reduce timeout slightly on retries to fail fast and try next
@@ -273,20 +277,26 @@ def download_lyrics(song_name, output_path, log_func):
                     time.sleep(0.5)
                 
                 # If we get here, no lyrics found for any query in this attempt
-                # If it's the last attempt, we failed
-                if attempt == max_retries - 1:
-                    log_func(f"  ℹ️ [Lrclib Not Found] {song_name}")
-                    return False
+                # Since we only try once, add to failed cache and return False
+                if failed_cache is not None:
+                    failed_cache[song_name] = True
+                log_func(f"  ℹ️ [Lrclib Not Found] {song_name}")
+                return False
                     
             except Exception as e:
                 error_msg = str(e).lower()
                 is_net_error = any(k in error_msg for k in ['timeout', 'timed out', 'reset', 'aborted', 'eof', 'ssl'])
                 
                 if is_net_error:
-                    if attempt == max_retries - 1:
-                        log_func(f"  🔌 [Network Failed] {song_name}: {error_msg[:50]}")
-                    continue
+                    # Add to failed cache for network errors too
+                    if failed_cache is not None:
+                        failed_cache[song_name] = True
+                    log_func(f"  🔌 [Network Failed] {song_name}: {error_msg[:50]}")
+                    return False
                 else:
+                    # Add to failed cache for other errors too
+                    if failed_cache is not None:
+                        failed_cache[song_name] = True
                     log_func(f"  ❌ [Lyrics Error] {song_name}: {str(e)[:50]}")
                     return False
 
@@ -298,8 +308,11 @@ def download_lyrics(song_name, output_path, log_func):
 def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None, progress_callback=None, current_dl=0, use_dab_lossless=False, use_dab_metadata=False, dab_credentials=None, config=None):
     """Downloads song in specified format (mp3 or flac)"""
     
+    # Create a simple failed lyrics cache for this session
+    lyrics_failed_cache = {}
+    
     # If DAB Music is requested and credentials are provided
-    if use_dab and dab_credentials:
+    if use_dab_lossless and dab_credentials:
         try:
             dab_downloader = create_dab_downloader(dab_credentials['email'], dab_credentials['password'])
             success = dab_downloader.download_song(
@@ -360,7 +373,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
             
             # Get progress data
             downloaded = d.get('downloaded_bytes', 0)
-            total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
             speed = d.get('speed', 0)
             eta = d.get('eta', 0)
             
@@ -369,7 +382,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
             
             # Update speed tracking for smoothing
             current_time = time.time()
-            if speed > 0:
+            if speed and speed > 0:
                 last_speed_time[0] = current_time
                 last_speed_value[0] = speed
             
@@ -414,7 +427,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                         eta_sec = eta_numeric % 60
                         eta_str = f"{int(eta_min)}:{int(eta_sec):02d}"
                         eta_seconds = eta_numeric
-                    elif speed > 0 and total > downloaded:
+                    elif speed and speed > 0 and total > downloaded:
                         # Calculate ETA based on current speed
                         remaining_bytes = total - downloaded
                         eta_seconds = remaining_bytes / speed
@@ -438,24 +451,31 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                 
                 # Call progress callback if provided
                 if progress_callback:
-                    progress_callback(current_dl, total, eta_seconds if eta_seconds > 0 else None)
+                    progress_callback(current_dl, total, eta_seconds if eta_seconds and eta_seconds > 0 else None)
                 
         elif d['status'] == 'finished':
             log_func("  ✅ Download complete, converting...")
     
-    # Check if we already have it
-    existing = find_song_in_library(song_name, file_list)
-    if existing:
-        ext = os.path.splitext(existing)[1].lower().replace('.', '')
-        if ext == audio_format:
+    # Check if we already have it - use prefer_flac logic when downloading FLAC
+    if audio_format == 'flac':
+        from core.library import find_song_prefer_flac
+        existing = find_song_prefer_flac(song_name, file_list)
+        if existing and existing.lower().endswith('.flac'):
             return existing
+        # If existing is not FLAC, we'll continue to download FLAC even if MP3 exists
+    else:
+        existing = find_song_in_library(song_name, file_list)
+        if existing:
+            ext = os.path.splitext(existing)[1].lower().replace('.', '')
+            if ext == audio_format:
+                return existing
 
     clean_name = sanitize_filename(song_name)
     out_template = os.path.join(library_path, f"{clean_name}.%(ext)s")
 
-    # Configure yt-dlp options
+    # Configure yt-dlp options with PO Token bypass
     ydl_opts = {
-        'format': 'bestaudio/best',
+        'format': 'ba/b',  # bestaudio/best - 允許降級到影片再轉檔
         'outtmpl': out_template,
         'quiet': True,
         'no_warnings': True,
@@ -470,6 +490,28 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         'keepvideo': False,
         'windowsfilenames': True,
         'restrictfilenames': False,
+        # 加入繞過 PO Token 限制的關鍵設定
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'web'],  # 使用多個客戶端繞過限制
+                'player_skip': ['webpage'],
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        },
+        'socket_timeout': 60,
+        'retries': 3,
+        'fragment_retries': 10,
+        'skip_unavailable_fragments': True,
+        'ignoreerrors': True,
+        'no_check_certificates': True,
     }
     
     # Add cookies if available
@@ -479,94 +521,63 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
 
     # Generate search candidates
     candidates = []
+    
+    # helper to clean query aggressively
+    def clean_query_text(text):
+        suffixes = [
+            r'\s*\(.*?\)', r'\s*\[.*?\]', r'\s*【.*?】', 
+            r'\s*-?\s*Official\s*Video', r'\s*-?\s*Music\s*Video', 
+            r'\s*-?\s*TV\s*Version', r'\s*-?\s*MV', r'\s*-?\s*Lyrics',
+            r'\s*-?\s*HD', r'\s*-?\s*4K',
+            r'\s*-?\s*八大.*?$',  # Strip long TV show descriptions common in user's errors
+            r'\s*-?\s*綜合台.*?$',  # Chinese TV station suffixes
+            r'\s*-?\s*戲劇台.*?$',  # Chinese drama channel suffixes
+            r'\s*-?\s*雙頻道.*?$',  # Dual channel mentions
+            r'\s*-?\s*熱播.*?$',  # Hot/broadcast mentions
+            r'\s*-?\s*韓劇.*?$',  # Korean drama mentions
+            r'\s*-?\s*片頭曲.*?$',  # Opening theme
+            r'\s*-?\s*片尾曲.*?$',  # Ending theme
+        ]
+        q = text
+        for s in suffixes:
+            q = re.sub(s, '', q, flags=re.IGNORECASE)
+        return q.replace(',', ' ').replace('\xa0', ' ').strip()
+
     # 1. Base clean query
-    base_query = song_name.replace(',', ' ').replace('\xa0', ' ').strip()
+    base_query = clean_query_text(song_name)
     base_query = ' '.join(base_query.split())
-    candidates.append(base_query)
     
-    # 2. Replace dash with space
+    # 2. Artist + Title (intelligent split)
     if ' - ' in base_query:
-        c2 = base_query.replace(' - ', ' ')
-        if c2 not in candidates: candidates.append(c2)
+        parts = base_query.split(' - ')
+        if len(parts) >= 2:
+            artist = parts[0].strip()
+            title = parts[1].strip()
+            c_at = f"{artist} {title}"
+            c_at = ' '.join(c_at.split())
+            if c_at and c_at not in candidates:
+                candidates.append(c_at)
     
-    # 3. Artist + Title (without dash) for better matching
-    if ' - ' in song_name:
-        parts = song_name.split(' - ', 1)
-        if len(parts) == 2:
-            artist = parts[0].strip().replace(',', ' ').replace('\xa0', ' ')
-            title = parts[1].strip().replace(',', ' ').replace('\xa0', ' ')
-            # Artist Title (no dash)
-            c4 = f"{artist} {title}"
-            c4 = ' '.join(c4.split())
-            if c4 and c4 not in candidates:
-                candidates.append(c4)
+    if base_query not in candidates:
+        candidates.append(base_query)
         
-    # 4. Title only (Last resort)
-    if ' - ' in song_name: # Use original name to find split
-        parts = song_name.rsplit(' - ', 1)
-        if len(parts) > 1:
-            c3 = parts[1].strip()
-            # Clean it too
-            c3 = c3.replace(',', ' ').replace('\xa0', ' ').strip()
-            c3 = ' '.join(c3.split())
-            if c3 and c3 not in candidates:
-                candidates.append(c3)
+    # Limit search query length to avoid issues
+    for i in range(len(candidates)):
+        if len(candidates[i]) > 60:
+            candidates[i] = ' '.join(candidates[i].split()[:8])
     
-    # 5. Add common K-pop search terms
+    # 3. Add common search terms for better relevance
     title_lower = base_query.lower()
     if any(keyword in title_lower for keyword in ['twice', 'blackpink', 'bts', 'seventeen', 'ive', 'nct', 'stray', 'enhypen', 'ateez', 'lisa', 'newjeans', 'tomorrow x together']):
-        # Try with "official" or "mv" for K-pop songs
         c5 = base_query + " official mv"
-        if c5 not in candidates:
+        if len(c5) <= 60 and c5 not in candidates:
             candidates.append(c5)
-        c6 = base_query + " music video"
-        if c6 not in candidates:
-            candidates.append(c6)
-    
-    # 6. Handle songs with parentheses - try without parentheses content
-    if '(' in base_query and ')' in base_query:
-        # Remove content in parentheses for cleaner search
-        base_no_parens = re.sub(r'\s*\([^)]*\)', '', base_query).strip()
-        if base_no_parens and base_no_parens not in candidates:
-            candidates.append(base_no_parens)
-        
-        # Also try with just the main part + "official mv"
-        if base_no_parens:
-            c7 = base_no_parens + " official mv"
-            if c7 not in candidates:
-                candidates.append(c7)
-    
-    # 7. For songs with special characters, try simplified version
-    simplified = re.sub(r'[^\w\s\-]', ' ', base_query)
-    simplified = ' '.join(simplified.split())
-    if simplified and simplified != base_query and simplified not in candidates:
-        candidates.append(simplified)
-    
-    # 8. Try shortened versions for very long titles
-    if len(base_query) > 50:
-        # Try just first few words
-        words = base_query.split()
-        if len(words) > 4:
-            shortened = ' '.join(words[:4])
-            if shortened not in candidates:
-                candidates.append(shortened)
-    
-    # 9. Try keyword-based search for complex titles
-    if 'BOUNCY' in base_query:
-        candidates.append('ATEEZ BOUNCY')
-        candidates.append('ATEEZ BOUNCY official mv')
-    if 'HOT CHILLI PEPPERS' in base_query:
-        candidates.append('ATEEZ HOT CHILLI PEPPERS')
-    
-    # 10. For Japanese versions, try without "Japanese Ver."
-    if 'Japanese Ver.' in base_query:
-        base_no_jp = base_query.replace('Japanese Ver.', '').strip()
-        if base_no_jp not in candidates:
-            candidates.append(base_no_jp)
-            candidates.append(base_no_jp + ' japanese version')
-            candidates.append(base_no_jp + ' jp ver')
 
     from utils.i18n import _
+    
+    log_func(f"🔍 [Debug] Generated {len(candidates)} search candidates:")
+    for i, candidate in enumerate(candidates):
+        log_func(f"🔍 [Debug]   {i+1}. '{candidate}' (length: {len(candidate)})")
     
     all_candidates_failed = True  # Track if all candidates fail
     
@@ -581,70 +592,229 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
             try:
                 # Check for cancellation before each attempt
                 check_stop()
+                
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     if attempt == 0:
                         if idx == 0:
                             log_func(_('searching', current_query))
                         else:
-                            # Only show "No results" warning if this is the last attempt of all candidates
                             if is_last_candidate and attempt == max_retries - 1:
                                 log_func(f"⚠️ {_('dl_fail', 'No results')}. Trying: {current_query}...")
                             else:
                                 log_func(_('searching', current_query))
                     
                     check_stop()
-                    # Use 'detailed' to catch 416 better? No, standard is fine.
+                    
+                    info = None
+                    download_success = False
+                    
+                    # 階段1: 嘗試標準高品質下載
                     try:
                         info = ydl.extract_info(f"ytsearch1:{current_query}", download=True)
+                        download_success = True
                     except yt_dlp.utils.DownloadError as de:
-                         # Re-raise if it's 416 or other critical errors to be caught below
-                         raise de
+                        error_msg = str(de).lower()
+                        
+                        # 階段2: 針對格式錯誤的fallback
+                        if 'requested format is not available' in error_msg or 'po token' in error_msg:
+                            log_func(f"⚠️ [Format Error] 嘗試更寬鬆格式: {current_query}")
+                            fallback_opts = {
+                                'format': 'worstvideo[ext=mp4]+worstaudio/best',
+                                'outtmpl': out_template,
+                                'quiet': True,
+                                'no_warnings': True,
+                                'extract_audio': True,
+                                'postprocessors': [{
+                                    'key': 'FFmpegExtractAudio',
+                                    'preferredcodec': audio_format,
+                                    'preferredquality': '0' if audio_format == 'flac' else '320',
+                                }],
+                                'logger': YdlLogger(log_func, stats),
+                                'progress_hooks': [progress_hook],
+                                'keepvideo': False,
+                                'windowsfilenames': True,
+                                'restrictfilenames': False,
+                                'socket_timeout': 60,
+                                'retries': 3,
+                                'ignoreerrors': True,
+                                'extractor_args': {
+                                    'youtube': {
+                                        'player_client': ['ios', 'web', 'android'],
+                                        'player_skip': ['webpage', 'configs'],
+                                    }
+                                },
+                                'http_headers': {
+                                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
+                                },
+                            }
+                            
+                            try:
+                                with yt_dlp.YoutubeDL(fallback_opts) as fydl:
+                                    info = fydl.extract_info(f"ytsearch1:{current_query}", download=True)
+                                    download_success = True
+                                    log_func(f"✅ [Fallback Success] 使用寬鬆格式下載: {current_query}")
+                            except Exception as fallback_error:
+                                log_func(f"⚠️ [Fallback Failed] {current_query}: {str(fallback_error)[:100]}")
+                                
+                                # 階段3: 最終fallback - 使用任何可用格式
+                                log_func(f"🔄 [Final Attempt] 嘗試任何可用格式: {current_query}")
+                                final_opts = {
+                                    'format': 'best[height<=360]/best',  # 限制畫質避免過大檔案
+                                    'outtmpl': out_template,
+                                    'quiet': True,
+                                    'no_warnings': True,
+                                    'extract_audio': True,
+                                    'postprocessors': [{
+                                        'key': 'FFmpegExtractAudio',
+                                        'preferredcodec': audio_format,
+                                        'preferredquality': '192',  # 降低品質要求
+                                    }],
+                                    'logger': YdlLogger(log_func, stats),
+                                    'progress_hooks': [progress_hook],
+                                    'keepvideo': False,
+                                    'windowsfilenames': True,
+                                    'restrictfilenames': False,
+                                    'socket_timeout': 120,  # 增加timeout
+                                    'retries': 5,  # 增加重試次數
+                                    'ignoreerrors': True,
+                                    'extractor_args': {
+                                        'youtube': {
+                                            'player_client': ['tv_embed', 'web', 'ios'],  # 嘗試TV嵌入
+                                            'player_skip': ['webpage', 'configs', 'js'],
+                                        }
+                                    },
+                                    'http_headers': {
+                                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                                        'Referer': 'https://www.youtube.com/',
+                                    },
+                                }
+                                
+                                try:
+                                    with yt_dlp.YoutubeDL(final_opts) as fydl:
+                                        info = fydl.extract_info(f"ytsearch1:{current_query}", download=True)
+                                        download_success = True
+                                        log_func(f"✅ [Final Success] 使用基本格式下載: {current_query}")
+                                except Exception as final_error:
+                                    log_func(f"❌ [All Attempts Failed] {current_query}: {str(final_error)[:100]}")
+                                    raise de
+                        else:
+                            # 非格式相關錯誤，直接拋出
+                            raise de
                     except Exception as e:
-                         # Fallback for generic
-                         raise e
+                        if not download_success:
+                            raise e
+
+                    if not info:
+                        log_func(f"⚠️ [No Info] {current_query}: No video information found")
+                        break
+
+                    # Check if info is a dictionary and has expected keys
+                    if not isinstance(info, dict):
+                        log_func(f"  [Invalid Info] {current_query}: Info is not a dictionary")
+                        break
 
                     if 'entries' in info and info['entries']:
+                        log_func(f" [Debug] Found {len(info['entries'])} entries for '{current_query}'")
+                        for i, entry in enumerate(info['entries']):
+                            if entry:
+                                log_func(f" [Debug] Entry {i}: {entry.get('title', 'No title')} - {entry.get('id', 'No ID')}")
+                            else:
+                                log_func(f" [Debug] Entry {i}: None")
                         info = info['entries'][0]
+                        if not info:
+                            log_func(f"  [Empty Entry] {current_query}: First entry is None")
+                            # Break to try next candidate
+                            break
                     elif 'entries' in info:
                         # Empty entries = No results
+                        log_func(f" [Debug] No entries found for '{current_query}'")
+                        log_func(f" [Debug] Info keys: {list(info.keys()) if isinstance(info, dict) else 'Not a dict'}")
                         # Break inner retry loop to try next candidate
                         break 
                     else:
-                        pass
+                        log_func(f" [Debug] Direct video info for '{current_query}'")
+                        log_func(f" [Debug] Video title: {info.get('title', 'No title') if isinstance(info, dict) else 'Not a dict'}")
 
-                    filename = ydl.prepare_filename(info)
+                    # Check if info is valid before proceeding
+                    if not info:
+                        log_func(f"  [Invalid Info] {current_query}: Info is None or invalid")
+                        break
+
+                    try:
+                        filename = ydl.prepare_filename(info)
+                    except Exception as e:
+                        log_func(f"  [Filename Error] {current_query}: Cannot prepare filename - {str(e)}")
+                        break
                     base, ext = os.path.splitext(filename)
                     final_path = base + "." + audio_format
                     
                     if os.path.exists(final_path):
                         log_func(f" -> {os.path.basename(final_path)}")
                         # Add metadata
-                        add_metadata_to_file(final_path, info, song_name, log_func, config, enrich_metadata)
+                        metadata_success = add_metadata_to_file(final_path, info, song_name, log_func, config, use_dab_metadata)
+                        
+                        # Auto-rename file based on metadata if metadata was added successfully
+                        if metadata_success:
+                            try:
+                                from core.file_renamer import create_file_renamer
+                                renamer = create_file_renamer(library_path, log_func)
+                                rename_result = renamer.rename_file(final_path, dry_run=False)
+                                if rename_result['success'] and rename_result['new_path'] != final_path:
+                                    log_func(f"  🔄 [Auto Renamed] {os.path.basename(rename_result['new_path'])}")
+                                    final_path = rename_result['new_path']
+                            except Exception as e:
+                                log_func(f"  ⚠️ [Auto Rename Failed] {str(e)}")
+                        
                         # Download lyrics
                         lrc_path = os.path.splitext(final_path)[0] + ".lrc"
-                        if not os.path.exists(lrc_path):
-                            download_lyrics(song_name, lrc_path, log_func)
+                        if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', True):
+                            download_lyrics(song_name, lrc_path, log_func, lyrics_failed_cache)
                         return final_path
                     
                     if os.path.exists(filename):
                         log_func(f" -> {os.path.basename(filename)}")
                         # Add metadata
-                        add_metadata_to_file(filename, info, song_name, log_func, config, enrich_metadata)
+                        metadata_success = add_metadata_to_file(filename, info, song_name, log_func, config, use_dab_metadata)
+                        
+                        # Auto-rename file based on metadata if metadata was added successfully
+                        if metadata_success:
+                            try:
+                                from core.file_renamer import create_file_renamer
+                                renamer = create_file_renamer(library_path, log_func)
+                                rename_result = renamer.rename_file(filename, dry_run=False)
+                                if rename_result['success'] and rename_result['new_path'] != filename:
+                                    log_func(f"  🔄 [Auto Renamed] {os.path.basename(rename_result['new_path'])}")
+                                    filename = rename_result['new_path']
+                            except Exception as e:
+                                log_func(f"  ⚠️ [Auto Rename Failed] {str(e)}")
+                        
                         # Download lyrics
                         lrc_path = os.path.splitext(filename)[0] + ".lrc"
-                        if not os.path.exists(lrc_path):
-                            download_lyrics(song_name, lrc_path, log_func)
+                        if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', True):
+                            download_lyrics(song_name, lrc_path, log_func, lyrics_failed_cache)
                         all_candidates_failed = False  # Mark as successful
                         return filename
                     
                     # Download lyrics for final_path even if it doesn't exist yet (it will be created by PP)
                     lrc_path = os.path.splitext(final_path)[0] + ".lrc"
-                    if not os.path.exists(lrc_path):
-                        download_lyrics(song_name, lrc_path, log_func)
+                    if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', True):
+                        download_lyrics(song_name, lrc_path, log_func, lyrics_failed_cache)
                     
                     # Add metadata after download is complete
                     if os.path.exists(final_path):
-                        add_metadata_to_file(final_path, info, song_name, log_func, config, enrich_metadata)
+                        metadata_success = add_metadata_to_file(final_path, info, song_name, log_func, config, use_dab_metadata)
+                        
+                        # Auto-rename file based on metadata if metadata was added successfully
+                        if metadata_success:
+                            try:
+                                from core.file_renamer import create_file_renamer
+                                renamer = create_file_renamer(library_path, log_func)
+                                rename_result = renamer.rename_file(final_path, dry_run=False)
+                                if rename_result['success'] and rename_result['new_path'] != final_path:
+                                    log_func(f"  🔄 [Auto Renamed] {os.path.basename(rename_result['new_path'])}")
+                                    final_path = rename_result['new_path']
+                            except Exception as e:
+                                log_func(f"  ⚠️ [Auto Rename Failed] {str(e)}")
                     
                     all_candidates_failed = False  # Mark as successful
                     return final_path

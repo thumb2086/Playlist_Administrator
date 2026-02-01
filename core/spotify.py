@@ -359,7 +359,17 @@ def scrape_via_spotify_embed(config, stats, log_func):
                             
                             # Calculate relative path from Playlists folder to Music folder (e.g. ../Music/Song.mp3)
                             # rel_path will generate the necessary '..' prefix automatically.
-                            rel_path = os.path.relpath(abs_song_path, start=abs_playlists_path)
+                            try:
+                                rel_path = os.path.relpath(abs_song_path, start=abs_playlists_path)
+                            except ValueError:
+                                # Cross-drive issue: use absolute path or fallback
+                                # Use forward slashes and remove drive letter for compatibility
+                                rel_path = abs_song_path.replace('\\', '/')
+                                if ':' in rel_path:
+                                    # Remove drive letter for cross-drive compatibility
+                                    rel_path = rel_path.split(':', 1)[1].lstrip('/\\')
+                                # Fallback to absolute path if relative path fails
+                                rel_path = abs_song_path
                             
                             # Standardization: Forward slashes (/) are best for M3U8 and avoid separator issues
                             m3u_entry_path = rel_path.replace('\\', '/')

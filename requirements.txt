@@ -1,4 +1,5 @@
-yt-dlp
+--pre
+yt-dlp[default]
 requests
 beautifulsoup4
 ffmpeg-python

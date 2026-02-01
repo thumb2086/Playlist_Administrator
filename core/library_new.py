@@ -80,7 +80,13 @@ def move_unsorted_songs(config, log_func):
                         rel_path = os.path.relpath(abs_file_path, abs_playlists_path)
                         # Convert to forward slashes for M3U compatibility
                         rel_path = rel_path.replace('\\', '/')
-                    except:
+                    except ValueError:
+                        # Cross-drive issue: use absolute path or fallback
+                        # Use forward slashes and remove drive letter for compatibility
+                        rel_path = abs_file_path.replace('\\', '/')
+                        if ':' in rel_path:
+                            # Remove drive letter for cross-drive compatibility
+                            rel_path = rel_path.split(':', 1)[1].lstrip('/\\')
                         # Fallback to absolute path if relative path fails
                         rel_path = abs_file_path
                     
