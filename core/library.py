@@ -4,6 +4,8 @@ import time
 import shutil
 import random
 import requests
+import json
+import hashlib
 from bs4 import BeautifulSoup
 from utils.helpers import sanitize_filename, normalize_name
 from utils.config import ensure_dirs
@@ -833,6 +835,16 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     unblock_files(library_path, log_func)
     # 1.2 Clean up 'E' prefixes and fix sanitization mismatch
     rename_explicit_files(library_path, log_func)
+    
+    # 1.3 Load failed FLAC cache
+    failed_flac_cache_file = os.path.join(config.get('base_path', ''), 'data', 'failed_flac.json')
+    failed_flac_cache = {}
+    try:
+        if os.path.exists(failed_flac_cache_file):
+            with open(failed_flac_cache_file, 'r', encoding='utf-8') as f:
+                failed_flac_cache = json.load(f)
+    except:
+        failed_flac_cache = {}
 
     # 2. Scrape Spotify (Update local tracklists from URL)
     scrape_via_spotify_embed(config, stats, log_func)
@@ -1030,6 +1042,21 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             if hasattr(stats, 'pause_event') and stats.pause_event:
                  stats.pause_event.wait()
             
+            # Check if this FLAC song was previously failed and should be skipped
+            if 'flac' in needed_formats:
+                song_key = hashlib.md5(song_name.encode('utf-8')).hexdigest()
+                should_retry_flac = config.get('retry_failed_flac', False)
+                
+                if not should_retry_flac and song_key in failed_flac_cache:
+                    if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                        stats.app.update_song_status(i, '⏭️ 跳過', song_name)
+                    log_func(f"  ⏭️ [FLAC Skipped] {song_name} (previously failed)")
+                    current_dl += 1
+                    # Update progress
+                    if progress_func: 
+                        progress_func(current_dl, total_missing, None)
+                    continue
+            
             # Set appropriate initial status based on format
             if 'flac' in needed_formats:
                 initial_status = '🔽 FLAC'
@@ -1139,6 +1166,14 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
                         stats.app.update_song_status(i, '❌ 無 FLAC', song_name)
                     log_func(f"  ℹ️ [FLAC Unavailable] {song_name} - DAB Music 無此歌曲")
+                    
+                    # Add to failed FLAC cache
+                    song_key = hashlib.md5(song_name.encode('utf-8')).hexdigest()
+                    failed_flac_cache[song_key] = {
+                        'name': song_name,
+                        'timestamp': time.time(),
+                        'reason': 'dab_unavailable'
+                    }
                 else:
                     # Update status to failed for other formats
                     if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
@@ -1165,6 +1200,16 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             if current_dl < total_missing - 1:
                 delay = random.uniform(3, 8)
                 time.sleep(delay)
+    
+    # Save failed FLAC cache
+    try:
+        os.makedirs(os.path.dirname(failed_flac_cache_file), exist_ok=True)
+        with open(failed_flac_cache_file, 'w', encoding='utf-8') as f:
+            json.dump(failed_flac_cache, f, ensure_ascii=False, indent=2)
+        if failed_flac_cache:
+            log_func(f"  💾 已儲存 {len(failed_flac_cache)} 首FLAC失敗記錄")
+    except Exception as e:
+        log_func(f"  ⚠️ 無法儲存FLAC失敗快取: {e}")
         
     # PHASE 3: Retroactive Lyrics Download (Only run if enabled and there are existing songs missing lyrics)
     if songs_missing_lyrics and config.get('enable_retroactive_lyrics', True):

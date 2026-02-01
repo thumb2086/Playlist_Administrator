@@ -20,6 +20,8 @@ Run `python main.py`. Once the window opens:
 *   Click **[Update All (Download & Sync)]**: The program will automatically fetch playlist content and download any missing songs from YouTube.
     *   (Smart matching prevents redownloading existing songs)
     *   (Supports resuming; just click the button again next time)
+    *   **Bot detection or download issues**:
+    The program is optimized to automatically bypass verification. No additional setup is generally needed. If issues persist, try again later.
 
 **Step 3: Exporting**
 *   Click **[Export to USB]**: Copies your organized songs into the `USB_Export` folder.

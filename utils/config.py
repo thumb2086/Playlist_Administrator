@@ -27,6 +27,7 @@ def load_config():
         'max_threads': 4,
         'setup_completed': False,
         'retry_failed_lyrics': False,  # Default to skip failed lyrics
+        'retry_failed_flac': False,  # Default to skip failed FLAC downloads
         'lyrics_offsets': {},  # Per-song lyrics timing adjustments
         'dab_use_lossless': False,
         'dab_use_metadata': False,

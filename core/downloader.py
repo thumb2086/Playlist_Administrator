@@ -564,10 +564,10 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         'no_check_certificates': True,
     }
     
-    # Add cookies if available
-    cookies_path = 'cookies.txt'
-    if os.path.exists(cookies_path):
-        ydl_opts['cookiefile'] = cookies_path
+    # Add cookies if available (optional - not required)
+    # cookies_path = 'cookies.txt'
+    # if os.path.exists(cookies_path):
+    #     ydl_opts['cookiefile'] = cookies_path
 
     # Generate search candidates
     candidates = []

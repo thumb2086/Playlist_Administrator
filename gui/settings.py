@@ -131,6 +131,9 @@ class SettingsWindow:
         
         self.retry_var = tk.BooleanVar(value=self.config.get('retry_failed_lyrics', False))
         tk.Checkbutton(lf_adv, text="重試失敗歌曲 (Retry Failed Scans)", variable=self.retry_var, font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
+        
+        self.retry_flac_var = tk.BooleanVar(value=self.config.get('retry_failed_flac', False))
+        tk.Checkbutton(lf_adv, text="重試失敗的 FLAC 下載 (Retry Failed FLAC)", variable=self.retry_flac_var, font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
 
         # Buttons (outside scrollable area)
         btn_frame = tk.Frame(self.top)
@@ -179,6 +182,7 @@ class SettingsWindow:
         self.config['max_threads'] = new_threads
         self.config['enable_retroactive_lyrics'] = new_lyrics
         self.config['retry_failed_lyrics'] = new_retry
+        self.config['retry_failed_flac'] = self.retry_flac_var.get()
         self.config['dab_email'] = new_dab_email
         self.config['dab_password'] = new_dab_password
         self.config['dab_use_lossless'] = new_use_dab
