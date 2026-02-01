@@ -114,8 +114,8 @@ class SettingsWindow:
         lf_dab = tk.LabelFrame(container, text="DAB Music (無損音質)", font=("Microsoft JhengHei", 10, "bold"), padx=10, pady=10)
         lf_dab.pack(fill="x", pady=(0, 15))
         
-        # self.use_dab_var = tk.BooleanVar(value=self.config.get('use_dab_music', False))
-        # tk.Checkbutton(lf_dab, text="使用 DAB Music (優先無損音質)", variable=self.use_dab_var, font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
+        self.use_dab_var = tk.BooleanVar(value=self.config.get('dab_use_lossless', False))
+        tk.Checkbutton(lf_dab, text="啟用 DAB Music 無損下載", variable=self.use_dab_var, font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
         
         tk.Label(lf_dab, text="Email:", font=("Microsoft JhengHei", 9)).pack(anchor="w", padx=5, pady=(10, 0))
         self.dab_email_var = tk.StringVar(value=self.config.get('dab_email', ''))
@@ -158,6 +158,7 @@ class SettingsWindow:
         new_dab_email = self.dab_email_var.get()
         new_dab_password = self.dab_password_var.get()
         new_metadata_enrichment = self.metadata_enrichment_var.get()
+        new_use_dab = self.use_dab_var.get()
         
         # Construct audio formats list
         new_audio_formats = []
@@ -180,14 +181,8 @@ class SettingsWindow:
         self.config['retry_failed_lyrics'] = new_retry
         self.config['dab_email'] = new_dab_email
         self.config['dab_password'] = new_dab_password
-
-        # Auto-enable DAB Music if credentials are provided
-        if new_dab_email and new_dab_password:
-             self.config['use_dab_music'] = True
-        else:
-             self.config['use_dab_music'] = False
-             
-        self.config['enable_metadata_enrichment'] = new_metadata_enrichment
+        self.config['dab_use_lossless'] = new_use_dab
+        self.config['dab_use_metadata'] = new_use_dab  # 同時啟用 metadata
         self.config['audio_formats'] = new_audio_formats
         self.config['audio_format'] = new_audio_formats[0] # Legacy compatibility
         

@@ -32,7 +32,7 @@ def load_config():
         'dab_use_metadata': False,
         'dab_email': "",
         'dab_password': "",
-        'auto_metadata': False
+        'auto_metadata': False,
     }
     for key, value in defaults.items():
         config.setdefault(key, value)

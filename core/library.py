@@ -806,6 +806,9 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     if not audio_formats:
         audio_formats = [config.get('audio_format', 'mp3')]
         
+    # Define legacy audio_format for compatibility
+    audio_format = audio_formats[0]
+        
     from utils.i18n import _
     
     # Get DAB Music credentials if available
@@ -921,15 +924,23 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     # Create a new list without the found format
                     needed_formats = [fmt for fmt in needed_formats if fmt != ext]
                     item['needed_formats'] = needed_formats
+                    log_func(f"  ✅ [Metadata Found] {song_name} -> {found_path}")
             
             # If we still need formats (either didn't find anything, or found one but needed others)
             if needed_formats:
                 still_missing.append(item)
+            else:
+                log_func(f"  ✅ [All Formats Found] {song_name}")
                 
         if len(songs_to_download) != len(still_missing):
             log_func(f"  ✅ 透過 Metadata 找回 {len(songs_to_download) - len(still_missing)} 首歌 (部分或全部格式)")
-            
+        
         songs_to_download = still_missing
+        
+        if len(songs_to_download) == 0:
+            log_func(f"  🎉 所有歌曲都已找到，無需下載")
+        else:
+            log_func(f"  📋 最終需要下載: {len(songs_to_download)} 首歌")
 
     total_missing = len(songs_to_download)
     log_func(_('stats_complete', total_missing))
@@ -939,6 +950,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     # PHASE 2: Download
     if total_missing > 0:
         log_func(_('dl_start'))
+        log_func(f"🔄 開始下載迴圈，共 {total_missing} 首歌曲")
         current_dl = 0
         successful_downloads = 0
         
@@ -987,18 +999,28 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         download_status = {}
         for i, item in enumerate(songs_to_download):
             song_name = item['name']
+            needed_formats = item.get('needed_formats', [audio_format])
+            
+            # 根據格式設定初始狀態
+            if 'flac' in needed_formats:
+                initial_status = '⏳ 等待 FLAC'
+            else:
+                initial_status = '⏳ 等待中'
+                
             download_status[i] = {
                 'name': song_name,
-                'status': '⏳ 等待中',
+                'status': initial_status,
                 'order': i + 1
             }
             # Initialize song status in UI
             if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
-                stats.app.update_song_status(i, '⏳ 等待中', song_name)
+                stats.app.update_song_status(i, initial_status, song_name)
 
+        # Process all downloads sequentially (including FLAC)
         for i, item in enumerate(songs_to_download):
             song_name = item['name']
             pl_name = item['playlist']
+            needed_formats = item.get('needed_formats', [audio_format])
             remaining = total_missing - (current_dl + 1)
             
             if stats and stats.stop_event and stats.stop_event.is_set():
@@ -1008,9 +1030,15 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             if hasattr(stats, 'pause_event') and stats.pause_event:
                  stats.pause_event.wait()
             
-            # Update status to downloading (generic)
+            # Set appropriate initial status based on format
+            if 'flac' in needed_formats:
+                initial_status = '🔽 FLAC'
+            else:
+                initial_status = '🔽 下載中'
+                
+            # Update status to downloading
             if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
-                stats.app.update_song_status(i, '🔽 下載中', song_name)
+                stats.app.update_song_status(i, initial_status, song_name)
                  
             # Check if log_func supports immediate parameter
             if hasattr(log_func, '__code__') and 'immediate' in log_func.__code__.co_varnames:
@@ -1061,6 +1089,11 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                         progress_with_overall_eta(overall_progress, total_missing, None)
             
             needed_formats = item.get('needed_formats', [audio_format])
+            # Process all formats including FLAC (DAB Music handles FLAC via dab_downloader)
+            
+            if not needed_formats:
+                continue  # Skip if no formats to download
+                
             all_formats_success = True
             downloaded_paths = []
             
@@ -1101,9 +1134,15 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     log_func(_('dl_rest', successful_downloads))
                     time.sleep(15)
             else:
-                # Update status to failed
-                if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
-                    stats.app.update_song_status(i, '❌ 失敗', song_name)
+                # Handle FLAC failure specially
+                if 'flac' in needed_formats:
+                    if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                        stats.app.update_song_status(i, '❌ 無 FLAC', song_name)
+                    log_func(f"  ℹ️ [FLAC Unavailable] {song_name} - DAB Music 無此歌曲")
+                else:
+                    # Update status to failed for other formats
+                    if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                        stats.app.update_song_status(i, '❌ 失敗', song_name)
             
             current_dl += 1
             # Update progress with overall ETA calculation

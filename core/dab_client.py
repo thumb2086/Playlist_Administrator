@@ -7,8 +7,13 @@ import requests
 import json
 import time
 import os
+import ssl
+import urllib3
 from typing import Optional, Dict, List, Any
 from urllib.parse import urljoin
+
+# Disable SSL warnings
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class DABMusicClient:
     """Client for DAB Music Player API"""
@@ -16,12 +21,28 @@ class DABMusicClient:
     def __init__(self, base_url: str = "https://dab.yeet.su/api/"):
         self.base_url = base_url
         self.session = requests.Session()
+        # Configure SSL verification bypass
+        self.session.verify = False
+        # Update headers for better compatibility
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive',
+        })
         self.authenticated = False
         self.user_info = None
+        self.last_request_time = 0
+        self.min_request_interval = 2.0  # 最小請求間隔 2 秒
         
     def login(self, email: str, password: str) -> bool:
         """Authenticate with DAB Music API"""
         try:
+            current_time = time.time()
+            if current_time - self.last_request_time < self.min_request_interval:
+                time.sleep(self.min_request_interval - (current_time - self.last_request_time))
+            self.last_request_time = time.time()
+            
             response = self.session.post(
                 urljoin(self.base_url, "auth/login"),
                 json={"email": email, "password": password},
@@ -59,6 +80,12 @@ class DABMusicClient:
     def search_tracks(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         """Search for tracks"""
         try:
+            # 添加延遲避免 Rate Limiting
+            current_time = time.time()
+            if current_time - self.last_request_time < self.min_request_interval:
+                time.sleep(self.min_request_interval - (current_time - self.last_request_time))
+            self.last_request_time = time.time()
+            
             params = {
                 "q": query,
                 "type": "track",
@@ -130,6 +157,12 @@ class DABMusicClient:
     def get_stream_url(self, track_id: str, quality: str = "27") -> Optional[str]:
         """Get streaming URL for a track"""
         try:
+            # 添加延遲避免 Rate Limiting
+            current_time = time.time()
+            if current_time - self.last_request_time < self.min_request_interval:
+                time.sleep(self.min_request_interval - (current_time - self.last_request_time))
+            self.last_request_time = time.time()
+            
             params = {
                 "trackId": track_id,
                 "quality": quality
@@ -219,11 +252,48 @@ class DABMusicClient:
     
     def get_best_quality_match(self, track_name: str, artist_name: str = None) -> Optional[Dict[str, Any]]:
         """Search for the best quality match for a track"""
+        import re
+        
+        # Clean track name - remove common suffixes and extra info
+        clean_track_name = track_name
+        
+        # First, extract quoted content if present (this is usually the actual song title)
+        quoted_content = re.search(r'\'([^\']+)\'', clean_track_name)
+        if quoted_content:
+            # If we found quoted content, use that as the song title
+            clean_track_name = quoted_content.group(1)
+        else:
+            # If no quotes, remove common video/suffix patterns
+            suffixes_to_remove = [
+                r'\s*Official\s+.*?\s*Video',
+                r'\s*Performance\s+Video',
+                r'\s*Music\s+Video',
+                r'\s*MV',
+                r'\s*Official\s+MV',
+                r'\s*\[.*?\]',  # Remove brackets content
+                r'\s*\(.*?\)',  # Remove parentheses content
+                r'\s*【.*?】',  # Remove Chinese brackets
+            ]
+            
+            for suffix in suffixes_to_remove:
+                clean_track_name = re.sub(suffix, '', clean_track_name, flags=re.IGNORECASE)
+        
+        # Clean up extra spaces
+        clean_track_name = re.sub(r'\s+', ' ', clean_track_name).strip()
+        
+        # Remove artist name if it's at the beginning (only if we didn't extract from quotes)
+        if not quoted_content and artist_name:
+            if clean_track_name.startswith(artist_name):
+                clean_track_name = clean_track_name.replace(artist_name, '', 1).strip(' -')
+            # Handle duplicate artist names
+            if clean_track_name.startswith(artist_name):
+                clean_track_name = clean_track_name.replace(artist_name, '', 1).strip(' -')
+        
         # Construct search query
         if artist_name:
-            query = f"{artist_name} {track_name}"
+            query = f"{artist_name} {clean_track_name}"
         else:
-            query = track_name
+            query = clean_track_name
         
         # Search for tracks
         tracks = self.search_tracks(query, limit=10)
@@ -233,17 +303,39 @@ class DABMusicClient:
         # Try to find exact match first
         for track in tracks:
             title = track.get('title', '').lower()
-            name_lower = track_name.lower()
+            artist = track.get('artist', '').lower()
+            clean_name_lower = clean_track_name.lower()
             
             # Check for exact title match
-            if name_lower in title or title in name_lower:
+            if clean_name_lower == title or title == clean_name_lower:
                 if artist_name:
-                    artist = track.get('artist', '').lower()
                     artist_lower = artist_name.lower()
-                    if artist_lower in artist or artist in artist_lower:
+                    # More flexible artist matching - check for partial matches
+                    if (artist_lower == artist or 
+                        artist_lower in artist or 
+                        artist in artist_lower or
+                        # Handle case where artist name contains spaces vs no spaces
+                        artist_lower.replace(' ', '') == artist.replace(' ', '') or
+                        artist_lower.replace(' ', '') in artist.replace(' ', '') or
+                        artist.replace(' ', '') in artist_lower.replace(' ', '')):
                         return track
                 else:
                     return track
         
-        # If no exact match, return first result
-        return tracks[0] if tracks else None
+        # Try partial match with higher similarity requirement
+        for track in tracks:
+            title = track.get('title', '').lower()
+            artist = track.get('artist', '').lower()
+            clean_name_lower = clean_track_name.lower()
+            
+            # Check if title contains significant portion of search query
+            if len(clean_name_lower) > 3 and (clean_name_lower in title or title in clean_name_lower):
+                if artist_name:
+                    artist_lower = artist_name.lower()
+                    if len(artist_lower) > 2 and (artist_lower in artist or artist in artist_lower):
+                        return track
+                else:
+                    return track
+        
+        # If still no good match, return None to trigger fallback
+        return None

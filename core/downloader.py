@@ -311,8 +311,8 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
     # Create a simple failed lyrics cache for this session
     lyrics_failed_cache = {}
     
-    # If DAB Music is requested and credentials are provided
-    if use_dab_lossless and dab_credentials:
+    # If DAB Music is requested and credentials are provided AND asking for FLAC
+    if use_dab_lossless and dab_credentials and audio_format == 'flac':
         try:
             dab_downloader = create_dab_downloader(dab_credentials['email'], dab_credentials['password'])
             success = dab_downloader.download_song(
@@ -321,30 +321,61 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
             )
             dab_downloader.logout()
             if success:
-                # If DAB download was successful, we should enrich its metadata if requested
-                if use_dab_metadata and config:
-                    log_func(f"  ✨ [DAB Download Success] Attempting metadata enrichment for {song_name}")
-                    try:
-                        enricher = create_metadata_enricher(config)
-                        # Refresh file_list to include newly downloaded FLAC
-                        from core.library import find_song_prefer_flac
-                        final_path = find_song_prefer_flac(song_name, file_list)
-                        if final_path:
+                # DAB downloader should return the actual path
+                # If it returned True but no path, try to find the file
+                if isinstance(success, str):
+                    # success is actually the file path
+                    final_path = success
+                else:
+                    # success is True, need to find the file
+                    import glob
+                    lossless_dir = os.path.join(library_path, "Lossless")
+                    if os.path.exists(lossless_dir):
+                        # Look for recently downloaded FLAC files
+                        flac_files = glob.glob(os.path.join(lossless_dir, "*.flac"))
+                        if flac_files:
+                            # Get the most recently modified file
+                            final_path = max(flac_files, key=os.path.getmtime)
+                            log_func(f"  ✅ [DAB Found File] {os.path.basename(final_path)}")
+                        else:
+                            log_func(f"  ⚠️ [DAB Success but File Not Found] No FLAC files found.")
+                            return None
+                    else:
+                        log_func(f"  ⚠️ [DAB Success but File Not Found] Lossless directory not found.")
+                        return None
+                
+                # Verify the file exists
+                if os.path.exists(final_path):
+                    # Enriched metadata if requested
+                    if use_dab_metadata and config:
+                        log_func(f"  ✨ [DAB Download Success] Attempting metadata enrichment for {song_name}")
+                        try:
+                            enricher = create_metadata_enricher(config)
                             enricher.enrich_file_metadata(final_path, song_name, log_func)
                             log_func(f"  ✅ [Metadata Enriched] {song_name}")
-                        else:
-                            log_func(f"  ⚠️ [Metadata Enricher] Could not find downloaded DAB file for enrichment: {song_name}")
-                        enricher.cleanup()
-                    except Exception as e:
-                        log_func(f"  ⚠️ [DAB Metadata Enricher Error] {str(e)}")
-                return True
+                            enricher.cleanup()
+                        except Exception as e:
+                            log_func(f"  ⚠️ [DAB Metadata Enricher Error] {str(e)}")
+                    return final_path
+                else:
+                    log_func(f"  ⚠️ [DAB Success but File Not Found] {final_path}")
+                    return None
             else:
-                log_func(f"  ⚠️ [DAB Failed] Falling back to YouTube for {song_name}")
+                log_func(f"  ❌ [FLAC Unavailable] {song_name} - DAB Music 無此歌曲的無損版本")
+                log_func(f"  ⚠️ [跳過] 無損音檔僅提供於 DAB Music，不降級到 YouTube")
+                return None  # 真正的 FLAC 失敗，不 fallback
         except Exception as e:
-            log_func(f"  ⚠️ [DAB Error] {str(e)}. Falling back to YouTube for {song_name}")
+            log_func(f"  ❌ [DAB Error] {song_name}: {str(e)}")
+            log_func(f"  ⚠️ [跳過] DAB Music 服務異常，無法取得無損音檔")
+            return None  # 真正的 FLAC 失敗，不 fallback
     
-    # Force FLAC format when DAB lossless is enabled, even if we fall back to YouTube
-    effective_audio_format = 'flac' if use_dab_lossless else audio_format
+    # 如果是 FLAC 但沒有 DAB Music，直接返回 None
+    if audio_format == 'flac' and not use_dab_lossless:
+        log_func(f"  ❌ [FLAC Disabled] {song_name} - FLAC 需要啟用 DAB Music")
+        return None
+    
+    # Use the requested format directly
+    effective_audio_format = audio_format
     
     # Progress tracking state
     import time
@@ -472,10 +503,29 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
 
     clean_name = sanitize_filename(song_name)
     out_template = os.path.join(library_path, f"{clean_name}.%(ext)s")
+    
+    # Clean up any partial downloads from previous attempts, especially for FLAC
+    if effective_audio_format == 'flac':
+        import glob
+        for ext in ['*.mp4.part', '*.webm.part', '*.m4a.part', '*.part']:
+            pattern = os.path.join(library_path, f"{clean_name}.{ext}")
+            for part_file in glob.glob(pattern):
+                try:
+                    os.remove(part_file)
+                    log_func(f"  🧹 [Cleaned] Removed partial file: {os.path.basename(part_file)}")
+                except Exception as e:
+                    log_func(f"  ⚠️ [Cleanup Error] Could not remove {part_file}: {str(e)}")
 
     # Configure yt-dlp options with PO Token bypass
+    if effective_audio_format == 'flac':
+        # For FLAC, prioritize audio-only formats to avoid video downloads
+        format_string = 'bestaudio[acodec=flac]/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/ba'
+    else:
+        # Original format for other formats
+        format_string = 'ba/b'  # bestaudio/best - 允許降級到影片再轉檔
+    
     ydl_opts = {
-        'format': 'ba/b',  # bestaudio/best - 允許降級到影片再轉檔
+        'format': format_string,
         'outtmpl': out_template,
         'quiet': True,
         'no_warnings': True,
@@ -617,36 +667,70 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                         
                         # 階段2: 針對格式錯誤的fallback
                         if 'requested format is not available' in error_msg or 'po token' in error_msg:
-                            log_func(f"⚠️ [Format Error] 嘗試更寬鬆格式: {current_query}")
-                            fallback_opts = {
-                                'format': 'worstvideo[ext=mp4]+worstaudio/best',
-                                'outtmpl': out_template,
-                                'quiet': True,
-                                'no_warnings': True,
-                                'extract_audio': True,
-                                'postprocessors': [{
-                                    'key': 'FFmpegExtractAudio',
-                                    'preferredcodec': effective_audio_format,
-                                    'preferredquality': '0' if effective_audio_format == 'flac' else '320',
-                                }],
-                                'logger': YdlLogger(log_func, stats),
-                                'progress_hooks': [progress_hook],
-                                'keepvideo': False,
-                                'windowsfilenames': True,
-                                'restrictfilenames': False,
-                                'socket_timeout': 60,
-                                'retries': 3,
-                                'ignoreerrors': True,
-                                'extractor_args': {
-                                    'youtube': {
-                                        'player_client': ['ios', 'web', 'android'],
-                                        'player_skip': ['webpage', 'configs'],
-                                    }
-                                },
-                                'http_headers': {
-                                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
-                                },
-                            }
+                            if effective_audio_format == 'flac':
+                                # For FLAC, try audio-only formats first
+                                log_func(f"⚠️ [FLAC Format Error] 嘗試其他音頻格式: {current_query}")
+                                fallback_opts = {
+                                    'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
+                                    'outtmpl': out_template,
+                                    'quiet': True,
+                                    'no_warnings': True,
+                                    'extract_audio': True,
+                                    'postprocessors': [{
+                                        'key': 'FFmpegExtractAudio',
+                                        'preferredcodec': 'flac',
+                                        'preferredquality': '0',
+                                    }],
+                                    'logger': YdlLogger(log_func, stats),
+                                    'progress_hooks': [progress_hook],
+                                    'keepvideo': False,
+                                    'windowsfilenames': True,
+                                    'restrictfilenames': False,
+                                    'socket_timeout': 60,
+                                    'retries': 3,
+                                    'ignoreerrors': True,
+                                    'extractor_args': {
+                                        'youtube': {
+                                            'player_client': ['ios', 'web', 'android'],
+                                            'player_skip': ['webpage', 'configs'],
+                                        }
+                                    },
+                                    'http_headers': {
+                                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
+                                    },
+                                }
+                            else:
+                                # Original fallback for non-FLAC formats
+                                log_func(f"⚠️ [Format Error] 嘗試更寬鬆格式: {current_query}")
+                                fallback_opts = {
+                                    'format': 'worstvideo[ext=mp4]+worstaudio/best',
+                                    'outtmpl': out_template,
+                                    'quiet': True,
+                                    'no_warnings': True,
+                                    'extract_audio': True,
+                                    'postprocessors': [{
+                                        'key': 'FFmpegExtractAudio',
+                                        'preferredcodec': effective_audio_format,
+                                        'preferredquality': '0' if effective_audio_format == 'flac' else '320',
+                                    }],
+                                    'logger': YdlLogger(log_func, stats),
+                                    'progress_hooks': [progress_hook],
+                                    'keepvideo': False,
+                                    'windowsfilenames': True,
+                                    'restrictfilenames': False,
+                                    'socket_timeout': 60,
+                                    'retries': 3,
+                                    'ignoreerrors': True,
+                                    'extractor_args': {
+                                        'youtube': {
+                                            'player_client': ['ios', 'web', 'android'],
+                                            'player_skip': ['webpage', 'configs'],
+                                        }
+                                    },
+                                    'http_headers': {
+                                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
+                                    },
+                                }
                             
                             try:
                                 with yt_dlp.YoutubeDL(fallback_opts) as fydl:
@@ -657,37 +741,71 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                                 log_func(f"⚠️ [Fallback Failed] {current_query}: {str(fallback_error)[:100]}")
                                 
                                 # 階段3: 最終fallback - 使用任何可用格式
-                                log_func(f"🔄 [Final Attempt] 嘗試任何可用格式: {current_query}")
-                                final_opts = {
-                                    'format': 'best[height<=360]/best',  # 限制畫質避免過大檔案
-                                    'outtmpl': out_template,
-                                    'quiet': True,
-                                    'no_warnings': True,
-                                    'extract_audio': True,
-                                    'postprocessors': [{
-                                        'key': 'FFmpegExtractAudio',
-                                        'preferredcodec': effective_audio_format,
-                                        'preferredquality': '192',  # 降低品質要求
-                                    }],
-                                    'logger': YdlLogger(log_func, stats),
-                                    'progress_hooks': [progress_hook],
-                                    'keepvideo': False,
-                                    'windowsfilenames': True,
-                                    'restrictfilenames': False,
-                                    'socket_timeout': 120,  # 增加timeout
-                                    'retries': 5,  # 增加重試次數
-                                    'ignoreerrors': True,
-                                    'extractor_args': {
-                                        'youtube': {
-                                            'player_client': ['tv_embed', 'web', 'ios'],  # 嘗試TV嵌入
-                                            'player_skip': ['webpage', 'configs', 'js'],
-                                        }
-                                    },
-                                    'http_headers': {
-                                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                                        'Referer': 'https://www.youtube.com/',
-                                    },
-                                }
+                                if effective_audio_format == 'flac':
+                                    log_func(f"🔄 [FLAC Final Attempt] 嘗試任何音頻格式: {current_query}")
+                                    final_opts = {
+                                        'format': 'bestaudio/best',  # 只使用音頻格式
+                                        'outtmpl': out_template,
+                                        'quiet': True,
+                                        'no_warnings': True,
+                                        'extract_audio': True,
+                                        'postprocessors': [{
+                                            'key': 'FFmpegExtractAudio',
+                                            'preferredcodec': 'flac',
+                                            'preferredquality': '0',
+                                        }],
+                                        'logger': YdlLogger(log_func, stats),
+                                        'progress_hooks': [progress_hook],
+                                        'keepvideo': False,
+                                        'windowsfilenames': True,
+                                        'restrictfilenames': False,
+                                        'socket_timeout': 120,
+                                        'retries': 5,
+                                        'ignoreerrors': True,
+                                        'extractor_args': {
+                                            'youtube': {
+                                                'player_client': ['tv_embed', 'web', 'ios'],
+                                                'player_skip': ['webpage', 'configs', 'js'],
+                                            }
+                                        },
+                                        'http_headers': {
+                                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                                            'Referer': 'https://www.youtube.com/',
+                                        },
+                                    }
+                                else:
+                                    # Original final fallback for non-FLAC
+                                    log_func(f"🔄 [Final Attempt] 嘗試任何可用格式: {current_query}")
+                                    final_opts = {
+                                        'format': 'best[height<=360]/best',  # 限制畫質避免過大檔案
+                                        'outtmpl': out_template,
+                                        'quiet': True,
+                                        'no_warnings': True,
+                                        'extract_audio': True,
+                                        'postprocessors': [{
+                                            'key': 'FFmpegExtractAudio',
+                                            'preferredcodec': effective_audio_format,
+                                            'preferredquality': '192',  # 降低品質要求
+                                        }],
+                                        'logger': YdlLogger(log_func, stats),
+                                        'progress_hooks': [progress_hook],
+                                        'keepvideo': False,
+                                        'windowsfilenames': True,
+                                        'restrictfilenames': False,
+                                        'socket_timeout': 120,  # 增加timeout
+                                        'retries': 5,  # 增加重試次數
+                                        'ignoreerrors': True,
+                                        'extractor_args': {
+                                            'youtube': {
+                                                'player_client': ['tv_embed', 'web', 'ios'],  # 嘗試TV嵌入
+                                                'player_skip': ['webpage', 'configs', 'js'],
+                                            }
+                                        },
+                                        'http_headers': {
+                                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                                            'Referer': 'https://www.youtube.com/',
+                                        },
+                                    }
                                 
                                 try:
                                     with yt_dlp.YoutubeDL(final_opts) as fydl:
@@ -865,6 +983,11 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         
     # If all candidates failed, show final warning
     if all_candidates_failed:
-        log_func(f"❌ {_('dl_fail', 'All search attempts failed')}")
+        if effective_audio_format == 'flac':
+            log_func(f"❌ [無損音檔取得失敗] {song_name}")
+            log_func(f"   💡 說明：此歌曲在 DAB Music 中沒有無損版本")
+            log_func(f"   🎯 建議：如需下載此歌曲，請改用 MP3 格式")
+        else:
+            log_func(f"❌ {_('dl_fail', 'All search attempts failed')}")
         
     return None
