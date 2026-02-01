@@ -263,7 +263,15 @@ class DABMusicClient:
             # If we found quoted content, use that as the song title
             clean_track_name = quoted_content.group(1)
         else:
-            # If no quotes, remove common video/suffix patterns
+            # If no quotes, handle "Artist - Title" format first
+            if ' - ' in clean_track_name:
+                parts = clean_track_name.split(' - ', 1)
+                if len(parts) == 2:
+                    # We have artist and title, but we'll use the title part for search
+                    # The artist will be added separately in the query
+                    clean_track_name = parts[1].strip()
+            
+            # Remove common video/suffix patterns
             suffixes_to_remove = [
                 r'\s*Official\s+.*?\s*Video',
                 r'\s*Performance\s+Video',
@@ -282,12 +290,13 @@ class DABMusicClient:
         clean_track_name = re.sub(r'\s+', ' ', clean_track_name).strip()
         
         # Remove artist name if it's at the beginning (only if we didn't extract from quotes)
-        if not quoted_content and artist_name:
-            if clean_track_name.startswith(artist_name):
-                clean_track_name = clean_track_name.replace(artist_name, '', 1).strip(' -')
-            # Handle duplicate artist names
-            if clean_track_name.startswith(artist_name):
-                clean_track_name = clean_track_name.replace(artist_name, '', 1).strip(' -')
+        # Skip this step since we already handled "Artist - Title" format above
+        # if not quoted_content and artist_name:
+        #     if clean_track_name.startswith(artist_name):
+        #         clean_track_name = clean_track_name.replace(artist_name, '', 1).strip(' -')
+        #     # Handle duplicate artist names
+        #     if clean_track_name.startswith(artist_name):
+        #         clean_track_name = clean_track_name.replace(artist_name, '', 1).strip(' -')
         
         # Construct search query
         if artist_name:

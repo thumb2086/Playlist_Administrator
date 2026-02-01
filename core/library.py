@@ -196,9 +196,17 @@ def get_normalized_tokens(text):
         # If conversion fails, keep original text
         pass
 
-    # 2.5 Remove "E" prefix artifact (common in Spotify scrapes)
-    # e.g. "EYosebe", "E王ADEN"
-    text = re.sub(r'^e(?=[a-z\u4e00-\u9fff\u3040-\u30ff])', '', text)
+    # 2.5 Remove \"E\" prefix artifact (common in Spotify scrapes)
+    # e.g. \"EYosebe\", \"E王ADEN\"
+    text = re.sub(r'^e(?=[a-z\\u4e00-\\u9fff\\u3040-\\u30ff])', '', text)
+
+    # 2.6 Remove common Chinese music title noise phrases
+    noise_phrases = [
+        r'全新單曲', r'單曲', r'官方完整版', r'官方', r'完整版', 
+        r'高清', r'動態歌詞版', r'歌詞版', r'官方版', r'全新'
+    ]
+    for phrase in noise_phrases:
+        text = re.sub(phrase, ' ', text)
 
     # 3. Standardize artist separators and common terms to spaces
     # Handles 'feat.', 'ft.', 'vs', 'vs.', '&', ',', ' x '
@@ -222,8 +230,8 @@ def get_normalized_tokens(text):
     # Include Japanese Hiragana (\u3040-\u309f) and Katakana (\u30a0-\u30ff)
     text = re.sub(r"[^a-z0-9\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]+", " ", text)
 
-    # 7. Split into tokens, remove empty strings, and sort
-    return sorted([t for t in text.split() if t])
+    # 7. Split into tokens, remove empty strings, deduplicate and sort
+    return sorted(list(set([t for t in text.split() if t])))
 
 def build_library_index(audio_files):
     index = {}
@@ -396,16 +404,21 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
         if not candidates and title_tokens:
             collect_candidates(title_tokens)
         
-        # 3. Subset matching (slow fallback if no direct hits)
+        # 3. Flexible matching (simplified: check overlap between title and file tokens)
         if not candidates and title_tokens:
-             for index_tokens, paths in library_source.items():
-                if len(title_tokens) > 0 and all(token in index_tokens for token in title_tokens):
-                    coverage = len(title_tokens) / len(index_tokens) if len(index_tokens) > 0 else 0
-                    if coverage >= 0.1:
-                         if isinstance(paths, list):
-                             candidates.extend(paths)
-                         else:
-                             candidates.append(paths)
+            title_set = set(title_tokens)
+            for index_tokens, paths in library_source.items():
+                if not index_tokens: continue
+                index_set = set(index_tokens)
+                
+                # Calculate overlap: intersection / smaller set size
+                overlap = len(title_set & index_set)
+                min_size = min(len(title_set), len(index_set))
+                
+                if min_size > 0 and overlap / min_size >= 0.5:
+                    # At least 50% of the smaller token set matches
+                    if isinstance(paths, list): candidates.extend(paths)
+                    else: candidates.append(paths)
 
     elif isinstance(library_source, list):
         # Legacy List Mode
@@ -415,17 +428,21 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
             name_no_ext = os.path.splitext(filename)[0]
             file_tokens = tuple(get_normalized_tokens(name_no_ext))
             
+            if not file_tokens: continue
+            
             if file_tokens == query_tokens:
                 candidates.append(file_path)
-                
             elif title_tokens and file_tokens == title_tokens:
                 candidates.append(file_path)
-                
             elif title_tokens:
-                 if len(title_tokens) > 0 and all(token in file_tokens for token in title_tokens):
-                     coverage = len(title_tokens) / len(file_tokens) if len(file_tokens) > 0 else 0
-                     if coverage >= 0.1:
-                         candidates.append(file_path)
+                # Flexible matching with overlap
+                title_set = set(title_tokens)
+                file_set = set(file_tokens)
+                overlap = len(title_set & file_set)
+                min_size = min(len(title_set), len(file_set))
+                
+                if min_size > 0 and overlap / min_size >= 0.5:
+                    candidates.append(file_path)
 
     # 3. Metadata Index Lookup (Pass 2)
     current_best_candidate = None
@@ -594,22 +611,63 @@ def find_song_exact_format(song_name, target_extension, library_source):
     """ 
     Find song in library that strictly matches the target extension (e.g., '.mp3', '.flac')
     Returns the path if found, else None.
+    Supports subset matching for renamed files (e.g., playlist '癒合' matches file '告五人 - 癒合.mp3')
     """
     query_tokens = tuple(get_normalized_tokens(song_name))
     if not query_tokens:
         return None
     
+    # Extract title part for flexible matching
+    title_part = song_name
+    if ' - ' in song_name:
+        parts = song_name.split(' - ', 1)
+        if len(parts) == 2:
+            title_part = parts[1].strip()
+    title_tokens = tuple(get_normalized_tokens(title_part))
+    
     found_files = []
     
     # Check if library_source is a dictionary (index) or list (file list)
     if isinstance(library_source, dict):
-        # FAST PATH: Dictionary Lookup
+        # 1. FAST PATH: Exact full match
         paths = library_source.get(query_tokens)
         if paths:
             if isinstance(paths, list):
-                found_files = paths
+                found_files = list(paths)
             else:
                 found_files = [paths]
+        
+        # 2. Title-only match (for renamed files)
+        if not found_files and title_tokens and title_tokens != query_tokens:
+            paths = library_source.get(title_tokens)
+            if paths:
+                if isinstance(paths, list):
+                    found_files = list(paths)
+                else:
+                    found_files = [paths]
+        
+        # 3. Subset matching (slow fallback)
+        if not found_files and title_tokens:
+            for index_tokens, paths in library_source.items():
+                if not index_tokens: continue
+                is_match = False
+                
+                # Case A: Title is subset of Index
+                if len(title_tokens) > 0 and len(index_tokens) >= len(title_tokens):
+                    if all(token in index_tokens for token in title_tokens):
+                        coverage = len(title_tokens) / len(index_tokens)
+                        if coverage >= 0.1: is_match = True
+                
+                # Case B: Index is subset of Title
+                elif len(index_tokens) > 0 and len(title_tokens) >= len(index_tokens):
+                    if all(token in title_tokens for token in index_tokens):
+                        coverage = len(index_tokens) / len(title_tokens)
+                        if coverage >= 0.3: is_match = True
+                
+                if is_match:
+                    if isinstance(paths, list): found_files.extend(paths)
+                    else: found_files.append(paths)
+                        
     elif isinstance(library_source, list):
         # SLOW PATH: Linear Scan
         audio_files = library_source
@@ -617,8 +675,29 @@ def find_song_exact_format(song_name, target_extension, library_source):
             filename = os.path.basename(file_path)
             name_no_ext = os.path.splitext(filename)[0]
             file_tokens = tuple(get_normalized_tokens(name_no_ext))
+            
+            if not file_tokens: continue
+            
+            # Exact match
             if file_tokens == query_tokens:
                 found_files.append(file_path)
+            # Title-only match
+            elif title_tokens and file_tokens == title_tokens:
+                found_files.append(file_path)
+            # Subset match
+            elif title_tokens:
+                is_match = False
+                if len(title_tokens) > 0 and len(file_tokens) >= len(title_tokens):
+                    if all(token in file_tokens for token in title_tokens):
+                        coverage = len(title_tokens) / len(file_tokens)
+                        if coverage >= 0.1: is_match = True
+                elif len(file_tokens) > 0 and len(title_tokens) >= len(file_tokens):
+                    if all(token in title_tokens for token in file_tokens):
+                        coverage = len(file_tokens) / len(title_tokens)
+                        if coverage >= 0.3: is_match = True
+                
+                if is_match:
+                    found_files.append(file_path)
     else:
         return None
         
@@ -1076,6 +1155,9 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             # Create a progress callback for this song
             song_start_time = time.time()
             def song_progress_callback(current, total, eta=None):
+                # Calculate remaining songs here to avoid UnboundLocalError
+                remaining_songs = total_missing - current_dl
+                
                 # Update overall progress with current song progress
                 # Use current_dl + (current/total) to show progress within current song
                 if total and total > 0:
@@ -1087,7 +1169,6 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 # Calculate overall ETA for the entire task
                 if total_downloaded_time > 0 and current_dl > 0:
                     avg_time_per_song = total_downloaded_time / current_dl
-                    remaining_songs = total_missing - current_dl
                     eta_seconds = remaining_songs * avg_time_per_song
                     # Ensure eta_seconds is numeric
                     try:
@@ -1217,7 +1298,6 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         import threading
         from concurrent.futures import ThreadPoolExecutor, as_completed
         import json
-        import hashlib
         
         log_func(_('retroactive_lyrics', len(songs_missing_lyrics)))
         total_lyrics_to_fetch = len(songs_missing_lyrics)

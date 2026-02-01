@@ -28,6 +28,13 @@ class DABDownloader:
         try:
             log_func(f"  🔍 [DAB Search] {song_name}")
             
+            # Extract artist name from song_name if in "Artist - Title" format
+            artist_name = None
+            if ' - ' in song_name:
+                parts = song_name.split(' - ', 1)
+                if len(parts) == 2:
+                    artist_name = parts[0].strip()
+            
             # Search for the track
             track_info = self.client.get_best_quality_match(song_name, artist_name)
             if not track_info:

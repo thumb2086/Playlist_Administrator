@@ -84,33 +84,54 @@ class FileRenamer:
             return None
     
     def generate_new_filename(self, metadata: dict, file_ext: str) -> str:
-        """Generate new filename based on metadata"""
+        """Generate new filename based on metadata with Artist-Title format"""
         artist = metadata.get('artist', '').strip()
         title = metadata.get('title', '').strip()
+        album = metadata.get('album', '').strip()
+        date = metadata.get('date', '').strip()
         
-        # 如果有完整的 metadata（歌手和歌名都有），檔案只叫歌名
+        # Build filename components
+        name_parts = []
+        
+        # Priority order: Artist - Title (歌手-歌名格式)
         if artist and title:
-            new_name = title
+            # 完整的歌手和歌名，使用「歌手-歌名」格式
+            base_name = f"{artist} - {title}"
         elif title:
-            # 如果只有歌名，檔案就叫歌名
-            new_name = title
+            # 只有歌名，直接使用歌名
+            base_name = title
         elif artist:
-            # 如果只有歌手，檔案就叫歌手
-            new_name = artist
+            # 只有歌手，使用歌手名
+            base_name = artist
+        elif album:
+            # 只有專輯名，使用專輯名
+            base_name = album
         else:
-            # 如果都沒有，返回 None（無法生成新檔名）
-            return None
+            # 都沒有，使用預設名稱
+            base_name = "Unknown_Song"
         
-        # Sanitize filename
-        new_name = sanitize_filename(new_name)
-        return f"{new_name}{file_ext}"
+        # Add year if available and meaningful
+        if date and len(date) >= 4 and date[:4].isdigit():
+            year = date[:4]
+            # Only add year if it's recent and meaningful
+            if 1900 <= int(year) <= 2030:
+                base_name = f"{base_name} ({year})"
+        
+        # Sanitize the filename
+        safe_name = sanitize_filename(base_name)
+        
+        # Final safety check
+        if not safe_name or safe_name.isspace():
+            safe_name = "Unknown_Song"
+        
+        return f"{safe_name}{file_ext}"
     
     def rename_file(self, file_path: str, dry_run: bool = True) -> dict:
-        """Rename a single file based on its metadata"""
+        """Rename a single file based on its metadata with improved error handling"""
         result = {
             'success': False,
             'old_path': file_path,
-            'new_path': None,
+            'new_path': file_path,  # Default to original path
             'metadata': None,
             'message': ''
         }
@@ -146,19 +167,26 @@ class FileRenamer:
                 result['message'] = f"Target file already exists: {new_filename}"
                 return result
             
-            result['new_path'] = str(new_path)
-            
-            if dry_run:
-                result['success'] = True
-                result['message'] = f"Would rename to: {new_filename}"
+            # Perform rename if not dry run
+            if not dry_run:
+                try:
+                    import shutil
+                    shutil.move(str(file_path), str(new_path))
+                    result['new_path'] = str(new_path)
+                    result['success'] = True
+                    result['message'] = f"Successfully renamed to {new_filename}"
+                except Exception as e:
+                    result['message'] = f"Failed to rename file: {str(e)}"
+                    return result
             else:
-                # Perform actual rename
-                os.rename(file_path, new_path)
+                # Dry run - just report what would happen
+                result['new_path'] = str(new_path)
                 result['success'] = True
-                result['message'] = f"Renamed to: {new_filename}"
-                
+                result['message'] = f"Would rename to {new_filename}"
+            
         except Exception as e:
-            result['message'] = f"Error: {str(e)}"
+            result['message'] = f"Error during rename process: {str(e)}"
+            result['success'] = False
         
         return result
     

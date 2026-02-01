@@ -7,7 +7,7 @@ class SettingsWindow:
     def __init__(self, parent, config, on_close_callback=None):
         self.top = tk.Toplevel(parent)
         self.top.title("設定 (Settings)")
-        self.top.geometry("500x850")
+        self.top.geometry("500x900")
         self.top.resizable(False, False)
         
         # Modal window behavior

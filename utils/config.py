@@ -53,6 +53,7 @@ def derive_paths(config):
     # Use subfolder for playlists as requested by user
     config['playlists_path'] = os.path.normpath(os.path.join(base_path, 'Playlists'))
     config['export_path'] = os.path.normpath(os.path.join(base_path, 'USB_Output'))
+    return config
 
 def prompt_and_set_base_path(config):
     from utils.i18n import _
