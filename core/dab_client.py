@@ -56,7 +56,8 @@ class DABMusicClient:
                 self.user_info = data.get('user', {})
                 return True
             else:
-                print(f"Login failed: {response.status_code} - {response.text}")
+                resp_text = response.text[:200] + "..." if len(response.text) > 200 else response.text
+                print(f"Login failed: {response.status_code} - {resp_text}")
                 return False
                 
         except Exception as e:
@@ -102,7 +103,8 @@ class DABMusicClient:
                 data = response.json()
                 return data.get('tracks', [])
             else:
-                print(f"Search failed: {response.status_code} - {response.text}")
+                resp_text = response.text[:200] + "..." if len(response.text) > 200 else response.text
+                print(f"Search failed: {response.status_code} - {resp_text}")
                 return []
                 
         except Exception as e:
@@ -122,7 +124,8 @@ class DABMusicClient:
             if response.status_code == 200:
                 return response.json()
             else:
-                print(f"Get album info failed: {response.status_code} - {response.text}")
+                resp_text = response.text[:200] + "..." if len(response.text) > 200 else response.text
+                print(f"Get album info failed: {response.status_code} - {resp_text}")
                 return None
                 
         except Exception as e:
@@ -147,7 +150,8 @@ class DABMusicClient:
             if response.status_code == 200:
                 return response.json()
             else:
-                print(f"Get download info failed: {response.status_code} - {response.text}")
+                resp_text = response.text[:200] + "..." if len(response.text) > 200 else response.text
+                print(f"Get download info failed: {response.status_code} - {resp_text}")
                 return None
                 
         except Exception as e:
@@ -177,7 +181,8 @@ class DABMusicClient:
                 data = response.json()
                 return data.get('url')
             else:
-                print(f"Get stream URL failed: {response.status_code} - {response.text}")
+                resp_text = response.text[:200] + "..." if len(response.text) > 200 else response.text
+                print(f"Get stream URL failed: {response.status_code} - {resp_text}")
                 return None
                 
         except Exception as e:
@@ -201,7 +206,9 @@ class DABMusicClient:
                 data = response.json()
                 return data.get('lyrics')
             else:
-                print(f"Get lyrics failed: {response.status_code} - {response.text}")
+                # Truncate large error pages (e.g. Cloudflare 504)
+                resp_text = response.text[:200] + "..." if len(response.text) > 200 else response.text
+                print(f"Get lyrics failed: {response.status_code} - {resp_text}")
                 return None
                 
         except Exception as e:

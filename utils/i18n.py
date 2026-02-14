@@ -140,6 +140,7 @@ class I18N:
             'player_now_playing': "正在播放: {0}",
             'player_shuffle': "隨機播放",
             'player_no_lyrics': "(無動態歌詞資料)",
+            'metadata_enrichment_start': "正在補充 metadata (專輯封面/歌手資訊)...",
         },
         'en': {
             'app_title': "Playlist Manager",

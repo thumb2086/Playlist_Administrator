@@ -876,6 +876,7 @@ def move_unsorted_songs(config, log_func):
 def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None, speed_display_callback=None):
     from core.spotify import scrape_via_spotify_embed
     from core.downloader import download_song
+    from utils.config import get_failed_flac_path 
     import time
             
     # 0. Initialize
@@ -916,7 +917,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     rename_explicit_files(library_path, log_func)
     
     # 1.3 Load failed FLAC cache
-    failed_flac_cache_file = os.path.join(config.get('base_path', ''), 'data', 'failed_flac.json')
+    failed_flac_cache_file = get_failed_flac_path(config)
     failed_flac_cache = {}
     try:
         if os.path.exists(failed_flac_cache_file):
@@ -974,8 +975,16 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
 
              # Check which formats are missing
              missing_formats = []
+             should_retry_flac = config.get('retry_failed_flac', False)
              for fmt in audio_formats:
                  if not find_song_exact_format(song_name, fmt, library_index):
+                     # If format is FLAC, check if it was previously failed and we shouldn't retry
+                     if fmt == 'flac' and not should_retry_flac:
+                         # Normalize song name for consistent hashing
+                         norm_name = song_name.strip().lower()
+                         song_key = hashlib.md5(norm_name.encode('utf-8')).hexdigest()
+                         if song_key in failed_flac_cache:
+                             continue # Skip adding FLAC to missing if it's in failed cache
                      missing_formats.append(fmt)
              
              if missing_formats:
@@ -1123,7 +1132,9 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             
             # Check if this FLAC song was previously failed and should be skipped
             if 'flac' in needed_formats:
-                song_key = hashlib.md5(song_name.encode('utf-8')).hexdigest()
+                # Normalize song name for consistent hashing
+                norm_name = song_name.strip().lower()
+                song_key = hashlib.md5(norm_name.encode('utf-8')).hexdigest()
                 should_retry_flac = config.get('retry_failed_flac', False)
                 
                 if not should_retry_flac and song_key in failed_flac_cache:
@@ -1225,13 +1236,23 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             
             # Handle FLAC failure cache independently
             if 'flac' in failed_formats:
-                song_key = hashlib.md5(song_name.encode('utf-8')).hexdigest()
+                norm_name = song_name.strip().lower()
+                song_key = hashlib.md5(norm_name.encode('utf-8')).hexdigest()
                 failed_flac_cache[song_key] = {
                     'name': song_name,
                     'timestamp': time.time(),
                     'reason': 'dab_unavailable'
                 }
                 log_func(f"  ℹ️ [FLAC Unavailable] {song_name} - DAB Music 無此歌曲")
+                
+                # Save cache immediately to prevent loss on cancellation
+                try:
+                    failed_flac_cache_file = get_failed_flac_path(config)
+                    os.makedirs(os.path.dirname(failed_flac_cache_file), exist_ok=True)
+                    with open(failed_flac_cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(failed_flac_cache, f, ensure_ascii=False, indent=2)
+                except:
+                    pass
             
             if downloaded_paths:
                 # At least one format succeeded
@@ -1290,6 +1311,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     
     # Save failed FLAC cache
     try:
+        failed_flac_cache_file = get_failed_flac_path(config)
         os.makedirs(os.path.dirname(failed_flac_cache_file), exist_ok=True)
         with open(failed_flac_cache_file, 'w', encoding='utf-8') as f:
             json.dump(failed_flac_cache, f, ensure_ascii=False, indent=2)
@@ -1297,6 +1319,19 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             log_func(f"  💾 已儲存 {len(failed_flac_cache)} 首FLAC失敗記錄")
     except Exception as e:
         log_func(f"  ⚠️ 無法儲存FLAC失敗快取: {e}")
+
+    # PHASE 4: Metadata Enrichment
+    if config.get('enable_metadata_enrichment', True) or config.get('auto_metadata', False):
+        try:
+            from core.metadata_enricher import create_metadata_enricher
+            log_func(_('metadata_enrichment_start'))
+            enricher = create_metadata_enricher(config)
+            enricher.enrich_library_metadata(library_path, log_func)
+            enricher.cleanup()
+        except ImportError:
+            log_func("⚠️ Metadata enrichment module not found.")
+        except Exception as e:
+            log_func(f"⚠️ Metadata enrichment failed: {e}")
         
     # PHASE 3: Retroactive Lyrics Download (Only run if enabled and there are existing songs missing lyrics)
     if songs_missing_lyrics and config.get('enable_retroactive_lyrics', True):
@@ -1304,6 +1339,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         import threading
         from concurrent.futures import ThreadPoolExecutor, as_completed
         import json
+        from utils.config import get_data_path
         
         log_func(_('retroactive_lyrics', len(songs_missing_lyrics)))
         total_lyrics_to_fetch = len(songs_missing_lyrics)
@@ -1312,7 +1348,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         max_consecutive_failures = 10  # Skip to next phase after too many failures
         
         # Load failed lyrics cache
-        failed_cache_file = os.path.join(config.get('base_path', ''), 'data', 'failed_lyrics.json')
+        failed_cache_file = os.path.join(get_data_path(config), 'failed_lyrics.json')
         failed_cache = {}
         try:
             if os.path.exists(failed_cache_file):
@@ -1490,7 +1526,7 @@ def get_playlist_completeness_report(files, library_path):
     library_index = build_library_index(audio_files_cache)
     
     # Get current audio format preference (support multiple formats)
-    from utils.config import load_config
+    from utils.config import load_config, get_failed_flac_path
     config = load_config()
     audio_formats = config.get('audio_formats', [])
     if not audio_formats:
@@ -1500,7 +1536,7 @@ def get_playlist_completeness_report(files, library_path):
     # Load failed_flac_cache to exclude known-unavailable FLAC from missing count
     failed_flac_cache = {}
     if 'flac' in audio_formats:
-        failed_flac_cache_file = os.path.join(config.get('base_path', ''), 'data', 'failed_flac.json')
+        failed_flac_cache_file = get_failed_flac_path(config)
         try:
             if os.path.exists(failed_flac_cache_file):
                 with open(failed_flac_cache_file, 'r', encoding='utf-8') as f:
@@ -1516,7 +1552,8 @@ def get_playlist_completeness_report(files, library_path):
             # Determine which formats this song actually needs
             song_formats = list(audio_formats)
             if 'flac' in song_formats and failed_flac_cache:
-                song_key = hashlib.md5(song_name.encode('utf-8')).hexdigest()
+                norm_name = song_name.strip().lower()
+                song_key = hashlib.md5(norm_name.encode('utf-8')).hexdigest()
                 if song_key in failed_flac_cache:
                     # FLAC known unavailable, don't require it
                     song_formats = [f for f in song_formats if f != 'flac']

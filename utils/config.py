@@ -53,7 +53,27 @@ def derive_paths(config):
     # Use subfolder for playlists as requested by user
     config['playlists_path'] = os.path.normpath(os.path.join(base_path, 'Playlists'))
     config['export_path'] = os.path.normpath(os.path.join(base_path, 'USB_Output'))
+    config['data_path'] = get_data_path(config)
     return config
+
+def get_data_path(config):
+    """
+    Returns the path to the data directory.
+    If base_path already ends with 'data', returns base_path.
+    Otherwise, returns base_path/data.
+    """
+    base_path = config.get('base_path', '')
+    if not base_path:
+        return 'data'
+        
+    if base_path.lower().endswith(('\\data', '/data')):
+        return base_path
+    else:
+        return os.path.join(base_path, 'data')
+
+def get_failed_flac_path(config):
+    """Returns the full path to failed_flac.json"""
+    return os.path.join(get_data_path(config), 'failed_flac.json')
 
 def prompt_and_set_base_path(config):
     from utils.i18n import _
