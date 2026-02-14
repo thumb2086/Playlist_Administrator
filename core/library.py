@@ -1127,14 +1127,19 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 should_retry_flac = config.get('retry_failed_flac', False)
                 
                 if not should_retry_flac and song_key in failed_flac_cache:
-                    if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
-                        stats.app.update_song_status(i, '⏭️ 跳過', song_name)
                     log_func(f"  ⏭️ [FLAC Skipped] {song_name} (previously failed)")
-                    current_dl += 1
-                    # Update progress
-                    if progress_func: 
-                        progress_func(current_dl, total_missing, None)
-                    continue
+                    # Only remove FLAC from needed formats, keep other formats (e.g. MP3)
+                    needed_formats = [f for f in needed_formats if f != 'flac']
+                    item['needed_formats'] = needed_formats
+                    
+                    if not needed_formats:
+                        # Only needed FLAC and it was skipped → skip entire song
+                        if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                            stats.app.update_song_status(i, '⏭️ 跳過', song_name)
+                        current_dl += 1
+                        if progress_func: 
+                            progress_func(current_dl, total_missing, None)
+                        continue
             
             # Set appropriate initial status based on format
             if 'flac' in needed_formats:
@@ -1202,8 +1207,8 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             if not needed_formats:
                 continue  # Skip if no formats to download
                 
-            all_formats_success = True
             downloaded_paths = []
+            failed_formats = []
             
             for fmt in needed_formats:
                 # Update UI to show specific format
@@ -1216,12 +1221,27 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     downloaded_paths.append(res)
                     audio_files_cache.append(res)
                 else:
-                    all_formats_success = False
+                    failed_formats.append(fmt)
             
-            if all_formats_success and downloaded_paths:
-                # Update status to success
+            # Handle FLAC failure cache independently
+            if 'flac' in failed_formats:
+                song_key = hashlib.md5(song_name.encode('utf-8')).hexdigest()
+                failed_flac_cache[song_key] = {
+                    'name': song_name,
+                    'timestamp': time.time(),
+                    'reason': 'dab_unavailable'
+                }
+                log_func(f"  ℹ️ [FLAC Unavailable] {song_name} - DAB Music 無此歌曲")
+            
+            if downloaded_paths:
+                # At least one format succeeded
+                if failed_formats:
+                    status_text = f'⚠️ 部分完成 ({",".join(f.upper() for f in failed_formats)} 失敗)'
+                else:
+                    status_text = '✅ 完成'
+                
                 if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
-                    stats.app.update_song_status(i, '✅ 完成', song_name)
+                    stats.app.update_song_status(i, status_text, song_name)
                 
                 # Track time spent on this song
                 song_end_time = time.time()
@@ -1242,23 +1262,9 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     log_func(_('dl_rest', successful_downloads))
                     time.sleep(15)
             else:
-                # Handle FLAC failure specially
-                if 'flac' in needed_formats:
-                    if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
-                        stats.app.update_song_status(i, '❌ 無 FLAC', song_name)
-                    log_func(f"  ℹ️ [FLAC Unavailable] {song_name} - DAB Music 無此歌曲")
-                    
-                    # Add to failed FLAC cache
-                    song_key = hashlib.md5(song_name.encode('utf-8')).hexdigest()
-                    failed_flac_cache[song_key] = {
-                        'name': song_name,
-                        'timestamp': time.time(),
-                        'reason': 'dab_unavailable'
-                    }
-                else:
-                    # Update status to failed for other formats
-                    if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
-                        stats.app.update_song_status(i, '❌ 失敗', song_name)
+                # All formats failed
+                if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+                    stats.app.update_song_status(i, '❌ 失敗', song_name)
             
             current_dl += 1
             # Update progress with overall ETA calculation
@@ -1491,13 +1497,36 @@ def get_playlist_completeness_report(files, library_path):
         # Fallback to legacy single format
         audio_formats = [config.get('audio_format', 'mp3')]
     
+    # Load failed_flac_cache to exclude known-unavailable FLAC from missing count
+    failed_flac_cache = {}
+    if 'flac' in audio_formats:
+        failed_flac_cache_file = os.path.join(config.get('base_path', ''), 'data', 'failed_flac.json')
+        try:
+            if os.path.exists(failed_flac_cache_file):
+                with open(failed_flac_cache_file, 'r', encoding='utf-8') as f:
+                    failed_flac_cache = json.load(f)
+        except:
+            failed_flac_cache = {}
+    
     report = {}
     for pl_file in files:
         songs = parse_playlist(pl_file)
         missing = 0
         for song_name in songs:
+            # Determine which formats this song actually needs
+            song_formats = list(audio_formats)
+            if 'flac' in song_formats and failed_flac_cache:
+                song_key = hashlib.md5(song_name.encode('utf-8')).hexdigest()
+                if song_key in failed_flac_cache:
+                    # FLAC known unavailable, don't require it
+                    song_formats = [f for f in song_formats if f != 'flac']
+            
+            if not song_formats:
+                # All formats were excluded (only had FLAC and it failed)
+                continue
+            
             is_song_complete = True
-            for fmt in audio_formats:
+            for fmt in song_formats:
                 # Check strict existence of each format
                 if not find_song_exact_format(song_name, fmt, library_index):
                     is_song_complete = False
@@ -1721,20 +1750,20 @@ def get_detailed_stats(config, audio_files=None):
                 song_occurrences[query_tokens] += 1
     
     # Calculate actual savings: for each song that appears multiple times, 
-    # add (occurrences - 1) * file_size
+    # add (occurrences - 1) * total_file_size (sum of all formats: MP3 + FLAC etc.)
     actual_savings_bytes = 0
     for tokens_tuple, occurrences in song_occurrences.items():
         if occurrences > 1 and tokens_tuple in song_to_files:
-            # Find the first existing file for this song
+            # Sum sizes of ALL format files for this song (e.g. MP3 + FLAC)
+            song_total_size = 0
             for file_path in song_to_files[tokens_tuple]:
                 if os.path.exists(file_path):
                     try:
-                        file_size = os.path.getsize(file_path)
-                        # Add file size for each duplicate occurrence (occurrences - 1)
-                        actual_savings_bytes += (occurrences - 1) * file_size
-                        break  # Only use the first file found
+                        song_total_size += os.path.getsize(file_path)
                     except (OSError, IOError):
                         continue
+            if song_total_size > 0:
+                actual_savings_bytes += (occurrences - 1) * song_total_size
     
     savings_mb = actual_savings_bytes / (1024 * 1024)
     

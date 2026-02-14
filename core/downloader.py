@@ -492,6 +492,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         from core.library import find_song_prefer_flac
         existing = find_song_prefer_flac(song_name, file_list)
         if existing and existing.lower().endswith('.flac'):
+            log_func(f"  ✅ [Already Exists] {song_name} (FLAC)")
             return existing
         # If existing is not FLAC, we'll continue to download FLAC even if MP3 exists
     else:
@@ -499,6 +500,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         if existing:
             ext = os.path.splitext(existing)[1].lower().replace('.', '')
             if ext == effective_audio_format:
+                log_func(f"  ✅ [Already Exists] {song_name} ({effective_audio_format.upper()})")
                 return existing
 
     clean_name = sanitize_filename(song_name)
