@@ -28,9 +28,8 @@ class DABDownloader:
         try:
             log_func(f"  🔍 [DAB Search] {song_name}")
             
-            # Extract artist name from song_name if in "Artist - Title" format
-            artist_name = None
-            if ' - ' in song_name:
+            # Extract artist name from song_name if in "Artist - Title" format and not provided
+            if not artist_name and ' - ' in song_name:
                 parts = song_name.split(' - ', 1)
                 if len(parts) == 2:
                     artist_name = parts[0].strip()

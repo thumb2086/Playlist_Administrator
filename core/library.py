@@ -876,8 +876,9 @@ def move_unsorted_songs(config, log_func):
 def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None, speed_display_callback=None):
     from core.spotify import scrape_via_spotify_embed
     from core.downloader import download_song
-    from utils.config import get_failed_flac_path 
+    from utils.config import get_data_file
     import time
+    import json
             
     # 0. Initialize
     library_path = config['library_path']
@@ -917,13 +918,21 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     rename_explicit_files(library_path, log_func)
     
     # 1.3 Load failed FLAC cache
-    failed_flac_cache_file = get_failed_flac_path(config)
     failed_flac_cache = {}
     try:
+        failed_flac_cache_file = get_data_file('failed_flac.json')
         if os.path.exists(failed_flac_cache_file):
-            with open(failed_flac_cache_file, 'r', encoding='utf-8') as f:
-                failed_flac_cache = json.load(f)
-    except:
+            if os.path.getsize(failed_flac_cache_file) > 0:
+                with open(failed_flac_cache_file, 'r', encoding='utf-8') as f:
+                    failed_flac_cache = json.load(f)
+                log_func(f"  前次失敗FLAC記錄: {len(failed_flac_cache)} 首")
+            else:
+                 log_func("  快取檔案為空，將重新建立")
+    except json.JSONDecodeError:
+        log_func("  快取檔案損毀 (JSON Error)，將重新建立")
+        failed_flac_cache = {}
+    except Exception as e:
+        log_func(f"  無法讀取FLAC失敗快取: {e}")
         failed_flac_cache = {}
 
     # 2. Scrape Spotify (Update local tracklists from URL)
@@ -959,6 +968,13 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             # Extract song name from filename
             song_name = os.path.splitext(os.path.basename(audio_path))[0]
             songs_missing_lyrics.append((song_name, audio_path))
+
+    # Map playlist names back to artist names for "Artist" type playlists to provide better search hints
+    pl_name_to_artist = {}
+    url_names_cfg = config.get('url_names', {})
+    for sp_url, name in url_names_cfg.items():
+        if get_playlist_type(sp_url) == "Artist":
+            pl_name_to_artist[name] = name
 
     # First Pass: Filename Index Check (Fast)
     for pl_file in files:
@@ -998,7 +1014,13 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                      new_missing = set(missing_formats)
                      existing_entry['needed_formats'] = list(current_missing.union(new_missing))
                  else:
-                     songs_to_download.append({'name': song_name, 'playlist': pl_name, 'needed_formats': missing_formats})
+                     artist_hint = pl_name_to_artist.get(pl_name)
+                      songs_to_download.append({
+                          'name': song_name, 
+                          'playlist': pl_name, 
+                          'needed_formats': missing_formats,
+                          'artist_hint': artist_hint
+                      })
     
     # Second Pass: Deep Metadata Scan (Slower but necessary for renamed files)
     if songs_to_download:
@@ -1226,7 +1248,8 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
                     stats.app.update_song_status(i, f'🔽 {fmt.upper()}', song_name)
                     
-                res = download_song(song_name, library_path, fmt, log_func, audio_files_cache, stats, None, song_progress_callback, current_dl, use_dab_lossless, use_dab_metadata, dab_credentials, config)
+                artist_hint = item.get('artist_hint')
+                res = download_song(song_name, library_path, fmt, log_func, audio_files_cache, stats, None, song_progress_callback, current_dl, use_dab_lossless, use_dab_metadata, dab_credentials, config, artist_hint)
                 
                 if res and os.path.exists(res):
                     downloaded_paths.append(res)
@@ -1235,9 +1258,10 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                     failed_formats.append(fmt)
             
             # Handle FLAC failure cache independently
+            norm_name = song_name.strip().lower()
+            song_key = hashlib.md5(norm_name.encode('utf-8')).hexdigest()
+
             if 'flac' in failed_formats:
-                norm_name = song_name.strip().lower()
-                song_key = hashlib.md5(norm_name.encode('utf-8')).hexdigest()
                 failed_flac_cache[song_key] = {
                     'name': song_name,
                     'timestamp': time.time(),
@@ -1247,12 +1271,18 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 
                 # Save cache immediately to prevent loss on cancellation
                 try:
-                    failed_flac_cache_file = get_failed_flac_path(config)
+                    failed_flac_cache_file = get_data_file('failed_flac.json')
                     os.makedirs(os.path.dirname(failed_flac_cache_file), exist_ok=True)
                     with open(failed_flac_cache_file, 'w', encoding='utf-8') as f:
                         json.dump(failed_flac_cache, f, ensure_ascii=False, indent=2)
                 except:
                     pass
+            elif 'flac' in needed_formats and 'flac' not in failed_formats:
+                # FLAC was requested and succeeded, remove from failed cache if present
+                if song_key in failed_flac_cache:
+                    del failed_flac_cache[song_key]
+                    # Also save periodically or at the end
+
             
             if downloaded_paths:
                 # At least one format succeeded
@@ -1311,7 +1341,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     
     # Save failed FLAC cache
     try:
-        failed_flac_cache_file = get_failed_flac_path(config)
+        failed_flac_cache_file = get_data_file('failed_flac.json')
         os.makedirs(os.path.dirname(failed_flac_cache_file), exist_ok=True)
         with open(failed_flac_cache_file, 'w', encoding='utf-8') as f:
             json.dump(failed_flac_cache, f, ensure_ascii=False, indent=2)
@@ -1339,7 +1369,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         import threading
         from concurrent.futures import ThreadPoolExecutor, as_completed
         import json
-        from utils.config import get_data_path
+        from utils.config import get_data_file
         
         log_func(_('retroactive_lyrics', len(songs_missing_lyrics)))
         total_lyrics_to_fetch = len(songs_missing_lyrics)
@@ -1348,7 +1378,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         max_consecutive_failures = 10  # Skip to next phase after too many failures
         
         # Load failed lyrics cache
-        failed_cache_file = os.path.join(get_data_path(config), 'failed_lyrics.json')
+        failed_cache_file = get_data_file('failed_lyrics.json')
         failed_cache = {}
         try:
             if os.path.exists(failed_cache_file):
@@ -1526,7 +1556,7 @@ def get_playlist_completeness_report(files, library_path):
     library_index = build_library_index(audio_files_cache)
     
     # Get current audio format preference (support multiple formats)
-    from utils.config import load_config, get_failed_flac_path
+    from utils.config import load_config, get_data_file
     config = load_config()
     audio_formats = config.get('audio_formats', [])
     if not audio_formats:
@@ -1536,8 +1566,8 @@ def get_playlist_completeness_report(files, library_path):
     # Load failed_flac_cache to exclude known-unavailable FLAC from missing count
     failed_flac_cache = {}
     if 'flac' in audio_formats:
-        failed_flac_cache_file = get_failed_flac_path(config)
         try:
+            failed_flac_cache_file = get_data_file('failed_flac.json')
             if os.path.exists(failed_flac_cache_file):
                 with open(failed_flac_cache_file, 'r', encoding='utf-8') as f:
                     failed_flac_cache = json.load(f)

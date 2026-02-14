@@ -105,7 +105,7 @@ class MetadataEnricher:
         
         return missing_fields
     
-    def enrich_file_metadata(self, file_path, song_name, log_func):
+    def enrich_file_metadata(self, file_path, song_name, log_func, artist_hint=None):
         """Enrich metadata for a single file"""
         
         try:
@@ -113,7 +113,7 @@ class MetadataEnricher:
             
             # Try DAB Music first if available
             if self.dab_client:
-                success = self._enrich_with_dab_music(file_path, song_name, log_func)
+                success = self._enrich_with_dab_music(file_path, song_name, log_func, artist_hint)
                 if success:
                     return True
             
@@ -125,11 +125,20 @@ class MetadataEnricher:
             log_func(f"  ❌ Error enriching {os.path.basename(file_path)}: {str(e)}")
             return False
     
-    def _enrich_with_dab_music(self, file_path, song_name, log_func):
+    def _enrich_with_dab_music(self, file_path, song_name, log_func, artist_hint=None):
         """Try to enrich metadata using DAB Music API"""
         try:
+            # Extract artist name if not provided
+            search_artist = artist_hint
+            search_title = song_name
+            if not search_artist and ' - ' in song_name:
+                parts = song_name.split(' - ', 1)
+                if len(parts) == 2:
+                    search_artist = parts[0].strip()
+                    search_title = parts[1].strip()
+
             # Search for the track
-            track_info = self.dab_client.get_best_quality_match(song_name)
+            track_info = self.dab_client.get_best_quality_match(search_title, search_artist)
             if not track_info:
                 return False
             
@@ -296,7 +305,7 @@ class MetadataEnricher:
                     success_rate = (successful_enrichments / (i + 1) * 100) if (i + 1) > 0 else 0
                     log_func(f"🎵 Metadata 補充進度: {i + 1}/{total_files} (成功: {successful_enrichments}, 成功率: {success_rate:.1f}%)")
                 
-                success = self.enrich_file_metadata(file_path, song_name, log_func)
+                success = self.enrich_file_metadata(file_path, song_name, log_func, None)
                 if success:
                     successful_enrichments += 1
                 

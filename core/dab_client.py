@@ -354,4 +354,18 @@ class DABMusicClient:
                     return track
         
         # If still no good match, return None to trigger fallback
+        # CRITICAL: Don't return first candidate if artist info was requested but not matched
+        if artist_name:
+            return None
+            
+        # If artist wasn't provided, only return first match if it's very likely the right one
+        # (e.g. title is unique enough or the first result is a very strong match)
+        if tracks:
+             first = tracks[0]
+             # If first result's title is exact, and we don't have an artist hint, 
+             # it's still risky but we'll accept it for now as a last resort
+             # unless the user provided a song_name that has "Artist - Title" format
+             if first.get('title', '').lower() == clean_track_name.lower():
+                 return first
+
         return None

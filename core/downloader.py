@@ -314,10 +314,18 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
     # If DAB Music is requested and credentials are provided AND asking for FLAC
     if use_dab_lossless and dab_credentials and audio_format == 'flac':
         try:
+            # Extract artist name for better matching context
+            # Priority: 1. artist_hint, 2. extraction from song_name
+            actual_artist_hint = artist_hint
+            if not actual_artist_hint and ' - ' in song_name:
+                parts = song_name.split(' - ', 1)
+                if len(parts) == 2:
+                    actual_artist_hint = parts[0].strip()
+
             dab_downloader = create_dab_downloader(dab_credentials['email'], dab_credentials['password'])
             success = dab_downloader.download_song(
                 song_name, library_path, log_func, file_list, stats, 
-                progress_callback, current_dl
+                progress_callback, current_dl, actual_artist_hint
             )
             dab_downloader.logout()
             if success:
@@ -350,8 +358,14 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     if use_dab_metadata and config:
                         log_func(f"  ✨ [DAB Download Success] Attempting metadata enrichment for {song_name}")
                         try:
+                            # Re-extract/use artist hint if needed for enrichment
+                            if not actual_artist_hint and ' - ' in song_name:
+                                parts = song_name.split(' - ', 1)
+                                if len(parts) == 2:
+                                    actual_artist_hint = parts[0].strip()
+                                    
                             enricher = create_metadata_enricher(config)
-                            enricher.enrich_file_metadata(final_path, song_name, log_func)
+                            enricher.enrich_file_metadata(final_path, song_name, log_func, actual_artist_hint)
                             log_func(f"  ✅ [Metadata Enriched] {song_name}")
                             enricher.cleanup()
                         except Exception as e:
