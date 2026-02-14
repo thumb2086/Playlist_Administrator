@@ -186,7 +186,7 @@ class SettingsWindow:
         self.config['dab_email'] = new_dab_email
         self.config['dab_password'] = new_dab_password
         self.config['dab_use_lossless'] = new_use_dab
-        self.config['dab_use_metadata'] = new_use_dab  # 同時啟用 metadata
+        self.config['enable_metadata_enrichment'] = new_metadata_enrichment
         self.config['audio_formats'] = new_audio_formats
         self.config['audio_format'] = new_audio_formats[0] # Legacy compatibility
         

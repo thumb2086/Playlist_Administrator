@@ -177,6 +177,10 @@ def get_normalized_tokens(text):
     # 1. Convert to lowercase
     text = str(text).lower()
     
+    # 1.5 Remove spaces between Chinese/Japanese characters to ensure "你在 不在" matches "你在不在"
+    # This also helps with Japanese kana
+    text = re.sub(r'(?<=[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff])\s+(?=[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff])', '', text)
+
     # 2. Convert Chinese characters to Simplified Chinese, but preserve Japanese
     # Only apply zhconv to Chinese characters, not Japanese kana
     try:
@@ -196,29 +200,32 @@ def get_normalized_tokens(text):
         # If conversion fails, keep original text
         pass
 
-    # 2.5 Remove \"E\" prefix artifact (common in Spotify scrapes)
-    # e.g. \"EYosebe\", \"E王ADEN\"
-    text = re.sub(r'^e(?=[a-z\\u4e00-\\u9fff\\u3040-\\u30ff])', '', text)
+    # 2.5 Remove "E" prefix artifact (common in Spotify scrapes)
+    # Improved: work at word boundaries, not just start of string
+    text = re.sub(r'(?:^|(?<=[^a-z0-9]))e(?=[a-z\u4e00-\u9fff\u3040-\u30ff])', '', text)
 
-    # 2.6 Remove common Chinese music title noise phrases
+    # 2.6 Remove common music title noise phrases
     noise_phrases = [
         r'全新單曲', r'單曲', r'官方完整版', r'官方', r'完整版', 
-        r'高清', r'動態歌詞版', r'歌詞版', r'官方版', r'全新'
+        r'高清', r'動態歌詞版', r'歌詞版', r'官方版', r'全新',
+        r'music video', r'official video', r'official music video', r'video', r'loop', r'lyrics'
     ]
     for phrase in noise_phrases:
-        text = re.sub(phrase, ' ', text)
+        text = re.sub(phrase, ' ', text, flags=re.IGNORECASE)
 
     # 3. Standardize artist separators and common terms to spaces
     # Handles 'feat.', 'ft.', 'vs', 'vs.', '&', ',', ' x '
     text = re.sub(r'\s*(feat|ft|vs)\.?\s*|\s*[&,x]\s*', ' ', text)
 
-    # 4. Remove content in brackets for common markers, but preserve meaningful content
-    # Only remove patterns like (Live), [Remix], 【MV】, 【Official】, 【Lyric Video】 etc.
-    text = re.sub(r"[\(\[【](?:live|remix|mv|official|lyrics? video|lyric video|動態歌詞版|歌詞版)[^\)\]】]*[\)\]】]", " ", text, flags=re.IGNORECASE)
+    # 4. Remove content in brackets for common markers
+    # Enhanced: remove any brackets containing these keywords anywhere inside
+    # Added support for full-width brackets: （ ） ［ ］
+    bracket_keywords = r'live|remix|mv|official|lyrics? video|lyric video|動態歌詞版|歌詞版|music video|video|loop'
+    text = re.sub(r"[\(\[【（［][^\)\]】）］]*(?:" + bracket_keywords + r")[^\)\]】）］]*[\)\]】）］]", " ", text, flags=re.IGNORECASE)
     
-    # For other brackets, just remove the brackets but keep the content
-    text = re.sub(r"[\(\[【]", " ", text)
-    text = re.sub(r"[\)\]】]", " ", text)
+    # For other brackets, just remove the brackets but keep the content (including full-width)
+    text = re.sub(r"[\(\[【（［]", " ", text)
+    text = re.sub(r"[\)\]】）］]", " ", text)
 
     # 5. Add spaces between Latin letters and Chinese characters to improve tokenization
     # This helps separate "BIDO曾愷妤" into "BIDO 曾愷妤"
@@ -404,21 +411,23 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
         if not candidates and title_tokens:
             collect_candidates(title_tokens)
         
-        # 3. Flexible matching (simplified: check overlap between title and file tokens)
-        if not candidates and title_tokens:
-            title_set = set(title_tokens)
-            for index_tokens, paths in library_source.items():
-                if not index_tokens: continue
-                index_set = set(index_tokens)
-                
-                # Calculate overlap: intersection / smaller set size
-                overlap = len(title_set & index_set)
-                min_size = min(len(title_set), len(index_set))
-                
-                if min_size > 0 and overlap / min_size >= 0.5:
-                    # At least 50% of the smaller token set matches
-                    if isinstance(paths, list): candidates.extend(paths)
-                    else: candidates.append(paths)
+        # 3. Flexible matching (simplified: check overlap between search tokens and file tokens)
+        if not candidates:
+            fuzzy_source = title_tokens if title_tokens else query_tokens
+            if fuzzy_source:
+                title_set = set(fuzzy_source)
+                for index_tokens, paths in library_source.items():
+                    if not index_tokens: continue
+                    index_set = set(index_tokens)
+                    
+                    # Calculate overlap: intersection / smaller set size
+                    overlap = len(title_set & index_set)
+                    min_size = min(len(title_set), len(index_set))
+                    
+                    if min_size > 0 and overlap / min_size >= 0.5:
+                        # At least 50% of the smaller token set matches
+                        if isinstance(paths, list): candidates.extend(paths)
+                        else: candidates.append(paths)
 
     elif isinstance(library_source, list):
         # Legacy List Mode
@@ -460,23 +469,25 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
             if res_paths: 
                 if isinstance(res_paths, list): candidates.extend(res_paths)
                 else: candidates.append(res_paths)
-            
-            # Fuzzy/Subset Check on Metadata Index
-            if not candidates:
+        
+        # Fuzzy/Subset Check on Metadata Index
+        if not candidates:
+            fuzzy_tokens = title_tokens if title_tokens else query_tokens
+            if fuzzy_tokens:
                 for meta_tokens, paths in metadata_index.items():
                     if not meta_tokens: continue
                     is_match = False
                     
                     # Case A: Query is subset of Metadata
-                    if len(title_tokens) > 0 and len(meta_tokens) >= len(title_tokens):
-                        if all(token in meta_tokens for token in title_tokens):
-                             coverage = len(title_tokens) / len(meta_tokens)
+                    if len(fuzzy_tokens) > 0 and len(meta_tokens) >= len(fuzzy_tokens):
+                        if all(token in meta_tokens for token in fuzzy_tokens):
+                             coverage = len(fuzzy_tokens) / len(meta_tokens)
                              if coverage >= 0.3: is_match = True
 
                     # Case B: Metadata is subset of Query
-                    elif len(meta_tokens) > 0 and len(title_tokens) >= len(meta_tokens):
-                        if all(token in title_tokens for token in meta_tokens):
-                             coverage = len(meta_tokens) / len(title_tokens)
+                    elif len(meta_tokens) > 0 and len(fuzzy_tokens) >= len(meta_tokens):
+                        if all(token in fuzzy_tokens for token in meta_tokens):
+                             coverage = len(meta_tokens) / len(fuzzy_tokens)
                              if coverage >= 0.5: is_match = True
                     
                     if is_match:
@@ -504,8 +515,12 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
         
         if verified_candidates:
             return verified_candidates[0] # Return best verified match
+        else:
+            # STRICT MODE: If artist was provided but no candidate matches it, 
+            # we return None to avoid false positives (e.g. same title, diff artist)
+            return None
             
-    # Default: Return first candidate found (legacy behavior)
+    # Default: Return first candidate found (only if no artist was specified)
     return unique_candidates[0]
 
 def _search_by_metadata(title_tokens, file_list):
@@ -591,10 +606,36 @@ def find_song_prefer_flac(song_name, library_source):
             filename = os.path.basename(file_path)
             name_no_ext = os.path.splitext(filename)[0]
             file_tokens = tuple(get_normalized_tokens(name_no_ext))
+            
+            # Use overlap matching fallback similarly to find_song_in_library
+            is_match = False
             if file_tokens == query_tokens:
+                is_match = True
+            else:
+                # Check overlap (at least 50% of tokens match)
+                query_set = set(query_tokens)
+                file_set = set(file_tokens)
+                overlap = len(query_set & file_set)
+                min_size = min(len(query_set), len(file_set))
+                if min_size > 0 and overlap / min_size >= 0.5:
+                    is_match = True
+            
+            if is_match:
                 found_files.append(file_path)
     else:
         return None
+    
+    # Fallback: If no direct token match, try fuzzy matching on dictionary keys if using index
+    if not found_files and isinstance(library_source, dict):
+        query_set = set(query_tokens)
+        for index_tokens, paths in library_source.items():
+            if not index_tokens: continue
+            index_set = set(index_tokens)
+            overlap = len(query_set & index_set)
+            min_size = min(len(query_set), len(index_set))
+            if min_size > 0 and overlap / min_size >= 0.5:
+                if isinstance(paths, list): found_files.extend(paths)
+                else: found_files.append(paths)
     
     if not found_files:
         return None
@@ -657,27 +698,35 @@ def find_song_exact_format(song_name, target_extension, library_source):
                 found_files.extend(ext_candidates)
         
         # 3. Subset matching (slow fallback — always run if no extension match yet)
-        if title_tokens:
+        fuzzy_source = title_tokens if title_tokens else query_tokens
+        if fuzzy_source:
             best_match = None
             best_score = 0
+            fuzzy_tokens = fuzzy_source
             for index_tokens, paths in library_source.items():
                 if not index_tokens: continue
                 score = 0
                 
-                # Case A: Title is subset of Index
-                if len(title_tokens) > 0 and len(index_tokens) >= len(title_tokens):
-                    if all(token in index_tokens for token in title_tokens):
-                        coverage = len(title_tokens) / len(index_tokens)
-                        if coverage >= 0.1:
-                            # Score = number of matching tokens * coverage
-                            score = len(title_tokens) * coverage
+                # Case A: Query is subset of Index (Strict, but now with score fallback)
+                if len(fuzzy_tokens) > 0 and len(index_tokens) >= len(fuzzy_tokens):
+                    # Check overlap/coverage instead of strict "all"
+                    index_set = set(index_tokens)
+                    fuzzy_set = set(fuzzy_tokens)
+                    overlap_count = len(index_set & fuzzy_set)
+                    
+                    if overlap_count / len(fuzzy_set) >= 0.6: # At least 60% of query tokens found
+                        coverage = overlap_count / len(index_tokens)
+                        score = overlap_count * (coverage + 0.5) # Bonus for higher coverage
                 
-                # Case B: Index is subset of Title
-                elif len(index_tokens) > 0 and len(title_tokens) >= len(index_tokens):
-                    if all(token in title_tokens for token in index_tokens):
-                        coverage = len(index_tokens) / len(title_tokens)
-                        if coverage >= 0.3:
-                            score = len(index_tokens) * coverage
+                # Case B: Index is subset of Query
+                elif len(index_tokens) > 0 and len(fuzzy_tokens) >= len(index_tokens):
+                    index_set = set(index_tokens)
+                    fuzzy_set = set(fuzzy_tokens)
+                    overlap_count = len(index_set & fuzzy_set)
+                    
+                    if overlap_count / len(index_set) >= 0.6:
+                        coverage = overlap_count / len(fuzzy_set)
+                        score = overlap_count * (coverage + 0.5)
                 
                 if score > 0:
                     ext_candidates = paths if isinstance(paths, list) else [paths]
