@@ -104,7 +104,7 @@ class SettingsWindow:
         
         tk.Label(lf_feat, text="", font=("Microsoft JhengHei", 8)).pack(anchor="w", padx=5, pady=(5, 0))  # Spacer
         
-        self.lyrics_var = tk.BooleanVar(value=self.config.get('enable_retroactive_lyrics', True))
+        self.lyrics_var = tk.BooleanVar(value=self.config.get('enable_retroactive_lyrics', False))
         tk.Checkbutton(lf_feat, text="自動補抓歌詞 (Auto Lyrics)", variable=self.lyrics_var, font=("Microsoft JhengHei", 10)).pack(anchor="w", padx=5)
         
         self.metadata_enrichment_var = tk.BooleanVar(value=self.config.get('enable_metadata_enrichment', False))

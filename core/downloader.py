@@ -305,7 +305,7 @@ def download_lyrics(song_name, output_path, log_func, failed_cache=None):
         return False
     return False
 
-def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None, progress_callback=None, current_dl=0, use_dab_lossless=False, use_dab_metadata=False, dab_credentials=None, config=None):
+def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None, progress_callback=None, current_dl=0, use_dab_lossless=False, use_dab_metadata=False, dab_credentials=None, config=None, artist_hint=None):
     """Downloads song in specified format (mp3 or flac)"""
     
     # Create a simple failed lyrics cache for this session
@@ -901,7 +901,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                         
                         # Download lyrics
                         lrc_path = os.path.splitext(final_path)[0] + ".lrc"
-                        if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', True):
+                        if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', False):
                             download_lyrics(song_name, lrc_path, log_func, lyrics_failed_cache)
                         return final_path
                     
@@ -924,14 +924,14 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                         
                         # Download lyrics
                         lrc_path = os.path.splitext(filename)[0] + ".lrc"
-                        if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', True):
+                        if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', False):
                             download_lyrics(song_name, lrc_path, log_func, lyrics_failed_cache)
                         all_candidates_failed = False  # Mark as successful
                         return filename
                     
                     # Download lyrics for final_path even if it doesn't exist yet (it will be created by PP)
                     lrc_path = os.path.splitext(final_path)[0] + ".lrc"
-                    if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', True):
+                    if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', False):
                         download_lyrics(song_name, lrc_path, log_func, lyrics_failed_cache)
                     
                     # Add metadata after download is complete

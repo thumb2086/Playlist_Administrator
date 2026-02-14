@@ -89,7 +89,7 @@ def initialize_session_state():
         'dab_use_metadata': False,
         'dab_email': "",
         'dab_password': "",
-        'enable_retroactive_lyrics': True,
+        'enable_retroactive_lyrics': False,
         'auto_metadata': False,
         'language': 'zh-TW',
         'spotify_urls': [],
@@ -410,7 +410,7 @@ elif page == "⚙️ 系統設定":
     with tab3:
         st.subheader("下載行為")
         settings['threads'] = st.slider("同時下載數 (Threads)", 1, 32, value=settings.get('max_threads', 8))
-        settings['auto_lyrics'] = st.checkbox("自動搜尋歌詞 (Auto Lyrics)", value=settings.get('enable_retroactive_lyrics', True))
+        settings['auto_lyrics'] = st.checkbox("自動搜尋歌詞 (Auto Lyrics)", value=settings.get('enable_retroactive_lyrics', False))
         
         # Meta toggle now decoupled from lossless, but still needs credentials
         md_disabled = not (settings.get('dab_use_lossless') or settings.get('dab_use_metadata'))

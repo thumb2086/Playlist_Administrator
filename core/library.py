@@ -627,6 +627,11 @@ def find_song_exact_format(song_name, target_extension, library_source):
     
     found_files = []
     
+    # Helper to check extension match
+    target_ext = target_extension.lower()
+    if not target_ext.startswith('.'):
+        target_ext = '.' + target_ext
+    
     # Check if library_source is a dictionary (index) or list (file list)
     if isinstance(library_source, dict):
         # 1. FAST PATH: Exact full match
@@ -636,37 +641,54 @@ def find_song_exact_format(song_name, target_extension, library_source):
                 found_files = list(paths)
             else:
                 found_files = [paths]
+            # Check extension immediately — if found, return early
+            for file_path in found_files:
+                if file_path.lower().endswith(target_ext):
+                    return file_path
         
         # 2. Title-only match (for renamed files)
-        if not found_files and title_tokens and title_tokens != query_tokens:
+        if title_tokens and title_tokens != query_tokens:
             paths = library_source.get(title_tokens)
             if paths:
-                if isinstance(paths, list):
-                    found_files = list(paths)
-                else:
-                    found_files = [paths]
+                ext_candidates = paths if isinstance(paths, list) else [paths]
+                for file_path in ext_candidates:
+                    if file_path.lower().endswith(target_ext):
+                        return file_path
+                found_files.extend(ext_candidates)
         
-        # 3. Subset matching (slow fallback)
-        if not found_files and title_tokens:
+        # 3. Subset matching (slow fallback — always run if no extension match yet)
+        if title_tokens:
+            best_match = None
+            best_score = 0
             for index_tokens, paths in library_source.items():
                 if not index_tokens: continue
-                is_match = False
+                score = 0
                 
                 # Case A: Title is subset of Index
                 if len(title_tokens) > 0 and len(index_tokens) >= len(title_tokens):
                     if all(token in index_tokens for token in title_tokens):
                         coverage = len(title_tokens) / len(index_tokens)
-                        if coverage >= 0.1: is_match = True
+                        if coverage >= 0.1:
+                            # Score = number of matching tokens * coverage
+                            score = len(title_tokens) * coverage
                 
                 # Case B: Index is subset of Title
                 elif len(index_tokens) > 0 and len(title_tokens) >= len(index_tokens):
                     if all(token in title_tokens for token in index_tokens):
                         coverage = len(index_tokens) / len(title_tokens)
-                        if coverage >= 0.3: is_match = True
+                        if coverage >= 0.3:
+                            score = len(index_tokens) * coverage
                 
-                if is_match:
-                    if isinstance(paths, list): found_files.extend(paths)
-                    else: found_files.append(paths)
+                if score > 0:
+                    ext_candidates = paths if isinstance(paths, list) else [paths]
+                    for file_path in ext_candidates:
+                        if file_path.lower().endswith(target_ext):
+                            if score > best_score:
+                                best_score = score
+                                best_match = file_path
+            
+            if best_match:
+                return best_match
                         
     elif isinstance(library_source, list):
         # SLOW PATH: Linear Scan
@@ -678,15 +700,15 @@ def find_song_exact_format(song_name, target_extension, library_source):
             
             if not file_tokens: continue
             
+            is_match = False
             # Exact match
             if file_tokens == query_tokens:
-                found_files.append(file_path)
+                is_match = True
             # Title-only match
             elif title_tokens and file_tokens == title_tokens:
-                found_files.append(file_path)
+                is_match = True
             # Subset match
             elif title_tokens:
-                is_match = False
                 if len(title_tokens) > 0 and len(file_tokens) >= len(title_tokens):
                     if all(token in file_tokens for token in title_tokens):
                         coverage = len(title_tokens) / len(file_tokens)
@@ -695,24 +717,14 @@ def find_song_exact_format(song_name, target_extension, library_source):
                     if all(token in title_tokens for token in file_tokens):
                         coverage = len(file_tokens) / len(title_tokens)
                         if coverage >= 0.3: is_match = True
-                
-                if is_match:
-                    found_files.append(file_path)
+            
+            if is_match:
+                if file_path.lower().endswith(target_ext):
+                    return file_path
+                found_files.append(file_path)
     else:
         return None
         
-    if not found_files:
-        return None
-        
-    # Check for exact extension match
-    target_ext = target_extension.lower()
-    if not target_ext.startswith('.'):
-        target_ext = '.' + target_ext
-        
-    for file_path in found_files:
-        if file_path.lower().endswith(target_ext):
-            return file_path
-            
     return None
 
 def rename_explicit_files(library_path, log_func):
@@ -1015,12 +1027,12 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                      existing_entry['needed_formats'] = list(current_missing.union(new_missing))
                  else:
                      artist_hint = pl_name_to_artist.get(pl_name)
-                      songs_to_download.append({
-                          'name': song_name, 
-                          'playlist': pl_name, 
-                          'needed_formats': missing_formats,
-                          'artist_hint': artist_hint
-                      })
+                     songs_to_download.append({
+                         'name': song_name, 
+                         'playlist': pl_name, 
+                         'needed_formats': missing_formats,
+                         'artist_hint': artist_hint
+                     })
     
     # Second Pass: Deep Metadata Scan (Slower but necessary for renamed files)
     if songs_to_download:
@@ -1364,7 +1376,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
             log_func(f"⚠️ Metadata enrichment failed: {e}")
         
     # PHASE 3: Retroactive Lyrics Download (Only run if enabled and there are existing songs missing lyrics)
-    if songs_missing_lyrics and config.get('enable_retroactive_lyrics', True):
+    if songs_missing_lyrics and config.get('enable_retroactive_lyrics', False):
         from core.downloader import download_lyrics
         import threading
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1508,7 +1520,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
                 json.dump(failed_cache, f, ensure_ascii=False, indent=2)
         except Exception as e:
             log_func(f"  ⚠️ 無法儲存失敗歌詞快取: {e}")
-    elif songs_missing_lyrics and not config.get('enable_retroactive_lyrics', True):
+    elif songs_missing_lyrics and not config.get('enable_retroactive_lyrics', False):
         log_func(f" -> 跳過歌詞補抓 ({len(songs_missing_lyrics)} 首歌曲缺少歌詞，但已停用自動補抓功能)")
     
     if total_missing == 0:

@@ -48,8 +48,8 @@ class DABDownloader:
             
             log_func(f"  🎵 [DAB Found] {track_artist} - {track_title}")
             
-            # Sanitize filename
-            safe_title = sanitize_filename(f"{track_artist} - {track_title}")
+            # Use the playlist song_name for the filename base to match MP3 naming
+            safe_title = sanitize_filename(song_name)
             
             # Separate lossless files into a subfolder
             lossless_dir = os.path.join(library_path, "Lossless")

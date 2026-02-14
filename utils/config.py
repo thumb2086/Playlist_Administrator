@@ -23,7 +23,7 @@ def load_config():
         'spotify_urls': [],
         'url_names': {},
         'last_updated': {},
-        'enable_retroactive_lyrics': True,  # Allow users to disable lyrics fetching
+        'enable_retroactive_lyrics': False,  # Lyrics are opt-in
         'max_threads': 4,
         'setup_completed': False,
         'retry_failed_lyrics': False,  # Default to skip failed lyrics
