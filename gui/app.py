@@ -336,7 +336,7 @@ class PlaylistApp:
         stats_container = tk.Frame(self.stats_frame)
         stats_container.pack(fill="x", padx=10, pady=5)
         
-        self.total_songs_lbl = tk.Label(stats_container, text=_('total_songs', _('loading'), ""), font=("Microsoft JhengHei", 10))
+        self.total_songs_lbl = tk.Label(stats_container, text=_('total_songs', _('loading'), "", 0, 0), font=("Microsoft JhengHei", 10))
         self.total_songs_lbl.grid(row=0, column=0, sticky="w", padx=5)
         
         self.dup_songs_lbl = tk.Label(stats_container, text=_('duplicate_songs', _('loading')), font=("Microsoft JhengHei", 10))
@@ -686,7 +686,7 @@ class PlaylistApp:
                 saving_str = f"{savings/1024:.2f} GB" if savings > 1024 else f"{savings:.1f} MB"
                 
                 try:
-                    self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', total_songs, size_str)))
+                    self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', total_songs, size_str, stats['flac_count'], stats['lossy_count'])))
                     self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', dupes)))
                     self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', saving_str)))
                     
@@ -704,7 +704,7 @@ class PlaylistApp:
                 print(f"Error updating stats: {e}")
                 # Ensure UI doesn't get stuck on "Loading..."
                 try:
-                    self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', 0, "Error")))
+                    self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', 0, "Error", 0, 0)))
                     self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', 0)))
                     self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', 0)))
                     self.root.after(0, lambda: self.recent_lbl.config(text=_('recent_added', _('no_data'))))

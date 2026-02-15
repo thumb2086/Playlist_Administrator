@@ -1,13 +1,13 @@
 import os
 import re
 import yt_dlp
-from utils.helpers import sanitize_filename
+from utils.helpers import sanitize_filename, download_image
 from core.library import find_song_in_library
 from core.dab_downloader import create_dab_downloader
 from core.metadata_enricher import create_metadata_enricher # Added import
-from mutagen.flac import FLAC
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON
-from mutagen.mp4 import MP4
+from mutagen.flac import FLAC, Picture
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, APIC
+from mutagen.mp4 import MP4, MP4Cover
 from mutagen.easyid3 import EasyID3
 
 def strip_ansi(text):
@@ -63,7 +63,7 @@ def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enri
                 enricher.cleanup() # Clean up any session/cache
                 if success:
                     log_func(f"  ✅ [Metadata Enriched] {song_name}")
-                    return True
+                    return success
                 else:
                     log_func(f"  ⚠️ [Metadata Enricher] Failed to enrich {song_name}, falling back to basic metadata.")
             except Exception as e:
@@ -79,6 +79,7 @@ def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enri
         duration = info.get('duration', 0)
         upload_date = info.get('upload_date', '')
         description = info.get('description', '')
+        thumbnail_url = info.get('thumbnail', '')
         
         # Try to extract artist and title from song_name if not available
         if not artist or not title:
@@ -123,6 +124,16 @@ def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enri
             audio['SOURCE'] = 'YouTube'
             audio['COMMENT'] = f'Downloaded via Playlist Administrator'
             
+            # Add artwork
+            if thumbnail_url:
+                artwork_data = download_image(thumbnail_url)
+                if artwork_data:
+                    picture = Picture()
+                    picture.data = artwork_data
+                    picture.type = 3
+                    picture.mime = 'image/jpeg'
+                    audio.add_picture(picture)
+            
             audio.save()
             
         elif file_ext in ['.mp3', '.mp2', '.mp1']:
@@ -162,6 +173,14 @@ def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enri
                 else:
                     audio.add(TCON(encoding=3, text=genre))
             
+            # Add artwork
+            if thumbnail_url:
+                artwork_data = download_image(thumbnail_url)
+                if artwork_data:
+                    if isinstance(audio, EasyID3):
+                        audio = ID3(file_path)
+                    audio.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=artwork_data))
+            
             audio.save()
             
         elif file_ext in ['.m4a', '.mp4']:
@@ -179,14 +198,20 @@ def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enri
             if genre:
                 audio['\xa9gen'] = genre
             
+            # Add artwork
+            if thumbnail_url:
+                artwork_data = download_image(thumbnail_url)
+                if artwork_data:
+                    audio['covr'] = [MP4Cover(artwork_data, imageformat=MP4Cover.FORMAT_JPEG)]
+            
             audio.save()
         
         log_func(f"  🏷️ [Metadata Added] {title}")
-        return True
+        return file_path
         
     except Exception as e:
         log_func(f"  ⚠️ [Metadata Error] {str(e)}")
-        return False
+        return None
 
 def download_lyrics(song_name, output_path, log_func, failed_cache=None):
     """Downloads synced lyrics (.lrc) for a song using direct Lrclib API with Traditional Chinese conversion"""
@@ -885,10 +910,14 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     if os.path.exists(final_path):
                         log_func(f" -> {os.path.basename(final_path)}")
                         # Add metadata
-                        metadata_success = add_metadata_to_file(final_path, info, song_name, log_func, config, use_dab_metadata)
+                        new_path = add_metadata_to_file(final_path, info, song_name, log_func, config, use_dab_metadata)
                         
                         # Auto-rename file based on metadata if metadata was added successfully
-                        if metadata_success:
+                        if new_path:
+                            # Update final_path if changed
+                            if os.path.exists(new_path):
+                                final_path = new_path
+                                
                             try:
                                 from core.file_renamer import create_file_renamer
                                 renamer = create_file_renamer(library_path, log_func)
@@ -908,10 +937,14 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     if os.path.exists(filename):
                         log_func(f" -> {os.path.basename(filename)}")
                         # Add metadata
-                        metadata_success = add_metadata_to_file(filename, info, song_name, log_func, config, use_dab_metadata)
+                        new_path = add_metadata_to_file(filename, info, song_name, log_func, config, use_dab_metadata)
                         
                         # Auto-rename file based on metadata if metadata was added successfully
-                        if metadata_success:
+                        if new_path:
+                            # Update filename if changed
+                            if os.path.exists(new_path):
+                                filename = new_path
+                                
                             try:
                                 from core.file_renamer import create_file_renamer
                                 renamer = create_file_renamer(library_path, log_func)
@@ -936,10 +969,14 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     
                     # Add metadata after download is complete
                     if os.path.exists(final_path):
-                        metadata_success = add_metadata_to_file(final_path, info, song_name, log_func, config, use_dab_metadata)
+                        new_path = add_metadata_to_file(final_path, info, song_name, log_func, config, use_dab_metadata)
                         
                         # Auto-rename file based on metadata if metadata was added successfully
-                        if metadata_success:
+                        if new_path:
+                            # Update final_path if changed
+                            if os.path.exists(new_path):
+                                final_path = new_path
+                                
                             try:
                                 from core.file_renamer import create_file_renamer
                                 renamer = create_file_renamer(library_path, log_func)

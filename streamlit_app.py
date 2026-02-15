@@ -31,18 +31,22 @@ st.markdown("""
 def get_dir_size(path):
     total_size = 0
     file_count = 0
+    flac_count = 0
     try:
         if not os.path.exists(path):
-            return 0, 0
+            return 0, 0, 0
         for dirpath, dirnames, filenames in os.walk(path):
             for f in filenames:
-                if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')):
+                ext = f.lower()
+                if ext.endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')):
                     fp = os.path.join(dirpath, f)
                     total_size += os.path.getsize(fp)
                     file_count += 1
-        return total_size, file_count
+                    if ext.endswith(('.flac', '.wav')):
+                        flac_count += 1
+        return total_size, file_count, flac_count
     except Exception:
-        return 0, 0
+        return 0, 0, 0
 
 # 介面橋接器：用於串接後端邏輯與 Streamlit UI
 class StatusBridge:
@@ -187,19 +191,22 @@ if page == "🏠 儀表板 (Dashboard)":
     st.header("系統概況")
 
     lib_path = os.path.join(st.session_state['settings']['base_folder'], "Music")
-    total_size, total_files = get_dir_size(lib_path)
+    total_size, total_files, flac_count = get_dir_size(lib_path)
+    lossy_count = total_files - flac_count
     size_gb = total_size / (1024**3)
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("📚 歌曲總數", f"{total_files:,}")
-    col2.metric("💾 資料庫大小", f"{size_gb:.2f} GB")
+    col2.metric("💎 無損 (FLAC/WAV)", f"{flac_count:,}")
+    col3.metric("🎧 壓縮 (MP3/M4A)", f"{lossy_count:,}")
+    col4.metric("💾 資料庫大小", f"{size_gb:.2f} GB")
     
     # Safely handle empty dataframe or missing columns
     if not st.session_state.playlist_data.empty and '啟用' in st.session_state.playlist_data.columns:
         active_count = len(st.session_state.playlist_data[st.session_state.playlist_data['啟用']])
     else:
         active_count = 0
-    col3.metric("⚡ 啟用任務", f"{active_count} 個排程")
+    col5.metric("⚡ 啟用任務", f"{active_count} 個排程")
 
     st.write("") 
 

@@ -6,12 +6,12 @@ Handles scanning and adding missing metadata to existing songs
 import os
 import glob
 import time
-from mutagen.flac import FLAC
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON
-from mutagen.mp4 import MP4
+from mutagen.flac import FLAC, Picture
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, APIC
+from mutagen.mp4 import MP4, MP4Cover
 from mutagen.easyid3 import EasyID3
 from mutagen import File as MutagenFile
-from utils.helpers import sanitize_filename
+from utils.helpers import sanitize_filename, download_image
 from core.dab_client import DABMusicClient
 
 class MetadataEnricher:
@@ -115,15 +115,16 @@ class MetadataEnricher:
             if self.dab_client:
                 success = self._enrich_with_dab_music(file_path, song_name, log_func, artist_hint)
                 if success:
-                    return True
+                    # _enrich_with_dab_music now returns a path on success
+                    return success
             
             # Fallback to filename-based metadata
             success = self._enrich_from_filename(file_path, song_name, log_func)
-            return success
+            return file_path if success else None
             
         except Exception as e:
             log_func(f"  ❌ Error enriching {os.path.basename(file_path)}: {str(e)}")
-            return False
+            return None
     
     def _enrich_with_dab_music(self, file_path, song_name, log_func, artist_hint=None):
         """Try to enrich metadata using DAB Music API"""
@@ -139,8 +140,33 @@ class MetadataEnricher:
 
             # Search for the track
             track_info = self.dab_client.get_best_quality_match(search_title, search_artist)
+            # Search for the track
+            track_info = self.dab_client.get_best_quality_match(search_title, search_artist)
             if not track_info:
-                return False
+                return None
+            
+            # --- DURATION VERIFICATION ---
+            try:
+                # Check local file duration
+                audio = MutagenFile(file_path)
+                if audio and audio.info:
+                    local_duration = audio.info.length
+                    # DAB duration can be in seconds or minutes:seconds
+                    remote_duration_val = track_info.get('duration', 0)
+                    
+                    if isinstance(remote_duration_val, str) and ':' in remote_duration_val:
+                        parts = remote_duration_val.split(':')
+                        remote_duration = int(parts[0]) * 60 + int(parts[1])
+                    else:
+                        remote_duration = float(remote_duration_val)
+                    
+                    if remote_duration > 0:
+                        if abs(local_duration - remote_duration) > 15: # 15s tolerance
+                            log_func(f"  ⚠️ [Duration Mismatch] Local: {int(local_duration)}s, Remote: {int(remote_duration)}s. Skipping.")
+                            return None
+            except Exception as e:
+                log_func(f"  ⚠️ Duration check skipped: {e}")
+            # --- END DURATION VERIFICATION ---
             
             # Extract metadata
             title = track_info.get('title', '')
@@ -150,7 +176,7 @@ class MetadataEnricher:
             genre = track_info.get('genre', '')
             
             if not title or not artist:
-                return False
+                return None
             
             # Apply metadata to file
             success = self._apply_metadata_to_file(file_path, {
@@ -159,17 +185,57 @@ class MetadataEnricher:
                 'album': album,
                 'year': year,
                 'genre': genre,
+                'album_art_url': track_info.get('image', ''),
                 'source': 'DAB Music'
             }, log_func)
             
             if success:
                 log_func(f"  ✅ [DAB Enriched] {title} - {artist}")
+                
+                # Default return original path
+                final_path = file_path
+
+                # --- AUTO-RENAME LOGIC ---
+                if self.config and (self.config.get('auto_rename_files', True) or self.config.get('auto_rename', False)):
+                    try:
+                        old_filename = os.path.basename(file_path)
+                        file_ext = os.path.splitext(file_path)[1]
+                        
+                        # Clean title and artist for filename
+                        clean_title = sanitize_filename(title)
+                        clean_artist = sanitize_filename(artist)
+                        new_filename = f"{clean_artist} - {clean_title}{file_ext}"
+                        
+                        # Use loose matching to see if rename is needed
+                        from core.library import get_normalized_tokens
+                        old_tokens = set(get_normalized_tokens(os.path.splitext(old_filename)[0]))
+                        new_tokens = set(get_normalized_tokens(f"{artist} {title}"))
+                        
+                        # If overlap is low (less than 60%), it's a significant rename (fixing a wrong name)
+                        # Or if the old filename was very generic (e.g. just "城市之丘" vs "告五人 - 城市之丘")
+                        overlap = len(old_tokens & new_tokens)
+                        if overlap / max(1, len(new_tokens)) < 0.8 or len(old_tokens) < len(new_tokens) - 1:
+                            new_path = os.path.join(os.path.dirname(file_path), new_filename)
+                            
+                            # Check if destination exists
+                            if not os.path.exists(new_path) and new_filename != old_filename:
+                                os.rename(file_path, new_path)
+                                log_func(f"  🔄 [Auto-Renamed] {old_filename} -> {new_filename}")
+                                final_path = new_path
+                                # Note: file_path is no longer valid, but this is the end of processing for this file
+                            elif new_filename != old_filename:
+                                log_func(f"  ℹ️ [Rename Skipped] Target already exists: {new_filename}")
+                    except Exception as re:
+                        log_func(f"  ⚠️ Auto-rename failed: {re}")
+                # --- END AUTO-RENAME ---
             
-            return success
+                return final_path
+            
+            return None
             
         except Exception as e:
             log_func(f"  ⚠️ DAB enrichment failed: {str(e)}")
-            return False
+            return None
     
     def _enrich_from_filename(self, file_path, song_name, log_func):
         """Enrich metadata by parsing filename"""
@@ -267,9 +333,32 @@ class MetadataEnricher:
                     audio['\xa9day'] = metadata['year']
                 if metadata.get('genre'):
                     audio['\xa9gen'] = metadata['genre']
+                
+                # Add album art
+                album_art_data = None
+                if metadata.get('album_art_url'):
+                    album_art_data = download_image(metadata['album_art_url'])
+                elif metadata.get('album_art_data'):
+                    album_art_data = metadata['album_art_data']
+
+                if album_art_data:
+                    if file_ext == '.flac':
+                        picture = Picture()
+                        picture.data = album_art_data
+                        picture.type = 3 # Front cover
+                        picture.mime = 'image/jpeg'
+                        audio.add_picture(picture)
+                    elif file_ext in ['.mp3', '.mp2', '.mp1']:
+                        if isinstance(audio, EasyID3):
+                            # EasyID3 doesn't support APIC, need the underlying ID3
+                            audio = ID3(file_path)
+                        audio.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=album_art_data))
+                    elif file_ext in ['.m4a', '.mp4']:
+                        audio['covr'] = [MP4Cover(album_art_data, imageformat=MP4Cover.FORMAT_JPEG)]
+                
                 audio.save()
             
-            return True
+            return file_path
             
         except Exception as e:
             log_func(f"  ⚠️ Metadata application error: {str(e)}")

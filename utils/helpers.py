@@ -59,3 +59,19 @@ def normalize_name(name):
     name = re.sub(r"[\(\[【\)\]】]", " ", name)
     # 3. Clean up
     return name.lower().strip().replace('_', ' ').replace('-', ' ').replace(' ', '')
+def download_image(url, timeout=10):
+    """Download image data from a URL"""
+    if not url:
+        return None
+    try:
+        import requests
+        import urllib3
+        # Disable SSL warnings for cases where certs might be an issue (like DAB sometimes)
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        response = requests.get(url, timeout=timeout, verify=False)
+        if response.status_code == 200:
+            return response.content
+    except Exception:
+        pass
+    return None

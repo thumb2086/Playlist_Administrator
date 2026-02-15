@@ -6,9 +6,9 @@ Handles downloading lossless FLAC files with metadata from DAB Music API
 import os
 import re
 import time
-from mutagen.flac import FLAC
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK
-from utils.helpers import sanitize_filename
+from mutagen.flac import FLAC, Picture
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, APIC
+from utils.helpers import sanitize_filename, download_image
 from core.dab_client import DABMusicClient
 
 class DABDownloader:
@@ -135,6 +135,17 @@ class DABDownloader:
             # Add DAB Music specific tags
             audio['SOURCE'] = 'DAB Music'
             audio['QUALITY'] = 'Lossless FLAC'
+            
+            # Add album art if available
+            image_url = track_info.get('image', '')
+            if image_url:
+                artwork_data = download_image(image_url)
+                if artwork_data:
+                    picture = Picture()
+                    picture.data = artwork_data
+                    picture.type = 3 # Front cover
+                    picture.mime = 'image/jpeg'
+                    audio.add_picture(picture)
             
             # Save metadata
             audio.save()

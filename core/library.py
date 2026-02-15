@@ -196,6 +196,17 @@ def get_normalized_tokens(text):
         
         # Apply conversion only to Chinese characters (CJK Unified Ideographs)
         text = regex.sub(r'[\u4e00-\u9fff]', convert_chinese_only, text)
+        
+        # 2.1 Manual overrides for common Traditional/Simplified pairs that zhconv might miss
+        mapping = {
+            '著': '着',
+            '妳': '你',
+            '牠': '它',
+            '祂': '他',
+            '閒': '闲'
+        }
+        for t_char, s_char in mapping.items():
+            text = text.replace(t_char, s_char)
     except:
         # If conversion fails, keep original text
         pass
@@ -234,6 +245,9 @@ def get_normalized_tokens(text):
 
     # 6. Replace all non-alphanumeric characters (excluding Chinese and Japanese) with spaces
     # This will also handle underscores and other symbols
+    # Special fix: handle dash between words without spaces (Artist-Title)
+    text = re.sub(r'([a-z\u4e00-\u9fff\u3040-\u30ff])(-)(?=[a-z\u4e00-\u9fff\u3040-\u30ff])', r'\1 \2 ', text, flags=re.IGNORECASE)
+    
     # Include Japanese Hiragana (\u3040-\u309f) and Katakana (\u30a0-\u30ff)
     text = re.sub(r"[^a-z0-9\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]+", " ", text)
 
@@ -321,10 +335,11 @@ def build_metadata_index(audio_files, log_func=None):
         
     return index
 
-def find_song_in_library(song_name, library_source, metadata_index=None, artist=None):
+def find_song_in_library(song_name, library_source, metadata_index=None, artist=None, target_duration=None):
     """ 
     Tries to find a song using either a pre-built library index (dict) or a file list (list). 
     Supports verifying artist if provided (fuzzy match on metadata or path).
+    Supports duration verification if target_duration is provided.
     """
     query_tokens = tuple(get_normalized_tokens(song_name))
     if not query_tokens:
@@ -389,6 +404,21 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
                  
         return False
 
+    # Helper to check duration match
+    def verify_duration(file_path, target_duration):
+        if not target_duration or target_duration <= 0: return True
+        
+        try:
+            from mutagen import File as MutagenFile
+            audio = MutagenFile(file_path)
+            if audio and audio.info:
+                file_duration = audio.info.length
+                # Allow 12 seconds difference (to account for different versions/ads/intros)
+                if abs(file_duration - target_duration) <= 12:
+                    return True
+        except: pass
+        return False
+
     candidates = []
 
     # Check if library_source is a dictionary (index) or list (file list)
@@ -424,8 +454,10 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
                     overlap = len(title_set & index_set)
                     min_size = min(len(title_set), len(index_set))
                     
-                    if min_size > 0 and overlap / min_size >= 0.5:
-                        # At least 50% of the smaller token set matches
+                    # STRICTER MATCHING: Require at least 75% for small sets, 60% for large
+                    threshold = 0.75 if min_size <= 4 else 0.6
+                    if min_size > 0 and overlap / min_size >= threshold:
+                        # At least 75% of the smaller token set matches
                         if isinstance(paths, list): candidates.extend(paths)
                         else: candidates.append(paths)
 
@@ -450,7 +482,9 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
                 overlap = len(title_set & file_set)
                 min_size = min(len(title_set), len(file_set))
                 
-                if min_size > 0 and overlap / min_size >= 0.5:
+                # STRICTER MATCHING: Require at least 75% for small sets
+                threshold = 0.75 if min_size <= 4 else 0.6
+                if min_size > 0 and overlap / min_size >= threshold:
                     candidates.append(file_path)
 
     # 3. Metadata Index Lookup (Pass 2)
@@ -488,7 +522,7 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
                     elif len(meta_tokens) > 0 and len(fuzzy_tokens) >= len(meta_tokens):
                         if all(token in fuzzy_tokens for token in meta_tokens):
                              coverage = len(meta_tokens) / len(fuzzy_tokens)
-                             if coverage >= 0.5: is_match = True
+                             if coverage >= 0.6: is_match = True
                     
                     if is_match:
                          if isinstance(paths, list): candidates.extend(paths)
@@ -511,16 +545,29 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
         verified_candidates = []
         for c in unique_candidates:
             if verify_artist(c, target_artist):
-                verified_candidates.append(c)
+                # Also verify duration if available
+                if verify_duration(c, target_duration):
+                    verified_candidates.append(c)
         
         if verified_candidates:
             return verified_candidates[0] # Return best verified match
         else:
-            # STRICT MODE: If artist was provided but no candidate matches it, 
-            # we return None to avoid false positives (e.g. same title, diff artist)
-            return None
+            # If we had candidates but none passed artist check, 
+            # we DON'T return a random song by the same artist anymore if threshold is high.
+            # But we check for duration mismatch as a hard reject.
+            if target_duration:
+                # If we have a duration target, we MUST match it within reason
+                pass
+            return None # Fail safe
             
-    # Default: Return first candidate found (only if no artist was specified)
+    # If no artist provided but we have a duration, use it
+    if target_duration:
+        duration_verified = [c for c in unique_candidates if verify_duration(c, target_duration)]
+        if duration_verified:
+            return duration_verified[0]
+        return None
+
+    # Default: Return first candidate found (only if no artist/duration was specified)
     return unique_candidates[0]
 
 def _search_by_metadata(title_tokens, file_list):
@@ -580,52 +627,61 @@ def _search_by_metadata(title_tokens, file_list):
         
     return None
 
-def find_song_prefer_flac(song_name, library_source):
-    """ Find song in library, preferring FLAC over other formats """
+def find_song_prefer_flac(song_name, library_source, target_duration=None):
+    """ Find song in library, preferring FLAC over other formats. Supports duration check. """
     query_tokens = tuple(get_normalized_tokens(song_name))
     if not query_tokens:
         return None
     
+    # Helper for duration check
+    def verify_duration(file_path, target_duration):
+        if not target_duration or target_duration <= 0: return True
+        try:
+            from mutagen import File as MutagenFile
+            audio = MutagenFile(file_path)
+            if audio and audio.info:
+                file_duration = audio.info.length
+                if abs(file_duration - target_duration) <= 12:
+                    return True
+        except: pass
+        return False
+
     found_files = []
     
     # Check if library_source is a dictionary (index) or list (file list)
     if isinstance(library_source, dict):
-        # FAST PATH: Dictionary Lookup
-        # library_source is {tokens: [path1, path2, ...]}
+        # 1. FAST PATH: Exact full match
         paths = library_source.get(query_tokens)
         if paths:
-            if isinstance(paths, list):
-                found_files = paths
-            else:
-                found_files = [paths]
+            found_files = list(paths) if isinstance(paths, list) else [paths]
     
     elif isinstance(library_source, list):
-        # SLOW PATH: Linear Scan (Legacy)
+        # 2. SLOW PATH: Linear Scan
         audio_files = library_source
         for file_path in audio_files:
             filename = os.path.basename(file_path)
             name_no_ext = os.path.splitext(filename)[0]
             file_tokens = tuple(get_normalized_tokens(name_no_ext))
             
-            # Use overlap matching fallback similarly to find_song_in_library
+            if not file_tokens: continue
+            
             is_match = False
             if file_tokens == query_tokens:
                 is_match = True
             else:
-                # Check overlap (at least 50% of tokens match)
+                # Check overlap (Stricter: 75%)
                 query_set = set(query_tokens)
                 file_set = set(file_tokens)
                 overlap = len(query_set & file_set)
                 min_size = min(len(query_set), len(file_set))
-                if min_size > 0 and overlap / min_size >= 0.5:
+                threshold = 0.75 if min_size <= 4 else 0.6
+                if min_size > 0 and overlap / min_size >= threshold:
                     is_match = True
             
             if is_match:
                 found_files.append(file_path)
-    else:
-        return None
     
-    # Fallback: If no direct token match, try fuzzy matching on dictionary keys if using index
+    # 3. Fuzzy match fallback for Dictionary Index
     if not found_files and isinstance(library_source, dict):
         query_set = set(query_tokens)
         for index_tokens, paths in library_source.items():
@@ -633,13 +689,21 @@ def find_song_prefer_flac(song_name, library_source):
             index_set = set(index_tokens)
             overlap = len(query_set & index_set)
             min_size = min(len(query_set), len(index_set))
-            if min_size > 0 and overlap / min_size >= 0.5:
+            threshold = 0.75 if min_size <= 4 else 0.6
+            if min_size > 0 and overlap / min_size >= threshold:
                 if isinstance(paths, list): found_files.extend(paths)
                 else: found_files.append(paths)
     
     if not found_files:
         return None
     
+    # --- Filter by Duration if requested ---
+    if target_duration:
+        found_files = [f for f in found_files if verify_duration(f, target_duration)]
+    
+    if not found_files:
+        return None
+        
     # Prefer FLAC first
     for file_path in found_files:
         if file_path.lower().endswith('.flac'):
@@ -714,7 +778,7 @@ def find_song_exact_format(song_name, target_extension, library_source):
                     fuzzy_set = set(fuzzy_tokens)
                     overlap_count = len(index_set & fuzzy_set)
                     
-                    if overlap_count / len(fuzzy_set) >= 0.6: # At least 60% of query tokens found
+                    if overlap_count / len(fuzzy_set) >= 0.75: # Stricter
                         coverage = overlap_count / len(index_tokens)
                         score = overlap_count * (coverage + 0.5) # Bonus for higher coverage
                 
@@ -724,7 +788,7 @@ def find_song_exact_format(song_name, target_extension, library_source):
                     fuzzy_set = set(fuzzy_tokens)
                     overlap_count = len(index_set & fuzzy_set)
                     
-                    if overlap_count / len(index_set) >= 0.6:
+                    if overlap_count / len(index_set) >= 0.75: # Stricter
                         coverage = overlap_count / len(fuzzy_set)
                         score = overlap_count * (coverage + 0.5)
                 
@@ -757,15 +821,15 @@ def find_song_exact_format(song_name, target_extension, library_source):
             elif title_tokens and file_tokens == title_tokens:
                 is_match = True
             # Subset match
-            elif title_tokens:
-                if len(title_tokens) > 0 and len(file_tokens) >= len(title_tokens):
-                    if all(token in file_tokens for token in title_tokens):
-                        coverage = len(title_tokens) / len(file_tokens)
-                        if coverage >= 0.1: is_match = True
-                elif len(file_tokens) > 0 and len(title_tokens) >= len(file_tokens):
-                    if all(token in title_tokens for token in file_tokens):
-                        coverage = len(file_tokens) / len(title_tokens)
-                        if coverage >= 0.3: is_match = True
+            else:
+                fuzzy_source = title_tokens if title_tokens else query_tokens
+                if fuzzy_source:
+                    title_set = set(fuzzy_source)
+                    file_set = set(file_tokens)
+                    overlap = len(title_set & file_set)
+                    min_size = min(len(title_set), len(file_set))
+                    if min_size > 0 and overlap / min_size >= 0.5:
+                        is_match = True
             
             if is_match:
                 if file_path.lower().endswith(target_ext):
@@ -1804,6 +1868,8 @@ def get_detailed_stats(config, audio_files=None):
         audio_files = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
     
     total_songs = len(audio_files)
+    flac_count = len([f for f in audio_files if f.lower().endswith(('.flac', '.wav'))])
+    lossy_count = total_songs - flac_count
     total_size_bytes = 0
     for f in audio_files:
         try:
@@ -1897,6 +1963,8 @@ def get_detailed_stats(config, audio_files=None):
     
     return {
         'total_songs': total_songs,
+        'flac_count': flac_count,
+        'lossy_count': lossy_count,
         'total_size_mb': total_size_mb,
         'recent_5': recent_5,
         'total_playlist_entries': total_playlist_entries,
