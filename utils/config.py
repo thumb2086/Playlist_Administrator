@@ -20,18 +20,51 @@ def get_app_dir():
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Store config in data folder for persistence (absolute path for EXE compatibility)
-CONFIG_DIR = os.path.join(get_app_dir(), 'data')
-CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
+_APP_DATA_DIR = os.path.join(get_app_dir(), 'data')
+_APP_CONFIG_FILE = os.path.join(_APP_DATA_DIR, 'config.json')
+
+# Global variable to track currently active data directory (starts with app local)
+CONFIG_DIR = _APP_DATA_DIR
+CONFIG_FILE = _APP_CONFIG_FILE
+
+def get_data_dir(config):
+    """取得目前的資料儲存目錄（直接使用主資料夾，不建立 data 子目錄）"""
+    if config.get('base_path'):
+        return config['base_path']
+    return _APP_DATA_DIR
 
 def load_config():
+    # 1. 先讀取 EXE 旁邊的引導設定
     config = {}
-    # Ensure config directory exists
-    if not os.path.exists(CONFIG_DIR):
-        os.makedirs(CONFIG_DIR)
+    if not os.path.exists(_APP_DATA_DIR):
+        os.makedirs(_APP_DATA_DIR)
     
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            config = json.load(f)
+    if os.path.exists(_APP_CONFIG_FILE):
+        with open(_APP_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            try:
+                config = json.load(f)
+            except:
+                config = {}
+
+    # 2. 如果已設定主資料夾，嘗試切換到主資料夾下的「真正的設定檔」
+    if config.get('base_path'):
+        primary_data_dir = config['base_path']
+        primary_config_file = os.path.join(primary_data_dir, 'config.json')
+        
+        if os.path.exists(primary_config_file):
+            with open(primary_config_file, 'r', encoding='utf-8') as f:
+                try:
+                    primary_config = json.load(f)
+                    # 保留目前的 base_path，但以主資料夾內的設定為主
+                    primary_config['base_path'] = config['base_path']
+                    config = primary_config
+                except:
+                    pass
+
+    # 3. 更新全域路徑指針（讓 get_data_file 能正確運作）
+    global CONFIG_DIR, CONFIG_FILE
+    CONFIG_DIR = get_data_dir(config)
+    CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
 
     # Set defaults for missing keys
     defaults = {
@@ -40,12 +73,12 @@ def load_config():
         'spotify_urls': [],
         'url_names': {},
         'last_updated': {},
-        'enable_retroactive_lyrics': False,  # Lyrics are opt-in
+        'enable_retroactive_lyrics': False,
         'max_threads': 4,
         'setup_completed': False,
-        'retry_failed_lyrics': False,  # Default to skip failed lyrics
-        'retry_failed_flac': False,  # Default to skip failed FLAC downloads
-        'lyrics_offsets': {},  # Per-song lyrics timing adjustments
+        'retry_failed_lyrics': False,
+        'retry_failed_flac': False,
+        'lyrics_offsets': {},
         'dab_use_lossless': False,
         'dab_use_metadata': False,
         'dab_email': "",
@@ -67,13 +100,12 @@ def load_config():
 def derive_paths(config):
     base_path = config['base_path']
     config['library_path'] = os.path.normpath(os.path.join(base_path, 'Music'))
-    # Use subfolder for playlists as requested by user
     config['playlists_path'] = os.path.normpath(os.path.join(base_path, 'Playlists'))
     config['export_path'] = os.path.normpath(os.path.join(base_path, 'USB_Output'))
     return config
 
 def get_data_file(filename):
-    """Returns the full path for a file inside the application's data directory"""
+    """取得資料檔案路徑（會根據當前 CONFIG_DIR 自動導航）"""
     if not os.path.exists(CONFIG_DIR):
         os.makedirs(CONFIG_DIR)
     return os.path.join(CONFIG_DIR, filename)
@@ -82,27 +114,51 @@ def prompt_and_set_base_path(config):
     from utils.i18n import _
     new_path = filedialog.askdirectory(title=_('select_base_folder'))
     if new_path:
+        # 清理可能的路徑格式
+        new_path = os.path.normpath(new_path)
         config['base_path'] = new_path
         derive_paths(config)
+        
+        # 切換路徑指針
+        global CONFIG_DIR, CONFIG_FILE
+        CONFIG_DIR = get_data_dir(config)
+        CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
+        
         save_config(config)
         messagebox.showinfo(_('base_folder_set_title'), _('base_folder_set_msg', new_path))
         return True
     return False
 
 def save_config(config):
-    # Ensure config directory exists
-    if not os.path.exists(CONFIG_DIR):
-        os.makedirs(CONFIG_DIR)
+    # 確保資料目錄存在
+    global CONFIG_DIR, CONFIG_FILE
+    CONFIG_DIR = get_data_dir(config)
+    CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
     
+    if not os.path.exists(CONFIG_DIR):
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+    
+    # 1. 儲存到主資料目錄（包含所有詳細內容）
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
+    
+    # 2. 同步儲存到 EXE 本地目錄（主要作為「路徑指針」）
+    if CONFIG_DIR != _APP_DATA_DIR:
+        # 本地端只需要知道 base_path 就好，其他資料存在主資料夾
+        local_pointer = {'base_path': config.get('base_path'), 'language': config.get('language')}
+        with open(_APP_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(local_pointer, f, indent=4, ensure_ascii=False)
 
 def ensure_dirs(config):
     if 'base_path' not in config or not config['base_path']:
-        return # Can't create dirs if base path is not set
+        return
         
     for key in ['library_path', 'playlists_path', 'export_path']:
         path = config.get(key)
         if path and isinstance(path, str):
             if not os.path.exists(path):
-                os.makedirs(path)
+                os.makedirs(path, exist_ok=True)
+    
+    # 同時確保主資料夾目錄存在
+    if not os.path.exists(config['base_path']):
+        os.makedirs(config['base_path'], exist_ok=True)
