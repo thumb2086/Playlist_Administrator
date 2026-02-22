@@ -154,7 +154,7 @@ def save_config(config):
         json.dump(config, f, indent=4, ensure_ascii=False)
     
     # 2. 同步儲存到 EXE 本地目錄（主要作為「路徑指針」）
-    if CONFIG_DIR != _APP_DATA_DIR:
+    if os.path.normpath(CONFIG_DIR) != os.path.normpath(_APP_DATA_DIR):
         # 本地端只需要知道 base_path 就好，其他資料存在主資料夾
         local_pointer = {'base_path': config.get('base_path'), 'language': config.get('language')}
         with open(_APP_CONFIG_FILE, 'w', encoding='utf-8') as f:

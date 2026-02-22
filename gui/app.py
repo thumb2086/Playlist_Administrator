@@ -597,9 +597,17 @@ class PlaylistApp:
         import os
         today = datetime.datetime.now().strftime('%Y-%m-%d')
         
+        if 'playlists_path' not in self.config or 'library_path' not in self.config:
+            from utils.config import derive_paths
+            derive_paths(self.config)
+            
         from core.library import get_playlist_completeness_report
-        playlists_path = self.config['playlists_path']
-        library_path = self.config['library_path']
+        playlists_path = self.config.get('playlists_path')
+        library_path = self.config.get('library_path')
+        
+        if not playlists_path or not os.path.exists(playlists_path):
+            self.log(f"⚠️ Playlist path missing or invalid: {playlists_path}")
+            return
         
         urls = self.config.get('spotify_urls', [])
         
@@ -1035,25 +1043,15 @@ class PlaylistApp:
         
         self.root.after(0, final_refresh)
         
-        # --- Orphaned Playlists & Backups Cleanup ---
+        # --- Cleanup phase (ONLY clean up confirmed temporary backups) ---
         try:
-            playlists_path = self.config['playlists_path']
-            url_names = self.config.get('url_names', {})
-            current_names = set(url_names.values())
-            
-            # Clean up orphans
-            for ext in ['*.m3u8', '*.m3u']:
-                for f in glob.glob(os.path.join(playlists_path, ext)):
-                    name = os.path.splitext(os.path.basename(f))[0]
-                    if name not in current_names:
+            playlists_path = self.config.get('playlists_path')
+            if playlists_path and os.path.exists(playlists_path):
+                # Clean up ONLY known temporary backup files
+                for pattern in ['*.path_backup', '*.relative_backup']:
+                    for f in glob.glob(os.path.join(playlists_path, pattern)):
                         try: os.remove(f)
                         except: pass
-            
-            # Clean up backups
-            for pattern in ['*.path_backup', '*.relative_backup']:
-                for f in glob.glob(os.path.join(playlists_path, pattern)):
-                    try: os.remove(f)
-                    except: pass
         except: pass
 
         self.root.after(0, lambda: self.update_btn.config(state="normal", text=_('update_all_btn'), bg="#d0f0c0"))
