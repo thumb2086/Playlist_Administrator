@@ -63,9 +63,7 @@ def load_config():
                     config = primary_config
                 except:
                     pass
-    else:
-        # Legacy migration: if no base_path is set in the local config, default it to _APP_DATA_DIR
-        config['base_path'] = _APP_DATA_DIR
+        pass
 
     # 3. 更新全域路徑指針（讓 get_data_file 能正確運作）
     global CONFIG_DIR, CONFIG_FILE
