@@ -30,6 +30,9 @@ CONFIG_FILE = _APP_CONFIG_FILE
 def get_data_dir(config):
     """取得目前的資料儲存目錄（直接使用主資料夾，不建立 data 子目錄）"""
     if config.get('base_path'):
+        # If the user selected a path ending in 'data', use its parent to avoid data/data
+        # We don't strictly need to do this, but if they selected the previous 'data' dir,
+        # their data will just live inside it normally. We do NOT append 'data'.
         return config['base_path']
     return _APP_DATA_DIR
 
@@ -60,6 +63,9 @@ def load_config():
                     config = primary_config
                 except:
                     pass
+    else:
+        # Legacy migration: if no base_path is set in the local config, default it to _APP_DATA_DIR
+        config['base_path'] = _APP_DATA_DIR
 
     # 3. 更新全域路徑指針（讓 get_data_file 能正確運作）
     global CONFIG_DIR, CONFIG_FILE
@@ -116,6 +122,11 @@ def prompt_and_set_base_path(config):
     if new_path:
         # 清理可能的路徑格式
         new_path = os.path.normpath(new_path)
+        
+        # 避免使用者自己點進了 data 資料夾導致 data/data
+        if os.path.basename(new_path).lower() == 'data':
+            new_path = os.path.dirname(new_path)
+            
         config['base_path'] = new_path
         derive_paths(config)
         

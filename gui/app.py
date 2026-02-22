@@ -15,12 +15,6 @@ class PlaylistApp:
         self.root.title(_('app_title'))
         self.root.geometry("1100x800")
         
-        self.config = load_config()
-        
-        # Log config path for debugging
-        from utils.config import CONFIG_FILE
-        self.log(f"--- 系統啟動 | 設定檔路徑: {CONFIG_FILE} ---", immediate=True)
-
         # --- UI Throttling & Batching --- 
         self.last_progress_update = 0
         self.last_speed_update = 0
@@ -28,6 +22,12 @@ class PlaylistApp:
         self.log_update_job = None
         self.last_full_refresh = 0
         self.songs_since_last_refresh = 0
+
+        self.config = load_config()
+        
+        # Log config path for debugging
+        from utils.config import CONFIG_FILE
+        self.log(f"--- 系統啟動 | 設定檔路徑: {CONFIG_FILE} ---", immediate=True)
 
         # Prompt for base path if not set
         if 'base_path' not in self.config or not self.config['base_path']:
@@ -258,6 +258,19 @@ class PlaylistApp:
         # Use a big full-width frame for player
         player_main_container = tk.Frame(self.tab_player, bg="#f0f0f0")
         player_main_container.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # New Playlist Selector at the top of Player tab
+        player_top_bar = tk.Frame(player_main_container, bg="#f0f0f0")
+        player_top_bar.pack(fill="x", pady=(0, 10))
+        
+        tk.Label(player_top_bar, text="選擇播放清單:", font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0").pack(side="left", padx=(0, 5))
+        
+        self.player_playlist_combo = ttk.Combobox(player_top_bar, state="readonly", font=("Microsoft JhengHei", 10), width=40)
+        self.player_playlist_combo.pack(side="left", padx=5)
+        # We will populate this in refresh_url_list later
+        
+        self.player_load_btn = tk.Button(player_top_bar, text="載入並播放", command=self.load_selected_playlist, bg="#4CAF50", fg="white", font=("Microsoft JhengHei", 9, "bold"))
+        self.player_load_btn.pack(side="left", padx=5)
 
         self.player_frame = tk.LabelFrame(player_main_container, text=_('player_title'), font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0")
         self.player_frame.pack(fill="both", expand=True)
@@ -657,6 +670,33 @@ class PlaylistApp:
             else:
                 self.ar_listbox.insert(tk.END, status_text)
 
+        # Add local playlists that are not in the Spotify URLs
+        processed_names = [url_names.get(u, u) for u in urls]
+        for pl_file in pl_files:
+            name = os.path.splitext(os.path.basename(pl_file))[0]
+            if name in processed_names or name.startswith('_'): # Skip internal ones like _Unsorted
+                continue
+                
+            is_complete, missing, total = report.get(pl_file, (True, 0, 0))
+            if is_complete:
+                status_text = f"📦 {name} ({_('local_complete')})"
+            else:
+                status_text = f"⚠️ {name} ({_('wait_download')}, 缺 {missing} 首)"
+                
+            # Classify local files into appropriate categories
+            is_artist = name in ["BIDO 曾愷妤", "GENBLUE幻藍小熊", "Jocelyn 9.4.0", "QWER", "幽靈水晶 CRYXTAL", "艾薇 Ivy", "芒果醬 Mango Jump", "草東沒有派對", "7en"]
+            is_album = name in ["幸福在歌唱 (電影《陽光女子合唱團》幸福版主題曲)", "Ex-Otogibanashi", "未來少女 NEXT GIRLZ", "未來少女 幽靈水晶"]
+            
+            if is_artist:
+                self.ar_listbox.insert(tk.END, status_text)
+                self.ar_urls.append("local:" + name)
+            elif is_album:
+                self.al_listbox.insert(tk.END, status_text)
+                self.al_urls.append("local:" + name)
+            else:
+                self.pl_listbox.insert(tk.END, status_text)
+                self.pl_urls.append("local:" + name) # Add dummy URL so double-click / delete works properly
+
         # Restore positions and selections
         for i, lb in enumerate(lists):
             s = saves[i]
@@ -666,6 +706,34 @@ class PlaylistApp:
                     lb.selection_set(idx)
             # Restore scroll position
             lb.yview_moveto(s['yview'][0])
+            
+        # Update Player Combobox
+        # Gather all valid playlist names (from both API and local)
+        all_playlist_names = []
+        for url in urls:
+            all_playlist_names.append(url_names.get(url, url))
+        for pl_file in pl_files:
+            name = os.path.splitext(os.path.basename(pl_file))[0]
+            if name not in all_playlist_names and not name.startswith('_'):
+                all_playlist_names.append(name)
+        
+        all_playlist_names.sort()
+        self.player_playlist_combo['values'] = all_playlist_names
+        
+        # Keep selected value if it still exists
+        current_val = self.player_playlist_combo.get()
+        if current_val and current_val not in all_playlist_names:
+            self.player_playlist_combo.set('')
+        elif not current_val and all_playlist_names:
+            self.player_playlist_combo.set(all_playlist_names[0])
+            
+    def load_selected_playlist(self):
+        selected = self.player_playlist_combo.get()
+        if selected:
+            self.load_playlist_into_player(selected)
+            self.log(f"-> 播放器已載入歌單: {selected}")
+        else:
+            messagebox.showwarning("提示", "請先選擇一個播放清單")
 
     def reset_update_status(self):
         self.config['last_updated'] = {}
@@ -836,6 +904,20 @@ class PlaylistApp:
         else:
             idx = st_sel[0]
             url = self.st_urls[idx]
+
+        if url.startswith("local:"):
+            name = url.split("local:", 1)[1]
+            for ext in ['.m3u8', '.m3u']:
+                pl_file = os.path.join(self.config['playlists_path'], f"{name}{ext}")
+                if os.path.exists(pl_file):
+                    try:
+                        os.remove(pl_file)
+                    except: pass
+            
+            self.refresh_url_list()
+            self.update_stats_ui()
+            self.log(_('removed_url', name))
+            return
 
         if url in urls:
             # Get name before removing from url_names

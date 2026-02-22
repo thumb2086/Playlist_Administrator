@@ -103,6 +103,39 @@ def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enri
             genre_tags = [tag for tag in info['tags'] if 'music' in tag.lower() or 'genre' in tag.lower()]
             if genre_tags:
                 genre = genre_tags[0]
+                
+        # --- NEW: Check for cached Spotify metadata to override yt-dlp ---
+        try:
+            from utils.config import CONFIG_DIR
+            from utils.helpers import sanitize_filename
+            import json
+            
+            clean_filename = sanitize_filename(song_name)
+            cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+            meta_file = os.path.join(cache_dir, f"{clean_filename}.json")
+            
+            if os.path.exists(meta_file):
+                with open(meta_file, 'r', encoding='utf-8') as mf:
+                    cached_meta = json.load(mf)
+                    
+                if cached_meta:
+                    title = cached_meta.get('title', title)
+                    artist = cached_meta.get('artist', artist)
+                    if cached_meta.get('album'):
+                        album = cached_meta['album']
+                    
+                    date = cached_meta.get('release_date', '')
+                    if date:
+                        year = str(date)[:4]
+                        
+                    cover_url = cached_meta.get('cover_url')
+                    if cover_url:
+                        thumbnail_url = cover_url
+                        
+                    log_func(f"  ✨ [Spotify Cache] Using rich metadata and cover for {title}")
+        except Exception as cache_e:
+            log_func(f"  ⚠️ [Cache Error] Failed to read Spotify cache: {cache_e}")
+        # --- END NEW ---
         
         if file_ext == '.flac':
             # Handle FLAC files

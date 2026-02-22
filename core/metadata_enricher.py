@@ -238,7 +238,7 @@ class MetadataEnricher:
             return None
     
     def _enrich_from_filename(self, file_path, song_name, log_func):
-        """Enrich metadata by parsing filename"""
+        """Enrich metadata by parsing filename or reading from Spotify cache"""
         try:
             # Try to extract artist and title from filename
             title = song_name
@@ -250,18 +250,59 @@ class MetadataEnricher:
                     artist = parts[0].strip()
                     title = parts[1].strip()
             
-            # Apply basic metadata
-            success = self._apply_metadata_to_file(file_path, {
+            # Prepare default basic metadata
+            metadata = {
                 'title': title,
                 'artist': artist,
                 'album': 'Unknown Album',
                 'year': '',
                 'genre': '',
                 'source': 'Filename Parser'
-            }, log_func)
+            }
+            
+            # --- NEW: Check for cached Spotify metadata ---
+            try:
+                from utils.config import CONFIG_DIR
+                from utils.helpers import sanitize_filename
+                
+                # Check for exact file name match
+                clean_filename = sanitize_filename(song_name)
+                # Or check if filename starts with song name
+                cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+                meta_file = os.path.join(cache_dir, f"{clean_filename}.json")
+                
+                if os.path.exists(meta_file):
+                    import json
+                    with open(meta_file, 'r', encoding='utf-8') as mf:
+                        cached_meta = json.load(mf)
+                        
+                    if cached_meta:
+                        metadata['title'] = cached_meta.get('title', title)
+                        metadata['artist'] = cached_meta.get('artist', artist)
+                        if cached_meta.get('album'):
+                            metadata['album'] = cached_meta['album']
+                        
+                        date = cached_meta.get('release_date', '')
+                        if date:
+                            # Extract year
+                            metadata['year'] = str(date)[:4]
+                            
+                        cover_url = cached_meta.get('cover_url')
+                        if cover_url:
+                            metadata['album_art_url'] = cover_url
+                            
+                        metadata['source'] = 'Spotify Cache'
+                        log_func(f"  ✨ [Spotify Cache Found] Applying rich metadata for {metadata['title']}")
+            except Exception as cache_e:
+                log_func(f"  ⚠️ [Cache Error] Failed to read Spotify cache: {cache_e}")
+            # --- END NEW ---
+            
+            # Apply metadata
+            success = self._apply_metadata_to_file(file_path, metadata, log_func)
             
             if success:
-                log_func(f"  ✅ [Filename Enriched] {title}")
+                source_log = "Spotify Cache" if metadata.get('source') == 'Spotify Cache' else "Filename Extracted"
+                log_func(f"  ✅ [{source_log}] {metadata['title']}")
             
             return success
             

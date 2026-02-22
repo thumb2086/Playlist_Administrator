@@ -243,7 +243,6 @@ def scrape_via_spotify_embed(config, stats, log_func):
                                 import re
                                 def clean_artist_name(name):
                                     # Remove "E" prefix (Explicit tag artifact)
-                                    # e.g. "EYosebe" -> "Yosebe", "E王ADEN" -> "王ADEN"
                                     if not name: return name
                                     return re.sub(r'^E(?=[A-Z\u4e00-\u9fff\u3040-\u30ff])', '', name)
 
@@ -251,9 +250,47 @@ def scrape_via_spotify_embed(config, stats, log_func):
                                     track = item.get('track', item)
                                     name = track.get('name')
                                     artists = track.get('artists', [])
+                                    
                                     if name and artists:
                                         artist_name = clean_artist_name(artists[0].get('name'))
-                                        tracks.append(f"{artist_name} - {name}")
+                                        full_track_name = f"{artist_name} - {name}"
+                                        tracks.append(full_track_name)
+                                        
+                                        # --- NEW: Extract and save rich metadata ---
+                                        try:
+                                            # Try to create a cache directory for Spotify metadata
+                                            from utils.config import CONFIG_DIR
+                                            cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+                                            os.makedirs(cache_dir, exist_ok=True)
+                                            
+                                            meta = {
+                                                'title': name,
+                                                'artist': artist_name,
+                                            }
+                                            
+                                            # Try to get album info
+                                            album = track.get('album', {})
+                                            if album:
+                                                meta['album'] = album.get('name', '')
+                                                meta['release_date'] = album.get('release_date') or album.get('date', '')
+                                                # Try to get cover art
+                                                images = album.get('images', [])
+                                                if images and len(images) > 0:
+                                                    meta['cover_url'] = images[0].get('url', '')
+                                                    
+                                            elif is_album and 'name' in entity:
+                                                meta['album'] = entity['name']
+                                                
+                                            # Save to JSON
+                                            clean_filename = sanitize_filename(full_track_name)
+                                            meta_file = os.path.join(cache_dir, f"{clean_filename}.json")
+                                            with open(meta_file, 'w', encoding='utf-8') as mf:
+                                                json.dump(meta, mf, ensure_ascii=False, indent=2)
+                                                
+                                        except Exception as meta_e:
+                                            log_func(f" -> 儲存 Metadata 快取失敗: {meta_e}")
+                                        # --- END NEW ---
+                                        
                     except Exception as e:
                         log_func(_('json_error', e))
 
