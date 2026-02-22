@@ -16,6 +16,10 @@ class PlaylistApp:
         self.root.geometry("1100x800")
         
         self.config = load_config()
+        
+        # Log config path for debugging
+        from utils.config import CONFIG_FILE
+        self.log(f"--- 系統啟動 | 設定檔路徑: {CONFIG_FILE} ---", immediate=True)
 
         # --- UI Throttling & Batching --- 
         self.last_progress_update = 0

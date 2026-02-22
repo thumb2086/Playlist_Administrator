@@ -6,8 +6,15 @@ from tkinter import filedialog, messagebox
 def get_app_dir():
     """取得應用程式的根目錄（EXE 所在目錄 或 專案根目錄）"""
     if getattr(sys, 'frozen', False):
-        # PyInstaller 打包後：使用 EXE 所在的目錄
-        return os.path.dirname(sys.executable)
+        exe_dir = os.path.dirname(sys.executable)
+        # 優先檢查 EXE 同層是否有 data 資料夾
+        if os.path.exists(os.path.join(exe_dir, 'data')):
+            return exe_dir
+        # 如果沒有，檢查上一層目錄（處理在 dist/ 執行 EXE 的情況）
+        parent_dir = os.path.dirname(exe_dir)
+        if os.path.exists(os.path.join(parent_dir, 'data')):
+            return parent_dir
+        return exe_dir
     else:
         # 開發模式：使用 config.py 的上層目錄（專案根目錄）
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
