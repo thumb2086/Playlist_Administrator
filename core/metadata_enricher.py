@@ -72,25 +72,39 @@ class MetadataEnricher:
             
             if file_ext == '.flac':
                 audio = FLAC(file_path)
+                # Check tags
                 required_fields = ['TITLE', 'ARTIST']
                 for field in required_fields:
                     if field not in audio or not audio[field]:
                         missing_fields.append(field)
+                
+                # Check album art
+                if not audio.pictures:
+                    missing_fields.append('album_art')
                         
             elif file_ext in ['.mp3', '.mp2', '.mp1']:
                 try:
-                    audio = EasyID3(file_path)
+                    # EasyID3 for tags
+                    audio_tags = EasyID3(file_path)
                     required_fields = ['title', 'artist']
                     for field in required_fields:
-                        if field not in audio or not audio[field]:
+                        if field not in audio_tags or not audio_tags[field]:
                             missing_fields.append(field)
                 except:
                     # Fallback to ID3 if EasyID3 fails
-                    audio = ID3(file_path)
-                    if not audio.get('TIT2'):
+                    audio_id3 = ID3(file_path)
+                    if not audio_id3.get('TIT2'):
                         missing_fields.append('title')
-                    if not audio.get('TPE1'):
+                    if not audio_id3.get('TPE1'):
                         missing_fields.append('artist')
+                
+                # Check for album art (APIC frame in ID3)
+                try:
+                    audio_id3 = ID3(file_path)
+                    if not any(frame.startswith('APIC') for frame in audio_id3.keys()):
+                        missing_fields.append('album_art')
+                except:
+                    missing_fields.append('album_art')
                         
             elif file_ext in ['.m4a', '.mp4']:
                 audio = MP4(file_path)
@@ -98,6 +112,10 @@ class MetadataEnricher:
                 for field in required_fields:
                     if field not in audio or not audio[field]:
                         missing_fields.append(field)
+                
+                # Check for cover art atom
+                if 'covr' not in audio:
+                    missing_fields.append('album_art')
         
         except Exception:
             # If we can't read the file, consider all fields missing
@@ -115,9 +133,32 @@ class MetadataEnricher:
             if self.dab_client:
                 success = self._enrich_with_dab_music(file_path, song_name, log_func, artist_hint)
                 if success:
-                    # _enrich_with_dab_music now returns a path on success
                     return success
             
+            # --- NEW: Fallback to Spotify Cache (High Quality) ---
+            from utils.config import CONFIG_DIR
+            cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+            if os.path.exists(cache_dir):
+                from utils.helpers import sanitize_filename
+                clean_name = sanitize_filename(song_name)
+                # Try full name (Artist - Title)
+                meta_file = os.path.join(cache_dir, f"{clean_name}.json")
+                if os.path.exists(meta_file):
+                    try:
+                        with open(meta_file, 'r', encoding='utf-8') as f:
+                            spotify_meta = json.load(f)
+                        
+                        # Map cover_url to album_art_url for enricher compatibility
+                        if 'cover_url' in spotify_meta:
+                            spotify_meta['album_art_url'] = spotify_meta['cover_url']
+                        if 'release_date' in spotify_meta:
+                            spotify_meta['year'] = spotify_meta['release_date'].split('-')[0]
+                            
+                        if self._apply_metadata_to_file(file_path, spotify_meta, log_func):
+                            log_func(f"  ✨ [Spotify Cache] Enriched {song_name}")
+                            return file_path
+                    except: pass
+
             # Fallback to filename-based metadata
             success = self._enrich_from_filename(file_path, song_name, log_func)
             return file_path if success else None
@@ -374,30 +415,33 @@ class MetadataEnricher:
                     audio['\xa9day'] = metadata['year']
                 if metadata.get('genre'):
                     audio['\xa9gen'] = metadata['genre']
-                
-                # Add album art
-                album_art_data = None
-                if metadata.get('album_art_url'):
-                    album_art_data = download_image(metadata['album_art_url'])
-                elif metadata.get('album_art_data'):
-                    album_art_data = metadata['album_art_data']
-
-                if album_art_data:
-                    if file_ext == '.flac':
-                        picture = Picture()
-                        picture.data = album_art_data
-                        picture.type = 3 # Front cover
-                        picture.mime = 'image/jpeg'
-                        audio.add_picture(picture)
-                    elif file_ext in ['.mp3', '.mp2', '.mp1']:
-                        if isinstance(audio, EasyID3):
-                            # EasyID3 doesn't support APIC, need the underlying ID3
-                            audio = ID3(file_path)
-                        audio.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=album_art_data))
-                    elif file_ext in ['.m4a', '.mp4']:
-                        audio['covr'] = [MP4Cover(album_art_data, imageformat=MP4Cover.FORMAT_JPEG)]
-                
                 audio.save()
+
+            # --- Move album art logic OUT of the m4a block to apply to all formats ---
+            album_art_data = None
+            if metadata.get('album_art_url'):
+                album_art_data = download_image(metadata['album_art_url'])
+            elif metadata.get('album_art_data'):
+                album_art_data = metadata['album_art_data']
+
+            if album_art_data:
+                # Re-load audio object for adding picture depending on format
+                if file_ext == '.flac':
+                    audio = FLAC(file_path)
+                    picture = Picture()
+                    picture.data = album_art_data
+                    picture.type = 3 # Front cover
+                    picture.mime = 'image/jpeg'
+                    audio.add_picture(picture)
+                    audio.save()
+                elif file_ext in ['.mp3', '.mp2', '.mp1']:
+                    audio = ID3(file_path)
+                    audio.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=album_art_data))
+                    audio.save()
+                elif file_ext in ['.m4a', '.mp4']:
+                    audio = MP4(file_path)
+                    audio['covr'] = [MP4Cover(album_art_data, imageformat=MP4Cover.FORMAT_JPEG)]
+                    audio.save()
             
             return file_path
             
