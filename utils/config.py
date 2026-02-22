@@ -1,9 +1,19 @@
 import os
+import sys
 import json
 from tkinter import filedialog, messagebox
 
-# Store config in data folder for persistence
-CONFIG_DIR = 'data'
+def get_app_dir():
+    """取得應用程式的根目錄（EXE 所在目錄 或 專案根目錄）"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 打包後：使用 EXE 所在的目錄
+        return os.path.dirname(sys.executable)
+    else:
+        # 開發模式：使用 config.py 的上層目錄（專案根目錄）
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Store config in data folder for persistence (absolute path for EXE compatibility)
+CONFIG_DIR = os.path.join(get_app_dir(), 'data')
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
 
 def load_config():
