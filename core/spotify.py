@@ -178,7 +178,15 @@ def scrape_via_spotify_embed(config, stats, log_func):
                 if next_data_tag:
                     try:
                         data = json.loads(next_data_tag.string)
-                        entity = data.get('props', {}).get('pageProps', {}).get('state', {}).get('data', {}).get('entity', {})
+                        
+                        def get_path(obj, keys):
+                            curr = obj
+                            for k in keys:
+                                if isinstance(curr, dict) and k in curr: curr = curr[k]
+                                else: return None
+                            return curr
+
+                        entity = get_path(data, ['props', 'pageProps', 'state', 'data', 'entity'])
                         if entity:
                             track_name = entity.get('name')
                             artists = entity.get('artists', [])
@@ -188,23 +196,83 @@ def scrape_via_spotify_embed(config, stats, log_func):
                                 tracks.append(full_track_name)
                                 pl_name = sanitize_filename(full_track_name)
                                 log_func(f" -> 找到單曲: {full_track_name}")
+                                
+                                # --- NEW: Metadata caching for single track ---
+                                try:
+                                    from utils.config import CONFIG_DIR
+                                    cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+                                    os.makedirs(cache_dir, exist_ok=True)
+                                    
+                                    meta = {
+                                        'title': track_name,
+                                        'artist': artist_name,
+                                    }
+                                    
+                                    # Try to reach album or visual identity
+                                    album = entity.get('album', {})
+                                    if album:
+                                        meta['album'] = album.get('name', '')
+                                        meta['release_date'] = album.get('release_date') or album.get('date', '')
+                                        images = album.get('images', [])
+                                        if images and len(images) > 0:
+                                            meta['cover_url'] = images[0].get('url', '')
+                                    
+                                    # Fallback to visualIdentity for covers (common in tracks)
+                                    if not meta.get('cover_url'):
+                                        images = get_path(entity, ['visualIdentity', 'image'])
+                                        if images and len(images) > 0:
+                                            meta['cover_url'] = images[0].get('url', '')
+                                            
+                                    clean_filename = sanitize_filename(full_track_name)
+                                    meta_file = os.path.join(cache_dir, f"{clean_filename}.json")
+                                    with open(meta_file, 'w', encoding='utf-8') as mf:
+                                        json.dump(meta, mf, ensure_ascii=False, indent=2)
+                                except Exception as meta_e:
+                                    log_func(f" -> 儲存 Metadata 快取失敗: {meta_e}")
+                                # --- END NEW ---
+                                
+                        # FINAL FALLBACK: If meta is missing cover or album, try OG tags
+                        if not tracks: # or if we want to enrich HTML fallback
+                             pass # we can do more here if needed
                     except Exception as e:
                         log_func(_('json_error', e))
                 
-                # Fallback to HTML parsing if JSON fails
+                # Fallback to HTML parsing if JSON fails or is incomplete
                 if not tracks:
                     try:
-                        title_tag = soup.find("h1")
-                        artist_tag = soup.find("h2") or soup.find("a", {"data-testid": "entity-title"})
-                        if title_tag and artist_tag:
-                            title = title_tag.get_text(strip=True)
-                            artist = artist_tag.get_text(strip=True)
+                        title_tag = soup.find("h1") or soup.find("meta", property="og:title")
+                        artist_tag = soup.find("h2") or soup.find("meta", property="og:description")
+                        if title_tag:
+                            title = title_tag.get_text(strip=True) if not title_tag.get('content') else title_tag.get('content')
+                            # Handle "Artist - Song" format in title or description
+                            if artist_tag:
+                                artist = artist_tag.get_text(strip=True) if not artist_tag.get('content') else artist_tag.get('content').split('·')[0].strip()
+                            else:
+                                artist = "Unknown"
+                                
                             full_track_name = f"{artist} - {title}"
                             tracks.append(full_track_name)
                             pl_name = sanitize_filename(full_track_name)
-                            log_func(f" -> 找到單曲 (HTML): {full_track_name}")
+                            log_func(f" -> 找到單曲 (HTML Fallback): {full_track_name}")
+                            
+                            # Cache basic meta from HG/OG tags
+                            try:
+                                from utils.config import CONFIG_DIR
+                                cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+                                os.makedirs(cache_dir, exist_ok=True)
+                                
+                                meta = {'title': title, 'artist': artist}
+                                og_image = soup.find("meta", property="og:image")
+                                if og_image:
+                                    meta['cover_url'] = og_image.get('content')
+                                
+                                clean_filename = sanitize_filename(full_track_name)
+                                meta_file = os.path.join(cache_dir, f"{clean_filename}.json")
+                                with open(meta_file, 'w', encoding='utf-8') as mf:
+                                    json.dump(meta, mf, ensure_ascii=False, indent=2)
+                            except: pass
                     except Exception as e:
-                        log_func(f" -> 單曲解析錯誤: {e}")
+                        log_func(f" -> 單曲解析特急錯誤: {e}")
             else:
                 # Regular playlist/album/artist processing
                 if is_artist:
@@ -275,6 +343,12 @@ def scrape_via_spotify_embed(config, stats, log_func):
                                                 meta['release_date'] = album.get('release_date') or album.get('date', '')
                                                 # Try to get cover art
                                                 images = album.get('images', [])
+                                                if images and len(images) > 0:
+                                                    meta['cover_url'] = images[0].get('url', '')
+                                            
+                                            # Fallback for playlist tracks too
+                                            if not meta.get('cover_url'):
+                                                images = get_path(track, ['visualIdentity', 'image'])
                                                 if images and len(images) > 0:
                                                     meta['cover_url'] = images[0].get('url', '')
                                                     
