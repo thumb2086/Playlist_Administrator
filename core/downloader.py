@@ -1,5 +1,8 @@
 import os
 import re
+import logging
+import subprocess
+from pathlib import Path
 import yt_dlp
 from utils.helpers import sanitize_filename, download_image
 from core.library import find_song_in_library
@@ -48,6 +51,124 @@ class YdlLogger:
 
 class TaskAbortedException(Exception):
     pass
+
+def _resolve_spotdl_executable(raw_path):
+    """Resolve spotDL executable path for current platform."""
+    candidate = Path(raw_path)
+    if os.name == 'nt':
+        if candidate.suffix.lower() != '.exe':
+            candidate = candidate.with_suffix('.exe')
+    return candidate
+
+def _extract_spotdl_output_path(stdout_text):
+    """
+    Extract downloaded file path from spotDL stdout.
+    Supports lines like:
+      - Downloaded to /path/to/file.mp3
+      - Downloaded to C:\\path\\file.mp3
+    """
+    if not stdout_text:
+        return None
+
+    for raw_line in stdout_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        lower_line = line.lower()
+        if "downloaded to " in lower_line:
+            marker_index = lower_line.rfind("downloaded to ")
+            maybe_path = line[marker_index + len("downloaded to "):].strip().strip('"')
+            if maybe_path:
+                return Path(maybe_path)
+
+        if (line.endswith(".mp3") or line.endswith(".m4a") or
+                line.endswith(".opus") or line.endswith(".flac") or
+                line.endswith(".wav")):
+            return Path(line.strip('"'))
+
+    return None
+
+def download_with_spotdl(spotify_url: str, output_template: str, config: dict) -> Path | None:
+    """
+    Download a Spotify track URL via spotDL standalone executable.
+
+    Returns:
+        Path | None: Downloaded file path if successful, otherwise None.
+    """
+    spotdl_path = _resolve_spotdl_executable(config.get("spotdl_path", "bin/spotdl.exe"))
+    ffmpeg_path = Path(config.get("ffmpeg_path", "bin/ffmpeg.exe"))
+    output_format = config.get("format", "mp3")
+    overwrite_mode = config.get("overwrite", "skip")
+    bitrate = config.get("bitrate")
+    timeout = int(config.get("timeout", 600))
+
+    cmd = [
+        str(spotdl_path),
+        "download",
+        spotify_url,
+        "--output", output_template,
+        "--format", output_format,
+        "--overwrite", overwrite_mode,
+        "--preload",
+        "--ffmpeg", str(ffmpeg_path),
+    ]
+
+    if bitrate:
+        cmd.extend(["--bitrate", str(bitrate)])
+
+    logging.info("spotDL command: %s", " ".join(cmd))
+    print(f"[spotDL] Start download: {spotify_url}")
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        err_msg = f"spotDL timeout after {timeout}s: {spotify_url}"
+        logging.error(err_msg)
+        print(f"[spotDL] ERROR: {err_msg}")
+        return None
+    except Exception as exc:
+        err_msg = f"spotDL invocation failed: {exc}"
+        logging.error(err_msg)
+        print(f"[spotDL] ERROR: {err_msg}")
+        return None
+
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+
+    if proc.returncode != 0:
+        err_msg = f"spotDL failed (code={proc.returncode}): {stderr or stdout}"
+        logging.error(err_msg)
+        print(f"[spotDL] ERROR: {err_msg}")
+        return None
+
+    parsed_path = _extract_spotdl_output_path(stdout)
+    if parsed_path:
+        if not parsed_path.is_absolute():
+            parsed_path = (Path.cwd() / parsed_path).resolve()
+        if parsed_path.exists():
+            logging.info("spotDL success: %s", parsed_path)
+            print(f"[spotDL] Downloaded: {parsed_path}")
+            return parsed_path
+
+    output_parent = Path(output_template).parent
+    if output_parent.exists():
+        candidates = list(output_parent.glob(f"*.{output_format}"))
+        if candidates:
+            latest_file = max(candidates, key=lambda p: p.stat().st_mtime)
+            logging.info("spotDL success (fallback path): %s", latest_file)
+            print(f"[spotDL] Downloaded (fallback): {latest_file}")
+            return latest_file
+
+    logging.error("spotDL succeeded but output file path could not be resolved.")
+    print("[spotDL] ERROR: Download finished but file path not found.")
+    return None
 
 def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enrich_metadata=False):
     """Add metadata to downloaded audio file"""

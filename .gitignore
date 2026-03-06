@@ -31,3 +31,6 @@ RELEASING.md
 
 # Data folder (contains all app-generated data)
 data/
+
+# Local standalone binaries
+bin/

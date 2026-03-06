@@ -89,6 +89,13 @@ def initialize_session_state():
         'base_path': os.getcwd(),
         'export_path': os.path.join(os.getcwd(), 'USB_Output'),
         'max_threads': 8,
+        'spotdl_path': 'bin/spotdl.exe',
+        'ffmpeg_path': 'bin/ffmpeg.exe',
+        'spotdl_format': 'mp3',
+        'spotdl_force_overwrite': False,
+        'spotdl_bitrate': '',
+        'spotdl_timeout': 600,
+        'spotdl_output_template': '',
         'dab_use_lossless': False,
         'dab_use_metadata': False,
         'dab_email': "",
@@ -147,6 +154,13 @@ def save_settings():
         'dab_password': s.get('dab_password'),
         'enable_retroactive_lyrics': s.get('auto_lyrics'),
         'auto_metadata': s.get('auto_metadata'),
+        'spotdl_path': s.get('spotdl_path', 'bin/spotdl.exe'),
+        'ffmpeg_path': s.get('ffmpeg_path', 'bin/ffmpeg.exe'),
+        'spotdl_format': s.get('spotdl_format', 'mp3'),
+        'spotdl_force_overwrite': s.get('spotdl_force_overwrite', False),
+        'spotdl_bitrate': s.get('spotdl_bitrate', ''),
+        'spotdl_timeout': int(s.get('spotdl_timeout', 600)),
+        'spotdl_output_template': s.get('spotdl_output_template', ''),
         'language': s.get('language', 'zh-TW'),
         'spotify_urls': s.get('spotify_urls', []),
         'url_names': s.get('url_names', {})
@@ -225,6 +239,7 @@ if page == "🏠 儀表板 (Dashboard)":
     col_btn, col_log = st.columns([1, 1])
     with col_btn:
         if st.button("開始下載 / 更新 (Start)", type="primary", width='stretch'):
+            progress_bar = st.progress(0, text="準備開始下載...")
             with st.status("正在執行同步更新...", expanded=True) as status_indicator:
                 stats = UpdateStats()
                 bridge = StatusBridge(status_table_placeholder)
@@ -238,7 +253,16 @@ if page == "🏠 儀表板 (Dashboard)":
                     # We could also use another placeholder for log history if needed
                 
                 def progress_func(current, total, eta=None):
-                    pass 
+                    if not total or total <= 0:
+                        progress_bar.progress(0, text="正在分析缺歌...")
+                        return
+                    pct = int((float(current) / float(total)) * 100)
+                    pct = max(0, min(100, pct))
+                    if eta is None:
+                        eta_text = "ETA 計算中"
+                    else:
+                        eta_text = str(eta)
+                    progress_bar.progress(pct, text=f"下載進度 {current}/{total} | {eta_text}")
                 
                 update_library_logic(
                     st.session_state['settings'], 
@@ -246,6 +270,7 @@ if page == "🏠 儀表板 (Dashboard)":
                     log_func,
                     progress_func=progress_func
                 )
+                progress_bar.progress(100, text="下載流程完成")
                 
                 st.success(f"✅ 同步完成！下載了 {len(stats.songs_downloaded)} 首歌。")
                 # Refresh data after download
@@ -382,6 +407,23 @@ elif page == "⚙️ 系統設定":
         
         st.subheader("介面")
         settings['language'] = st.selectbox("語言 (Language)", ["繁體中文 (zh-TW)", "English (en-US)"], index=0 if settings.get('language') == 'zh-TW' else 1)
+        
+        st.subheader("spotDL 下載引擎")
+        settings['spotdl_path'] = st.text_input("spotdl 路徑", value=settings.get('spotdl_path', 'bin/spotdl.exe'))
+        settings['ffmpeg_path'] = st.text_input("ffmpeg 路徑", value=settings.get('ffmpeg_path', 'bin/ffmpeg.exe'))
+        settings['spotdl_format'] = st.selectbox(
+            "格式",
+            ["mp3", "m4a", "opus"],
+            index=["mp3", "m4a", "opus"].index(settings.get('spotdl_format', 'mp3')) if settings.get('spotdl_format', 'mp3') in ["mp3", "m4a", "opus"] else 0
+        )
+        settings['spotdl_force_overwrite'] = st.checkbox("強制覆蓋", value=settings.get('spotdl_force_overwrite', False))
+        settings['spotdl_bitrate'] = st.text_input("Bitrate (選填，例如 320k)", value=settings.get('spotdl_bitrate', ''))
+        settings['spotdl_timeout'] = st.number_input("spotDL Timeout (秒)", min_value=60, max_value=3600, value=int(settings.get('spotdl_timeout', 600)), step=30)
+        settings['spotdl_output_template'] = st.text_input(
+            "輸出模板 (選填)",
+            value=settings.get('spotdl_output_template', ''),
+            help="留空時使用預設 Music/{artist}/{album}/{title}.{output-ext}"
+        )
 
     with tab2:
         st.subheader("DAB Music 核心服務")

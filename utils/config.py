@@ -73,6 +73,13 @@ def load_config():
     # Set defaults for missing keys
     defaults = {
         'audio_format': 'mp3',
+        'spotdl_path': 'bin/spotdl.exe',
+        'ffmpeg_path': 'bin/ffmpeg.exe',
+        'spotdl_format': 'mp3',
+        'spotdl_force_overwrite': False,
+        'spotdl_bitrate': '',
+        'spotdl_timeout': 600,
+        'spotdl_output_template': '',
         'language': 'zh-TW',
         'spotify_urls': [],
         'url_names': {},

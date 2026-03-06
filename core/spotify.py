@@ -4,7 +4,38 @@ import requests
 from bs4 import BeautifulSoup
 from zhconv import convert
 from utils.helpers import sanitize_filename
-from utils.config import ensure_dirs
+from utils.config import ensure_dirs, get_data_file
+
+def _song_key(song_name):
+    """Stable key for per-track URL mapping."""
+    return sanitize_filename(song_name).strip().lower()
+
+def _extract_track_spotify_url(track_obj):
+    """Extract canonical Spotify track URL from a Spotify track payload."""
+    if not isinstance(track_obj, dict):
+        return None
+
+    external_urls = track_obj.get('external_urls')
+    if isinstance(external_urls, dict):
+        ext_sp = external_urls.get('spotify')
+        if ext_sp:
+            return ext_sp
+
+    direct_url = track_obj.get('shareUrl') or track_obj.get('url') or track_obj.get('spotify_url')
+    if direct_url and isinstance(direct_url, str) and "open.spotify.com/track/" in direct_url:
+        return direct_url
+
+    uri = track_obj.get('uri')
+    if isinstance(uri, str) and uri.startswith("spotify:track:"):
+        track_id = uri.split(":")[-1].strip()
+        if track_id:
+            return f"https://open.spotify.com/track/{track_id}"
+
+    track_id = track_obj.get('id')
+    if isinstance(track_id, str) and track_id.strip():
+        return f"https://open.spotify.com/track/{track_id.strip()}"
+
+    return None
 
 def get_spotify_name(sp_url):
     """Helper to fetch ONLY the name of a Spotify playlist, artist, or album from its embed page"""
@@ -90,6 +121,19 @@ def scrape_via_spotify_embed(config, stats, log_func):
     import datetime
     today = datetime.datetime.now().strftime('%Y-%m-%d')
     last_updated = config.get('last_updated', {})
+    
+    track_map_path = get_data_file('spotify_track_map.json')
+    track_url_map = {}
+    try:
+        if os.path.exists(track_map_path) and os.path.getsize(track_map_path) > 0:
+            with open(track_map_path, 'r', encoding='utf-8') as tf:
+                loaded_map = json.load(tf)
+                if isinstance(loaded_map, dict):
+                    track_url_map = loaded_map
+    except Exception as map_e:
+        log_func(f" -> 讀取 Spotify track URL 快取失敗: {map_e}")
+        track_url_map = {}
+    track_map_updated = False
 
     for sp_url in target_urls:
         if stats and stats.stop_event and stats.stop_event.is_set():
@@ -196,6 +240,11 @@ def scrape_via_spotify_embed(config, stats, log_func):
                                 tracks.append(full_track_name)
                                 pl_name = sanitize_filename(full_track_name)
                                 log_func(f" -> 找到單曲: {full_track_name}")
+                                
+                                single_track_url = _extract_track_spotify_url(entity)
+                                if single_track_url:
+                                    track_url_map[_song_key(full_track_name)] = single_track_url
+                                    track_map_updated = True
                                 
                                 # --- NEW: Metadata caching for single track ---
                                 try:
@@ -323,6 +372,11 @@ def scrape_via_spotify_embed(config, stats, log_func):
                                         artist_name = clean_artist_name(artists[0].get('name'))
                                         full_track_name = f"{artist_name} - {name}"
                                         tracks.append(full_track_name)
+                                        
+                                        track_url = _extract_track_spotify_url(track)
+                                        if track_url:
+                                            track_url_map[_song_key(full_track_name)] = track_url
+                                            track_map_updated = True
                                         
                                         # --- NEW: Extract and save rich metadata ---
                                         try:
@@ -499,3 +553,11 @@ def scrape_via_spotify_embed(config, stats, log_func):
 
         except Exception as e:
             log_func(_('scrape_error', e))
+    
+    if track_map_updated:
+        try:
+            with open(track_map_path, 'w', encoding='utf-8') as tf:
+                json.dump(track_url_map, tf, ensure_ascii=False, indent=2)
+            log_func(f" -> Spotify track URL 快取已更新: {len(track_url_map)} 首")
+        except Exception as map_write_e:
+            log_func(f" -> Spotify track URL 快取寫入失敗: {map_write_e}")
