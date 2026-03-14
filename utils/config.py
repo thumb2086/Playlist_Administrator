@@ -73,13 +73,7 @@ def load_config():
     # Set defaults for missing keys
     defaults = {
         'audio_format': 'mp3',
-        'spotdl_path': 'bin/spotdl.exe',
         'ffmpeg_path': 'bin/ffmpeg.exe',
-        'spotdl_format': 'mp3',
-        'spotdl_force_overwrite': False,
-        'spotdl_bitrate': '',
-        'spotdl_timeout': 600,
-        'spotdl_output_template': '',
         'language': 'zh-TW',
         'spotify_urls': [],
         'url_names': {},
@@ -95,6 +89,10 @@ def load_config():
         'dab_email': "",
         'dab_password': "",
         'auto_metadata': False,
+        'spotube_folder_name': 'spotube',
+        'spotube_mp3_subfolder': 'mp3',
+        'prefer_mp3_playlists': True,
+        'spotube_convert_workers': 4,
     }
     for key, value in defaults.items():
         config.setdefault(key, value)
@@ -109,10 +107,31 @@ def load_config():
     return config
 
 def derive_paths(config):
-    base_path = config['base_path']
-    config['library_path'] = os.path.normpath(os.path.join(base_path, 'Music'))
+    base_path = os.path.normpath(config['base_path'])
+
+    def _looks_like_music_root(path):
+        if not path or not os.path.isdir(path):
+            return False
+        try:
+            entries = os.listdir(path)
+        except Exception:
+            return False
+
+        lower_entries = {e.lower() for e in entries}
+        if 'spotube' in lower_entries:
+            return True
+
+        for name in entries:
+            if name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')):
+                return True
+        return False
+
+    library_root = base_path if _looks_like_music_root(base_path) else os.path.join(base_path, 'Music')
+    config['library_path'] = os.path.normpath(library_root)
     config['playlists_path'] = os.path.normpath(os.path.join(base_path, 'Playlists'))
     config['export_path'] = os.path.normpath(os.path.join(base_path, 'USB_Output'))
+    if os.path.basename(base_path).lower() == 'spotube' and config.get('spotube_folder_name', 'spotube') == 'spotube':
+        config['spotube_folder_name'] = ''
     return config
 
 def get_data_file(filename):

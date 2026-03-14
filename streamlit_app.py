@@ -6,7 +6,6 @@ import os
 from utils.config import load_config, save_config, derive_paths
 from core.library import load_playlists_data, update_library_logic, UpdateStats
 from core.sync_manager import sync_folders # Added import for sync_folders
-from core.dab_client import DABMusicClient # Added import for real DAB login
 
 # ==========================================
 # 1. 基礎設定與函式
@@ -88,20 +87,11 @@ def initialize_session_state():
     default_settings = {
         'base_path': os.getcwd(),
         'export_path': os.path.join(os.getcwd(), 'USB_Output'),
-        'max_threads': 8,
-        'spotdl_path': 'bin/spotdl.exe',
         'ffmpeg_path': 'bin/ffmpeg.exe',
-        'spotdl_format': 'mp3',
-        'spotdl_force_overwrite': False,
-        'spotdl_bitrate': '',
-        'spotdl_timeout': 600,
-        'spotdl_output_template': '',
-        'dab_use_lossless': False,
-        'dab_use_metadata': False,
-        'dab_email': "",
-        'dab_password': "",
-        'enable_retroactive_lyrics': False,
-        'auto_metadata': False,
+        'spotube_folder_name': 'spotube',
+        'spotube_mp3_subfolder': 'mp3',
+        'spotube_convert_workers': 4,
+        'prefer_mp3_playlists': True,
         'language': 'zh-TW',
         'spotify_urls': [],
         'url_names': {}
@@ -120,10 +110,6 @@ def initialize_session_state():
     # Map backend keys to UI keys if they differ
     if 'base_folder' not in st.session_state['settings']:
         st.session_state['settings']['base_folder'] = os.path.normpath(st.session_state['settings']['base_path'])
-    if 'threads' not in st.session_state['settings']:
-        st.session_state['settings']['threads'] = st.session_state['settings']['max_threads']
-    if 'auto_lyrics' not in st.session_state['settings']:
-        st.session_state['settings']['auto_lyrics'] = st.session_state['settings']['enable_retroactive_lyrics']
     
     # Normalize other paths
     st.session_state['settings']['export_path'] = os.path.normpath(st.session_state['settings']['export_path'])
@@ -147,20 +133,11 @@ def save_settings():
     config_to_save = {
         'base_path': os.path.normpath(s.get('base_folder')),
         'export_path': os.path.normpath(s.get('export_path')),
-        'max_threads': s.get('threads'),
-        'dab_use_lossless': s.get('dab_use_lossless'),
-        'dab_use_metadata': s.get('dab_use_metadata'),
-        'dab_email': s.get('dab_email'),
-        'dab_password': s.get('dab_password'),
-        'enable_retroactive_lyrics': s.get('auto_lyrics'),
-        'auto_metadata': s.get('auto_metadata'),
-        'spotdl_path': s.get('spotdl_path', 'bin/spotdl.exe'),
         'ffmpeg_path': s.get('ffmpeg_path', 'bin/ffmpeg.exe'),
-        'spotdl_format': s.get('spotdl_format', 'mp3'),
-        'spotdl_force_overwrite': s.get('spotdl_force_overwrite', False),
-        'spotdl_bitrate': s.get('spotdl_bitrate', ''),
-        'spotdl_timeout': int(s.get('spotdl_timeout', 600)),
-        'spotdl_output_template': s.get('spotdl_output_template', ''),
+        'spotube_folder_name': s.get('spotube_folder_name', 'spotube'),
+        'spotube_mp3_subfolder': s.get('spotube_mp3_subfolder', 'mp3'),
+        'spotube_convert_workers': s.get('spotube_convert_workers', 4),
+        'prefer_mp3_playlists': s.get('prefer_mp3_playlists', True),
         'language': s.get('language', 'zh-TW'),
         'spotify_urls': s.get('spotify_urls', []),
         'url_names': s.get('url_names', {})
@@ -224,7 +201,7 @@ if page == "🏠 儀表板 (Dashboard)":
 
     st.write("") 
 
-    st.subheader("📂 目前下載路徑")
+    st.subheader("📂 目前路徑")
     st.code(st.session_state['settings']['base_folder'], language="text")
     st.caption("如需修改路徑，請前往 [系統設定] 頁面。")
 
@@ -234,13 +211,13 @@ if page == "🏠 儀表板 (Dashboard)":
     st.subheader("🚀 執行操作")
     
     status_table_placeholder = st.empty()
-    status_table_placeholder.info("等待任務開始... (點擊下方按鈕開始)")
+    status_table_placeholder.info("等待任務開始...")
     
     col_btn, col_log = st.columns([1, 1])
     with col_btn:
-        if st.button("開始下載 / 更新 (Start)", type="primary", width='stretch'):
-            progress_bar = st.progress(0, text="準備開始下載...")
-            with st.status("正在執行同步更新...", expanded=True) as status_indicator:
+        if st.button("開始處理 (Start)", type="primary", width='stretch'):
+            progress_bar = st.progress(0, text="準備開始處理...")
+            with st.status("正在執行處理...", expanded=True) as status_indicator:
                 stats = UpdateStats()
                 bridge = StatusBridge(status_table_placeholder)
                 stats.app = bridge # Provide bridge to backend
@@ -254,7 +231,7 @@ if page == "🏠 儀表板 (Dashboard)":
                 
                 def progress_func(current, total, eta=None):
                     if not total or total <= 0:
-                        progress_bar.progress(0, text="正在分析缺歌...")
+                        progress_bar.progress(0, text="正在分析...")
                         return
                     pct = int((float(current) / float(total)) * 100)
                     pct = max(0, min(100, pct))
@@ -262,7 +239,7 @@ if page == "🏠 儀表板 (Dashboard)":
                         eta_text = "ETA 計算中"
                     else:
                         eta_text = str(eta)
-                    progress_bar.progress(pct, text=f"下載進度 {current}/{total} | {eta_text}")
+                    progress_bar.progress(pct, text=f"進度 {current}/{total} | {eta_text}")
                 
                 update_library_logic(
                     st.session_state['settings'], 
@@ -270,10 +247,10 @@ if page == "🏠 儀表板 (Dashboard)":
                     log_func,
                     progress_func=progress_func
                 )
-                progress_bar.progress(100, text="下載流程完成")
+                progress_bar.progress(100, text="處理完成")
                 
-                st.success(f"✅ 同步完成！下載了 {len(stats.songs_downloaded)} 首歌。")
-                # Refresh data after download
+                st.success("✅ 處理完成！")
+                # Refresh data after update
                 st.session_state.playlist_data = pd.DataFrame(load_playlists_data(st.session_state['settings']))
         
         st.button("暫停任務 (Pause)", width='stretch')
@@ -291,7 +268,7 @@ elif page == "📝 連結管理":
     col_h, col_r = st.columns([4, 1])
     with col_h:
         st.header("管理 Spotify 連結")
-        st.caption("勾選「啟用」以納入下載排程。")
+        st.caption("勾選「啟用」以納入處理排程。")
     with col_r:
         st.write("") # Padding
         if st.button("🔄 重新整理", width='stretch', help="重新掃描硬碟與設定檔中的歌單"):
@@ -301,7 +278,7 @@ elif page == "📝 連結管理":
     edited_df = st.data_editor(
         st.session_state.playlist_data,
         column_config={
-            "啟用": st.column_config.CheckboxColumn("下載?", width="small"),
+            "啟用": st.column_config.CheckboxColumn("啟用", width="small"),
             "類型": st.column_config.TextColumn("類型", disabled=True, width="medium"),
             "名稱": st.column_config.TextColumn("歌單名稱", width="medium"),
             "連結": st.column_config.LinkColumn("Spotify URL", width="large"),
@@ -396,83 +373,26 @@ elif page == "📤 匯出同步":
 elif page == "⚙️ 系統設定":
     st.header("系統設定")
 
-    tab1, tab2, tab3 = st.tabs(["一般 & 路徑", "DAB Music (無損核心)", "進階效能"])
+    tab1 = st.tabs(["一般 & 路徑"])[0]
 
     # 更新 session_state 當 UI 變動
     settings = st.session_state['settings']
 
     with tab1:
         st.subheader("儲存位置")
-        settings['base_folder'] = st.text_input("下載資料夾 (Base Folder)", value=settings.get('base_folder'))
+        settings['base_folder'] = st.text_input("音樂資料夾 (Base Folder)", value=settings.get('base_folder'))
         
         st.subheader("介面")
         settings['language'] = st.selectbox("語言 (Language)", ["繁體中文 (zh-TW)", "English (en-US)"], index=0 if settings.get('language') == 'zh-TW' else 1)
         
-        st.subheader("spotDL 下載引擎")
-        settings['spotdl_path'] = st.text_input("spotdl 路徑", value=settings.get('spotdl_path', 'bin/spotdl.exe'))
+        st.subheader("轉檔設定")
         settings['ffmpeg_path'] = st.text_input("ffmpeg 路徑", value=settings.get('ffmpeg_path', 'bin/ffmpeg.exe'))
-        settings['spotdl_format'] = st.selectbox(
-            "格式",
-            ["mp3", "m4a", "opus"],
-            index=["mp3", "m4a", "opus"].index(settings.get('spotdl_format', 'mp3')) if settings.get('spotdl_format', 'mp3') in ["mp3", "m4a", "opus"] else 0
-        )
-        settings['spotdl_force_overwrite'] = st.checkbox("強制覆蓋", value=settings.get('spotdl_force_overwrite', False))
-        settings['spotdl_bitrate'] = st.text_input("Bitrate (選填，例如 320k)", value=settings.get('spotdl_bitrate', ''))
-        settings['spotdl_timeout'] = st.number_input("spotDL Timeout (秒)", min_value=60, max_value=3600, value=int(settings.get('spotdl_timeout', 600)), step=30)
-        settings['spotdl_output_template'] = st.text_input(
-            "輸出模板 (選填)",
-            value=settings.get('spotdl_output_template', ''),
-            help="留空時使用預設 Music/{artist}/{album}/{title}.{output-ext}"
-        )
 
-    with tab2:
-        st.subheader("DAB Music 核心服務")
-        st.info("DAB Music 帳號可用於獲取 FLAC 無損音質或高品質 Metadata (如專輯封面)。")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            settings['dab_use_lossless'] = st.checkbox("啟用項目：無損音質 (FLAC)", value=settings.get('dab_use_lossless', False))
-        with c2:
-            settings['dab_use_metadata'] = st.checkbox("啟用項目：高品質 Metadata", value=settings.get('dab_use_metadata', False))
-            
-        if settings['dab_use_lossless'] or settings['dab_use_metadata']:
-            c1_cred, c2_cred = st.columns(2)
-            with c1_cred:
-                settings['dab_email'] = st.text_input("DAB Email", value=settings.get('dab_email'))
-            with c2_cred:
-                settings['dab_password'] = st.text_input("DAB Password", type="password", value=settings.get('dab_password'))
-            
-            if st.button("驗證帳號 (Test Login)"):
-                if not settings.get('dab_email') or not settings.get('dab_password'):
-                    st.warning("⚠️ 請先輸入 Email 與密碼")
-                else:
-                    client = DABMusicClient()
-                    with st.spinner("正在驗證帳號..."):
-                        if client.login(settings['dab_email'], settings['dab_password']):
-                            user_name = client.user_info.get('username', '使用者')
-                            st.success(f"✅ 驗證成功！歡迎回來，{user_name}。")
-                        else:
-                            st.error("❌ 驗證失敗，請檢查 Email 或密碼是否正確，或確認伺服器狀態。")
-        else:
-            st.caption("目前狀態：使用公開來源 (僅 MP3 128/320kbps)")
+        st.subheader("Spotube 路徑")
+        settings['spotube_folder_name'] = st.text_input("Spotube 資料夾", value=settings.get('spotube_folder_name', 'spotube'))
+        settings['spotube_mp3_subfolder'] = st.text_input("MP3 子資料夾", value=settings.get('spotube_mp3_subfolder', 'mp3'))
+        settings['prefer_mp3_playlists'] = st.checkbox("播放清單優先 MP3", value=settings.get('prefer_mp3_playlists', True))
 
-    with tab3:
-        st.subheader("下載行為")
-        settings['threads'] = st.slider("同時下載數 (Threads)", 1, 32, value=settings.get('max_threads', 8))
-        settings['auto_lyrics'] = st.checkbox("自動搜尋歌詞 (Auto Lyrics)", value=settings.get('enable_retroactive_lyrics', False))
-        
-        # Meta toggle now decoupled from lossless, but still needs credentials
-        md_disabled = not (settings.get('dab_use_lossless') or settings.get('dab_use_metadata'))
-        md_help = "需要啟用任一 DAB Music 核心服務才能使用此功能" if md_disabled else "將封面與詳細專輯資訊寫入檔案"
-        
-        settings['auto_metadata'] = st.checkbox("自動寫入 Metadata (DAB 精確版)", 
-                    value=settings.get('auto_metadata'),
-                    disabled=md_disabled,
-                    help=md_help)
-        
-        if md_disabled:
-            st.warning("⚠️ 「自動寫入 Metadata」功能已停用，請先至 [DAB Music] 分頁啟用服務並登入。")
-    
     st.divider()
     if st.button("💾 儲存設定 (Save Settings)", type="primary", width='stretch'):
         save_settings()

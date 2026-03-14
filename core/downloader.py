@@ -125,6 +125,8 @@ def download_with_spotdl(spotify_url: str, output_template: str, config: dict) -
             cmd,
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=timeout,
             check=False,
         )

@@ -170,6 +170,263 @@ def unblock_files(directory, log_func):
             subprocess.run(["powershell", "-Command", cmd], capture_output=True, check=False)
         except: pass
 
+def _resolve_spotube_paths(config):
+    library_path = config.get('library_path')
+    spotube_name = config.get('spotube_folder_name', 'spotube')
+    mp3_subfolder = config.get('spotube_mp3_subfolder', 'mp3')
+    if not spotube_name or spotube_name in ('.', './'):
+        spotube_path = library_path
+    else:
+        spotube_path = os.path.join(library_path, spotube_name)
+    mp3_path = os.path.join(spotube_path, mp3_subfolder)
+    return spotube_path, mp3_path
+
+def _has_m4a_files(root_path):
+    if not root_path or not os.path.exists(root_path):
+        return False
+    for root, _, files in os.walk(root_path):
+        for fname in files:
+            if fname.lower().endswith('.m4a'):
+                return True
+    return False
+
+def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None):
+    """Convert Spotube m4a files into mp3 subfolder inside Spotube."""
+    from core.audio_converter import convert_audio_file, check_ffmpeg_available
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+
+    spotube_path, mp3_path = _resolve_spotube_paths(config)
+    if not spotube_path or not os.path.exists(spotube_path):
+        library_path = config.get('library_path')
+        if _has_m4a_files(library_path):
+            log_func(f" -> Spotube folder not found, fallback to library root: {library_path}")
+            spotube_path = library_path
+            mp3_path = os.path.join(spotube_path, config.get('spotube_mp3_subfolder', 'mp3'))
+        else:
+            log_func(f" -> Spotube folder not found: {spotube_path}")
+            return 0, 0
+
+    if not check_ffmpeg_available():
+        log_func(" -> FFmpeg not found. Skip M4A -> MP3 conversion.")
+        return 0, 0
+
+    os.makedirs(mp3_path, exist_ok=True)
+
+    # Build task list first for progress reporting
+    tasks = []
+    for root, _, files in os.walk(spotube_path):
+        if os.path.normpath(root).lower().startswith(os.path.normpath(mp3_path).lower()):
+            continue
+        for fname in files:
+            if not fname.lower().endswith('.m4a'):
+                continue
+            src = os.path.join(root, fname)
+            base = os.path.splitext(fname)[0]
+            dest = os.path.join(mp3_path, f"{base}.mp3")
+            tasks.append((src, dest))
+
+    total_tasks = len(tasks)
+    if total_tasks == 0:
+        log_func(" -> No M4A files found for conversion.")
+        return 0, 0, 0
+
+    converted = 0
+    skipped = 0
+
+    # Pre-skip tasks that are already up to date
+    to_convert = []
+    for src, dest in tasks:
+        if os.path.exists(dest):
+            try:
+                if os.path.getmtime(dest) >= os.path.getmtime(src):
+                    skipped += 1
+                    continue
+            except Exception:
+                pass
+        to_convert.append((src, dest))
+
+    processed = skipped
+    if processed and (processed % 10 == 0 or processed == total_tasks):
+        log_func(f" -> Conversion progress: {processed}/{total_tasks}")
+    if progress_cb:
+        progress_cb(processed, total_tasks)
+
+    def _wait_if_paused():
+        if not pause_event:
+            return True
+        while not pause_event.is_set():
+            if stop_event and stop_event.is_set():
+                return False
+            pause_event.wait(0.2)
+        return not (stop_event and stop_event.is_set())
+
+    lock = threading.Lock()
+
+    def _convert_one(src, dest):
+        if stop_event and stop_event.is_set():
+            return "cancel"
+        if not _wait_if_paused():
+            return "cancel"
+        ok = convert_audio_file(src, dest, 'mp3', log_func)
+        return "ok" if ok else "fail"
+
+    workers = config.get('spotube_convert_workers', 4)
+    try:
+        workers = int(workers)
+    except Exception:
+        workers = 4
+    if workers < 1:
+        workers = 1
+
+    if to_convert:
+        log_func(f" -> Conversion workers: {workers}")
+
+    futures = []
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for src, dest in to_convert:
+            if stop_event and stop_event.is_set():
+                break
+            futures.append(ex.submit(_convert_one, src, dest))
+
+        for f in as_completed(futures):
+            result = None
+            try:
+                result = f.result()
+            except Exception:
+                result = "fail"
+
+                with lock:
+                    processed += 1
+                    if result == "ok":
+                        converted += 1
+                    else:
+                        skipped += 1
+
+                    if processed % 10 == 0 or processed == total_tasks:
+                        log_func(f" -> Conversion progress: {processed}/{total_tasks}")
+                    if progress_cb:
+                        progress_cb(processed, total_tasks)
+
+            if stop_event and stop_event.is_set():
+                log_func(" -> Conversion cancelled.")
+                break
+
+        if stop_event and stop_event.is_set():
+            for f in futures:
+                f.cancel()
+
+    log_func(f" -> Spotube conversion done: {converted} converted, {skipped} skipped")
+    return converted, skipped, total_tasks
+
+def _resolve_playlist_entry_path(entry, playlists_path):
+    if os.path.isabs(entry):
+        return os.path.normpath(entry)
+    return os.path.normpath(os.path.join(playlists_path, entry))
+
+def prune_missing_from_playlists(config, log_func, pause_event=None, stop_event=None):
+    """Remove missing audio entries from playlist files."""
+    playlists_path = config.get('playlists_path')
+    library_path = config.get('library_path')
+    if not playlists_path or not os.path.exists(playlists_path):
+        return 0, 0
+
+    # Build library index for non-M3U simple lists
+    search_pattern = os.path.join(library_path, "**", "*")
+    all_files = glob.glob(search_pattern, recursive=True)
+    audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
+    library_index = build_library_index(audio_files_cache)
+
+    pl_files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
+               glob.glob(os.path.join(playlists_path, "*.m3u")) + \
+               glob.glob(os.path.join(playlists_path, "*.txt"))
+
+    total_removed = 0
+    total_files = 0
+
+    for pl_file in pl_files:
+        if stop_event and stop_event.is_set():
+            log_func(" -> Prune cancelled.")
+            break
+        if pause_event:
+            pause_event.wait()
+        total_files += 1
+        removed = 0
+        try:
+            try:
+                with open(pl_file, 'r', encoding='utf-8-sig') as f:
+                    raw_lines = [line.rstrip('\r\n') for line in f.readlines()]
+            except UnicodeDecodeError:
+                with open(pl_file, 'r', encoding='gbk', errors='ignore') as f:
+                    raw_lines = [line.rstrip('\r\n') for line in f.readlines()]
+
+            if not raw_lines:
+                continue
+
+            is_m3u = any('#EXTM3U' in line for line in raw_lines[:5])
+            output = []
+
+            i = 0
+            while i < len(raw_lines):
+                line = raw_lines[i].strip()
+                if not line:
+                    i += 1
+                    continue
+
+                if is_m3u and line.startswith('#EXTINF:'):
+                    j = i + 1
+                    while j < len(raw_lines) and (not raw_lines[j].strip() or raw_lines[j].startswith('#')):
+                        j += 1
+                    if j < len(raw_lines):
+                        path_line = raw_lines[j].strip()
+                        resolved = _resolve_playlist_entry_path(path_line, playlists_path)
+                        if os.path.exists(resolved):
+                            output.append(line)
+                            output.append(path_line)
+                        else:
+                            removed += 1
+                        i = j + 1
+                    else:
+                        i += 1
+                    continue
+
+                if is_m3u:
+                    if line.startswith('#'):
+                        output.append(line)
+                    else:
+                        resolved = _resolve_playlist_entry_path(line, playlists_path)
+                        if os.path.exists(resolved):
+                            output.append(line)
+                        else:
+                            removed += 1
+                    i += 1
+                else:
+                    # Non-m3u: treat lines as song names and validate via library index
+                    if line.startswith('#'):
+                        i += 1
+                        continue
+                    if find_song_in_library(line, library_index):
+                        output.append(line)
+                    else:
+                        removed += 1
+                    i += 1
+
+            if is_m3u:
+                has_header = any(l.startswith('#EXTM3U') for l in output)
+                if not has_header:
+                    output.insert(0, "#EXTM3U")
+
+            if removed > 0:
+                with open(pl_file, 'w', encoding='utf-8-sig', newline='') as f:
+                    for out_line in output:
+                        f.write(f"{out_line}\r\n")
+                log_func(f" -> Removed {removed} missing entries from {os.path.basename(pl_file)}")
+            total_removed += removed
+        except Exception as e:
+            log_func(f"  ? Error pruning {os.path.basename(pl_file)}: {e}")
+
+    return total_removed, total_files
+
 def get_normalized_tokens(text):
     import re
     from zhconv import convert
@@ -998,7 +1255,7 @@ def move_unsorted_songs(config, log_func):
     
     return len(orphans)
 
-def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None, speed_display_callback=None):
+def update_library_logic_legacy(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None, speed_display_callback=None):
     from core.spotify import scrape_via_spotify_embed
     from core.downloader import download_song, download_with_spotdl
     from utils.config import get_data_file
@@ -1739,6 +1996,127 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         except Exception as e:
             log_func(f' Metadata enrichment failed: {str(e)}')
     
+    log_func(_('update_complete'))
+
+def update_library_logic(config, stats, log_func, progress_func=None, post_scrape_callback=None, post_download_callback=None, speed_display_callback=None):
+    from core.spotify import scrape_via_spotify_embed
+    from utils.i18n import _
+    import time
+
+    # 0. Initialize
+    library_path = config['library_path']
+    playlists_path = config['playlists_path']
+
+    def _check_cancel():
+        if stats and stats.stop_event and stats.stop_event.is_set():
+            log_func(_('task_stopped'))
+            return True
+        return False
+
+    def _wait_if_paused():
+        if not (stats and hasattr(stats, 'pause_event') and stats.pause_event):
+            return True
+        while not stats.pause_event.is_set():
+            if stats.stop_event and stats.stop_event.is_set():
+                return False
+            stats.pause_event.wait(0.2)
+        return True
+
+    # 1. Maintenance & Cleanup
+    if not _wait_if_paused():
+        return
+    if _check_cancel():
+        return
+    log_func(_('scanning_lib'))
+    unblock_files(library_path, log_func)
+    rename_explicit_files(library_path, log_func)
+
+    if progress_func:
+        progress_func(5, 100, None)
+
+    # 2. Convert Spotube M4A -> MP3
+    if not _wait_if_paused():
+        return
+    if _check_cancel():
+        return
+    log_func(" -> Converting Spotube M4A to MP3")
+    def _conv_progress(done, total):
+        if not progress_func or not total:
+            return
+        pct = 5 + (float(done) / float(total)) * 35.0
+        progress_func(int(pct), 100, None)
+
+    convert_spotube_m4a_to_mp3(
+        config,
+        log_func,
+        pause_event=getattr(stats, 'pause_event', None),
+        stop_event=getattr(stats, 'stop_event', None),
+        progress_cb=_conv_progress
+    )
+
+    if progress_func:
+        progress_func(40, 100, None)
+
+    # 3. Scrape Spotify and build playlists
+    if not _wait_if_paused():
+        return
+    if _check_cancel():
+        return
+    scrape_via_spotify_embed(config, stats, log_func)
+    if post_scrape_callback:
+        post_scrape_callback()
+
+    if progress_func:
+        progress_func(70, 100, None)
+
+    # 4. Remove missing tracks from playlists
+    if not _wait_if_paused():
+        return
+    if _check_cancel():
+        return
+    removed, total_files = prune_missing_from_playlists(config, log_func, pause_event=getattr(stats, 'pause_event', None), stop_event=getattr(stats, 'stop_event', None))
+    if removed == 0:
+        log_func(_('lib_up_to_date'))
+
+    if progress_func:
+        progress_func(85, 100, None)
+
+    # 5. Analyze and move unsorted songs
+    if not _wait_if_paused():
+        return
+    if _check_cancel():
+        return
+    try:
+        move_unsorted_songs(config, log_func)
+    except Exception:
+        pass
+
+    if progress_func:
+        progress_func(95, 100, None)
+
+    # Metadata enrichment (optional)
+    if config.get('enable_metadata_enrichment', False):
+        if not _wait_if_paused():
+            return
+        if _check_cancel():
+            return
+        try:
+            from core.metadata_enricher import create_metadata_enricher
+            enricher = create_metadata_enricher(config)
+
+            def metadata_progress(current, total):
+                if progress_func:
+                    percentage = (current / total) * 100 if total and total > 0 else 0
+                    progress_func(percentage, 100)
+
+            enricher.enrich_library_metadata(library_path, log_func, metadata_progress)
+            enricher.cleanup()
+        except Exception as e:
+            log_func(f' Metadata enrichment failed: {str(e)}')
+
+    if progress_func:
+        progress_func(100, 100, None)
+
     log_func(_('update_complete'))
 
 def get_playlist_completeness_report(files, library_path):

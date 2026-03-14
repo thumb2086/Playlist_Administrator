@@ -117,23 +117,16 @@ class PlaylistApp:
         SettingsWindow(self.root, self.config, on_settings_close)
 
     def proactive_name_fetch(self):
-        from core.spotify import get_spotify_name
-        from utils.config import save_config
+        from core.spotify import scrape_via_spotify_embed
         
         urls = self.config.get('spotify_urls', [])
         url_names = self.config.get('url_names', {})
-        
-        changed = False
-        for url in urls:
-            if url not in url_names:
-                name = get_spotify_name(url)
-                if name:
-                    url_names[url] = name
-                    changed = True
-                    self.root.after(0, self.refresh_url_list)
-        
-        if changed:
-            save_config(self.config)
+        missing = [u for u in urls if u not in url_names]
+        if not missing:
+            return
+
+        scrape_via_spotify_embed(self.config, None, self.log, target_urls=missing)
+        self.root.after(0, self.refresh_url_list)
 
     def create_widgets(self):
         # Top Bar (Settings Button only)
@@ -520,10 +513,10 @@ class PlaylistApp:
                     eta_text = f"剩餘時間: {eta_sec}秒"
                 self.speed_label.config(text=eta_text)
             elif current_val >= total_val:
-                self.speed_label.config(text="下載完成")
+                self.speed_label.config(text="處理完成")
             elif current_val == 0:
                 # Starting state - show task info
-                self.speed_label.config(text=f"準備下載 {total_val} 首歌曲")
+                self.speed_label.config(text=f"準備處理 {total_val} 首歌曲")
             else:
                 self.speed_label.config(text="準備就緒")
         else:
@@ -540,9 +533,9 @@ class PlaylistApp:
         current_text = self.speed_label.cget("text")
         if (not current_text.startswith("剩餘時間:") and 
             not current_text.startswith("預估時間:") and 
-            current_text != "下載完成" and
-            not current_text.startswith("準備下載")):
-            self.root.after(0, lambda: self.speed_label.config(text=f"下載速度: {speed_text}"))
+            current_text != "處理完成" and
+            not current_text.startswith("準備處理")):
+            self.root.after(0, lambda: self.speed_label.config(text=f"處理速度: {speed_text}"))
 
     def _process_log_queue(self):
         self.log_update_job = None
@@ -811,8 +804,9 @@ class PlaylistApp:
         self.update_btn.config(state="disabled", text=_('loading'))
         
         def _check_and_add():
-            from core.spotify import get_spotify_name
-            name = get_spotify_name(url)
+            from core.spotify import scrape_via_spotify_embed
+            scrape_via_spotify_embed(self.config, None, self.log, target_urls=[url])
+            name = self.config.get('url_names', {}).get(url)
             
             def _ui_final():
                 if not name:
@@ -825,6 +819,11 @@ class PlaylistApp:
                     if existing_url:
                         self.log(_('duplicate_name_warning', name, existing_url))
                         if not messagebox.askyesno(_('duplicate_confirm_title'), _('duplicate_confirm_msg', name)):
+                            if url in url_names:
+                                del url_names[url]
+                                self.config['url_names'] = url_names
+                                from utils.config import save_config
+                                save_config(self.config)
                             self.update_btn.config(state="normal", text=_('update_all_btn'), bg="#d0f0c0")
                             return
 

@@ -73,6 +73,8 @@ def convert_audio_file(input_path, output_path, target_format, log_func=None):
             cmd,
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=300  # 5 minute timeout per file
         )
         

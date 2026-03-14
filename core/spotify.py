@@ -108,9 +108,9 @@ def get_spotify_name(sp_url):
     except: pass
     return None
 
-def scrape_via_spotify_embed(config, stats, log_func):
+def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
     from utils.i18n import _
-    target_urls = config.get('spotify_urls', [])
+    target_urls = target_urls or config.get('spotify_urls', [])
     if not target_urls:
         log_func(_('skip_no_urls'))
         return
@@ -214,6 +214,7 @@ def scrape_via_spotify_embed(config, stats, log_func):
             
             soup = BeautifulSoup(resp.text, 'html.parser')
             tracks = []
+            pl_name = None
             
             # Special handling for single tracks
             if "track/" in sp_url:
@@ -445,6 +446,15 @@ def scrape_via_spotify_embed(config, stats, log_func):
                              artist_clean = clean_html_text(artist_text)
                              tracks.append(f"{artist_clean} - {title_text}")
 
+            # Save name mapping even if no tracks were resolved
+            if pl_name:
+                url_names = config.get('url_names', {})
+                if url_names.get(sp_url) != pl_name:
+                    url_names[sp_url] = pl_name
+                    config['url_names'] = url_names
+                    from utils.config import save_config
+                    save_config(config)
+
             if tracks:
                 # Save name to config mapping
                 if 'url_names' not in config: config['url_names'] = {}
@@ -505,21 +515,31 @@ def scrape_via_spotify_embed(config, stats, log_func):
                     search_pattern = os.path.join(library_path, "**", "*")
                     all_files = glob.glob(search_pattern, recursive=True)
                     audio_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
-                    from core.library import build_library_index, find_song_in_library
+                    from core.library import build_library_index, find_song_in_library, find_song_exact_format
                     lib_index = build_library_index(audio_cache)
 
                 # Only write M3U files for playlists/albums/artists
                 if "track/" not in sp_url:
                     with open(m3u_path, 'w', encoding='utf-8-sig', newline='') as f:
                         f.write("#EXTM3U\r\n")
+                        missing_tracks = 0
+                        kept_tracks = 0
                         for track in tracks:
                             clean_track = track.strip()
                             
                             # Find actual file in library
-                            actual_path = find_song_in_library(clean_track, lib_index)
+                            actual_path = None
+                            if config.get('prefer_mp3_playlists', True):
+                                actual_path = find_song_exact_format(clean_track, 'mp3', lib_index)
+                            if not actual_path:
+                                actual_path = find_song_in_library(clean_track, lib_index)
+                            if not actual_path:
+                                missing_tracks += 1
+                                continue
+                            kept_tracks += 1
                             
                             # Ensure all paths are absolute and normalized first
-                            abs_song_path = os.path.normpath(os.path.abspath(actual_path if actual_path else os.path.join(library_path, f"{clean_track}.mp3")))
+                            abs_song_path = os.path.normpath(os.path.abspath(actual_path))
                             abs_playlists_path = os.path.normpath(os.path.abspath(playlists_path))
                             
                             # Calculate relative path from Playlists folder to Music folder (e.g. ../Music/Song.mp3)
@@ -542,7 +562,9 @@ def scrape_via_spotify_embed(config, stats, log_func):
                             # Write EXTINF and the relative path with CRLF
                             f.write(f"#EXTINF:-1,{clean_track}\r\n")
                             f.write(f"{m3u_entry_path}\r\n")
-                    log_func(_('saved_tracks', len(tracks), os.path.basename(m3u_path)))
+                    log_func(_('saved_tracks', kept_tracks, os.path.basename(m3u_path)))
+                    if missing_tracks > 0:
+                        log_func(f" -> Removed {missing_tracks} missing tracks from {os.path.basename(m3u_path)}")
                     if stats: stats.playlists_scanned += 1
                 else:
                     # For single tracks, just log that they were processed
