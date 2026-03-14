@@ -142,6 +142,9 @@ class I18N:
             'player_shuffle': "隨機播放",
             'player_no_lyrics': "(無動態歌詞資料)",
             'metadata_enrichment_start': "正在補充 metadata (專輯封面/歌手資訊)...",
+            'stats_playlist_unique': "播放清單歌曲數(去重): {0}",
+            'stats_unconverted': "未轉檔數量: {0}",
+            'stats_not_in_playlists': "未收錄在歌單: {0}",
         },
         'en': {
             'app_title': "Playlist Manager",
@@ -284,6 +287,9 @@ class I18N:
             'player_now_playing': "Now Playing: {0}",
             'player_shuffle': "Shuffle",
             'player_no_lyrics': "(No synced lyrics found)",
+            'stats_playlist_unique': "Playlist unique: {0}",
+            'stats_unconverted': "Not converted: {0}",
+            'stats_not_in_playlists': "Not in playlists: {0}",
         },
     }
 

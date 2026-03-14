@@ -357,6 +357,9 @@ class PlaylistApp:
         
         self.recent_lbl = tk.Label(self.stats_frame, text=_('recent_added', ""), font=("Microsoft JhengHei", 9), fg="#666")
         self.recent_lbl.pack(side="top", anchor="w", padx=15, pady=(0, 5))
+
+        self.extra_stats_lbl = tk.Label(self.stats_frame, text="", font=("Microsoft JhengHei", 9), fg="#666")
+        self.extra_stats_lbl.pack(side="top", anchor="w", padx=15, pady=(0, 5))
         
         # Progress Bar (Inside Library Bottom Pane)
         progress_frame = tk.Frame(self.library_bottom_frame)
@@ -762,6 +765,12 @@ class PlaylistApp:
                     self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', total_songs, size_str, stats['flac_count'], stats['lossy_count'])))
                     self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', dupes)))
                     self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', saving_str)))
+                    extra_text = " | ".join([
+                        _('stats_playlist_unique', stats.get('unique_playlist_tokens', 0)),
+                        _('stats_unconverted', stats.get('unconverted_count', 0)),
+                        _('stats_not_in_playlists', stats.get('not_in_playlists_count', 0))
+                    ])
+                    self.root.after(0, lambda: self.extra_stats_lbl.config(text=extra_text))
                     
                     if recent:
                         recent_text = _('recent_added', " | ".join([f"{name[:15]}... ({date})" for name, date in recent]))
@@ -780,6 +789,7 @@ class PlaylistApp:
                     self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', 0, "Error", 0, 0)))
                     self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', 0)))
                     self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', 0)))
+                    self.root.after(0, lambda: self.extra_stats_lbl.config(text=""))
                     self.root.after(0, lambda: self.recent_lbl.config(text=_('recent_added', _('no_data'))))
                 except RuntimeError:
                     # Ignore "main thread is not in main loop" during shutdown

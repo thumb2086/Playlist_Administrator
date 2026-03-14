@@ -1,4 +1,4 @@
-import os
+﻿import os
 import glob
 import time
 import shutil
@@ -1157,23 +1157,27 @@ def move_unsorted_songs(config, log_func):
                          glob.glob(os.path.join(playlists_path, "*.m3u"))
     
     songs_in_playlists = set()
+    total_playlist_entries = 0
     for pl_file in all_playlist_files:
         base = os.path.basename(pl_file)
         # Skip the unsorted/single tracks playlists themselves
         if any(x in base for x in ["_未分類", "_Unsorted", "Single Tracks", "單曲"]): continue
-        songs_in_playlists.update(parse_playlist(pl_file))
+        songs = parse_playlist(pl_file)
+        total_playlist_entries += len(songs)
+        songs_in_playlists.update(songs)
     
     # Build tokens for comparison
     playlist_tokens = set()
     for s in songs_in_playlists:
         t = tuple(get_normalized_tokens(s))
         if t: playlist_tokens.add(t)
+    log_func(f" -> 播放清單歌曲數(去重): {len(playlist_tokens)} / 總條目: {total_playlist_entries}")
         
     # 2. Identify orphan files in Music root and subdirectories
     search_pattern = os.path.join(library_path, "**", "*")
     all_library_files = [os.path.normpath(f) for f in glob.glob(search_pattern, recursive=True) if os.path.isfile(f)]
     
-    orphans = []
+    orphans_map = {}
     for f in all_library_files:
         # ROBUST CHECK: skip if file is actually inside the _Unsorted directory
         if f.lower().startswith(unsorted_dir_norm): continue
@@ -1182,9 +1186,19 @@ def move_unsorted_songs(config, log_func):
         
         filename_no_ext = os.path.splitext(os.path.basename(f))[0]
         file_tokens = tuple(get_normalized_tokens(filename_no_ext))
-        
+
         if file_tokens not in playlist_tokens:
-            orphans.append(f)
+            existing = orphans_map.get(file_tokens)
+            if not existing:
+                orphans_map[file_tokens] = f
+            else:
+                # Prefer MP3 when multiple formats exist for the same song
+                cur_ext = os.path.splitext(existing)[1].lower()
+                new_ext = os.path.splitext(f)[1].lower()
+                if cur_ext != '.mp3' and new_ext == '.mp3':
+                    orphans_map[file_tokens] = f
+
+    orphans = list(orphans_map.values())
             
     # 3. Create playlist for unsorted songs (without moving files)
     # Use a localized name for the playlist
@@ -2319,6 +2333,8 @@ def get_detailed_stats(config, audio_files=None):
     total_songs = len(audio_files)
     flac_count = len([f for f in audio_files if f.lower().endswith(('.flac', '.wav'))])
     lossy_count = total_songs - flac_count
+    mp3_count = len([f for f in audio_files if f.lower().endswith('.mp3')])
+    m4a_count = len([f for f in audio_files if f.lower().endswith('.m4a')])
     total_size_bytes = 0
     for f in audio_files:
         try:
@@ -2351,6 +2367,25 @@ def get_detailed_stats(config, audio_files=None):
             # Skip files that can't be accessed
             continue
         
+    # Build token index for library (dedupe across formats)
+    library_tokens = set()
+    token_to_exts = {}
+    for file_path in audio_files:
+        if os.path.exists(file_path):
+            filename = os.path.basename(file_path)
+            name_no_ext = os.path.splitext(filename)[0]
+            tokens_tuple = tuple(get_normalized_tokens(name_no_ext))
+            if tokens_tuple:
+                library_tokens.add(tokens_tuple)
+                ext = os.path.splitext(filename)[1].lower()
+                token_to_exts.setdefault(tokens_tuple, set()).add(ext)
+
+    unique_library_tracks = len(library_tokens)
+    unconverted_count = 0
+    for tokens_tuple, exts in token_to_exts.items():
+        if '.m4a' in exts and '.mp3' not in exts:
+            unconverted_count += 1
+
     # 2. Duplicate/Savings Stats
     pl_files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
                glob.glob(os.path.join(playlists_path, "*.m3u")) + \
@@ -2358,13 +2393,25 @@ def get_detailed_stats(config, audio_files=None):
     
     all_pl_songs = []
     unique_pl_songs = set()
+    unique_pl_tokens = set()
     for pl_file in pl_files:
+        base = os.path.basename(pl_file)
+        if any(x in base for x in ["_Unsorted", "Single Tracks", "_Unsorted_Songs"]):
+            continue
         songs = parse_playlist(pl_file)
         all_pl_songs.extend(songs)
-        for s in songs: unique_pl_songs.add(s)
+        for s in songs:
+            unique_pl_songs.add(s)
+            t = tuple(get_normalized_tokens(s))
+            if t:
+                unique_pl_tokens.add(t)
     
     total_playlist_entries = len(all_pl_songs)
     unique_playlist_entries = len(unique_pl_songs)
+    unique_playlist_tokens = len(unique_pl_tokens)
+    not_in_playlists_count = 0
+    if library_tokens:
+        not_in_playlists_count = len([t for t in library_tokens if t not in unique_pl_tokens])
     
     # Calculate actual savings by summing sizes of duplicate songs
     duplicates_count = total_playlist_entries - unique_playlist_entries
@@ -2411,13 +2458,18 @@ def get_detailed_stats(config, audio_files=None):
     savings_mb = actual_savings_bytes / (1024 * 1024)
     
     return {
-        'total_songs': total_songs,
-        'flac_count': flac_count,
-        'lossy_count': lossy_count,
-        'total_size_mb': total_size_mb,
-        'recent_5': recent_5,
-        'total_playlist_entries': total_playlist_entries,
-        'unique_playlist_entries': unique_playlist_entries,
-        'duplicates_count': duplicates_count,
-        'savings_mb': savings_mb
-    }
+          'total_songs': unique_library_tracks,
+          'flac_count': flac_count,
+          'lossy_count': lossy_count,
+          'mp3_count': mp3_count,
+          'm4a_count': m4a_count,
+          'total_size_mb': total_size_mb,
+          'recent_5': recent_5,
+          'total_playlist_entries': total_playlist_entries,
+          'unique_playlist_entries': unique_playlist_entries,
+          'unique_playlist_tokens': unique_playlist_tokens,
+          'duplicates_count': duplicates_count,
+          'savings_mb': savings_mb,
+          'unconverted_count': unconverted_count,
+          'not_in_playlists_count': not_in_playlists_count
+      }
