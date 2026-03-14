@@ -13,12 +13,12 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.11'
 
     - name: Install dependencies
       run: |
@@ -28,12 +28,20 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "PlaylistManager" --add-data "core;core" --add-data "gui;gui" --add-data "utils;utils" --collect-all zhconv main.py
+        pyinstaller --noconfirm --onefile --windowed --name "PlaylistAdministrator" --add-data "core;core" --add-data "gui;gui" --add-data "utils;utils" --collect-all zhconv main.py
+
+    - name: Install Inno Setup
+      run: |
+        choco install innosetup --no-progress -y
+
+    - name: Build installer
+      run: |
+        "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" /DMyAppVersion=${{ github.ref_name }} installer\\PlaylistAdministrator.iss
 
     - name: Create Release
       id: create_release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
-        files: dist/PlaylistManager.exe
+        files: dist_installer/PlaylistAdministrator-Setup.exe
       env:
         GITHUB_TOKEN: ${{ github.token }}
