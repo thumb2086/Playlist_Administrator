@@ -69,12 +69,17 @@ def convert_audio_file(input_path, output_path, target_format, log_func=None):
         if log_func:
             log_func(f"  🔄 Converting to {target_format.upper()}: {os.path.basename(input_path)}")
         
+        creationflags = 0
+        if os.name == 'nt':
+            creationflags = subprocess.CREATE_NO_WINDOW
+
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             encoding='utf-8',
             errors='replace',
+            creationflags=creationflags,
             timeout=300  # 5 minute timeout per file
         )
         
@@ -139,7 +144,10 @@ def convert_audio_if_needed(input_path, target_format, log_func=None):
 def check_ffmpeg_available():
     """Check if ffmpeg is available in the system"""
     try:
-        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=10)
+        creationflags = 0
+        if os.name == 'nt':
+            creationflags = subprocess.CREATE_NO_WINDOW
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=10, creationflags=creationflags)
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
