@@ -236,7 +236,8 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
     skipped = 0
 
     if status_cb:
-        for i, (_, _, name) in enumerate(tasks):
+        for i, task in enumerate(tasks):
+            name = task[2]
             status_cb(i, _('conv_status_queued'), name)
 
     # Pre-skip tasks that are already up to date
