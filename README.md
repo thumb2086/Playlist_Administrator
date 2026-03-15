@@ -1,54 +1,70 @@
-# Playlist Administrator
+﻿# Playlist Administrator
 
-Lightweight library maintenance for Spotube users: convert M4A to MP3, classify tracks, and build Spotify playlists without downloading audio.
+Library maintenance for Spotube and local music libraries: convert M4A to MP3, build/update Spotify playlists, and manage exports. Default workflow does not download audio.
 
-## Latest Usage (Spotube M4A -> MP3 / Playlists)
+## What It Does
 
-- Base Folder: `C:\Users\CPXru\Music\Spotube`
-- Convert: `Spotube\*.m4a` -> `Spotube\mp3\*.mp3`
-- Playlists: build `.m3u8` under `Spotube\Playlists\` and remove missing files
-- No download. Only convert, classify, and update playlists.
+- Convert Spotube M4A to MP3 into a dedicated `mp3` subfolder (multi-threaded).
+- Build and refresh `.m3u8` playlists from Spotify playlist/album/artist/track URLs via the embed page.
+- Remove missing entries from playlists.
+- Move unsorted tracks to `_Unsorted` when needed.
+- Export selected playlists to USB/SD in Copy or Mirror mode.
+- Tkinter desktop UI with a built-in player and lyrics (`.lrc`).
+- Streamlit UI with dashboard and settings.
 
-### Key Settings
+## Quick Start
 
-`data/config.json` (or GUI/Streamlit settings)
-- `spotube_folder_name`: `""` (use base folder directly)
-- `spotube_mp3_subfolder`: `mp3`
-- `spotube_convert_workers`: conversion threads (suggest 6-8)
-- `prefer_mp3_playlists`: `true` (prefer MP3 in playlists)
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Run the UI:
+   ```bash
+   python main.py
+   ```
+   Or:
+   ```bash
+   streamlit run streamlit_app.py
+   ```
+3. Set your Base Folder (library root). It can be:
+   - A folder that already contains `Music` and `Playlists`, or
+   - A Spotube folder that contains `.m4a` files directly.
+4. Add Spotify URLs, then click Start/Update.
 
-### Folder Structure (after run)
+## Install (EXE)
 
-```
-C:\Users\CPXru\Music\Spotube\
-  config.json
-  *.m4a
-  mp3\
-    *.mp3
-  Playlists\
-    *.m3u8
-  _Unsorted\        (only if needed)
-  USB_Output\       (only if export is used)
-```
+GitHub Actions builds a Windows installer automatically. Download the latest release installer from the GitHub Releases page and run it to install.
 
-### Buttons
+## Configuration
 
-- Start/Update: run conversion + playlist update
-- Pause: pause and resume safely
-- Cancel: stop at the next safe checkpoint (current ffmpeg job finishes)
+Config is stored under the user profile and optionally in the base folder:
 
-### Requirements
+- Primary app config: `%LOCALAPPDATA%\Playlist Administrator\data\config.json`
+- If `base_path` is set, a `config.json` is also stored in the base folder and becomes the primary settings source. The app data config keeps a pointer to `base_path`.
 
-- `ffmpeg` must be available or M4A -> MP3 will be skipped.
+Key settings:
 
-## Run
+- `base_path`: Library root. `Music`, `Playlists`, and `USB_Output` are derived from it.
+- `ffmpeg_path`: Path to `ffmpeg` for M4A to MP3 conversion.
+- `spotube_folder_name`: Spotube folder name under the library. Set to `""` to use the base folder directly.
+- `spotube_mp3_subfolder`: Output folder name for MP3s (default `mp3`).
+- `spotube_convert_workers`: Conversion worker count (default 4).
+- `prefer_mp3_playlists`: Prefer MP3 when building playlists.
 
-Streamlit UI:
-```bash
-streamlit run streamlit_app.py
-```
+## Project Structure
 
-Tkinter UI:
-```bash
-python main.py
-```
+- `main.py`: Tkinter entry point.
+- `streamlit_app.py`: Streamlit UI.
+- `core/`: Core logic (playlist build/prune, conversion, scraping, sync/export, metadata helpers).
+- `gui/`: Tkinter UI and settings.
+- `utils/`: Config, helpers, i18n.
+- `tools/`: Utility scripts.
+- `Docs_ZH/`: Additional Chinese docs.
+- `PLAYBACK_FIX_README.md`: Windows Media Player playback issue fix.
+- `YTDLP_UPDATE_GUIDE.md`: yt-dlp update steps.
+
+## Notes
+
+- `ffmpeg` is required for M4A to MP3 conversion. If missing, conversion is skipped.
+- Spotify scraping relies on the embed page and requires network access.
+- Download utilities (yt-dlp, DAB, spotDL) exist in `core/downloader.py` but are not used by the default update flow.
