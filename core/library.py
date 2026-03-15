@@ -167,7 +167,8 @@ def unblock_files(directory, log_func):
         try:
             # Use powershell to unblock all files in the directory recursively
             cmd = f'Get-ChildItem -Path "{directory}" -Recurse | Unblock-File'
-            subprocess.run(["powershell", "-Command", cmd], capture_output=True, check=False)
+            creationflags = subprocess.CREATE_NO_WINDOW
+            subprocess.run(["powershell", "-Command", cmd], capture_output=True, check=False, creationflags=creationflags)
         except: pass
 
 def _resolve_spotube_paths(config):
