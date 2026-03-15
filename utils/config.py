@@ -19,8 +19,16 @@ def get_app_dir():
         # 開發模式：使用 config.py 的上層目錄（專案根目錄）
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Store app data under user profile to avoid Program Files permission issues
+def get_app_data_dir():
+    base = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
+    if base:
+        return os.path.join(base, 'Playlist Administrator', 'data')
+    # Fallback: use app directory (may be read-only in Program Files)
+    return os.path.join(get_app_dir(), 'data')
+
 # Store config in data folder for persistence (absolute path for EXE compatibility)
-_APP_DATA_DIR = os.path.join(get_app_dir(), 'data')
+_APP_DATA_DIR = get_app_data_dir()
 _APP_CONFIG_FILE = os.path.join(_APP_DATA_DIR, 'config.json')
 
 # Global variable to track currently active data directory (starts with app local)
