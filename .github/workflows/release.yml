@@ -36,7 +36,7 @@ jobs:
 
     - name: Build installer
       run: |
-        "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" /DMyAppVersion=${{ github.ref_name }} installer\\PlaylistAdministrator.iss
+        & "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" "/DMyAppVersion=${{ github.ref_name }}" "installer\\PlaylistAdministrator.iss"
 
     - name: Create Release
       id: create_release

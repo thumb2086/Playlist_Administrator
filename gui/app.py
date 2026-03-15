@@ -136,7 +136,7 @@ class PlaylistApp:
         top_bar.pack(fill="x", padx=10, pady=(5, 0))
         
         # Settings Button (Right aligned)
-        self.settings_btn = tk.Button(top_bar, text="Settings", command=self.open_settings_window, font=("Microsoft JhengHei", 9))
+        self.settings_btn = tk.Button(top_bar, text=_('settings_btn'), command=self.open_settings_window, font=("Microsoft JhengHei", 9))
         self.settings_btn.pack(side="right", padx=5)
 
         # Tabs container (Root)
@@ -260,13 +260,13 @@ class PlaylistApp:
         player_top_bar = tk.Frame(player_main_container, bg="#f0f0f0")
         player_top_bar.pack(fill="x", pady=(0, 10))
         
-        tk.Label(player_top_bar, text="Playlist:", font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0").pack(side="left", padx=(0, 5))
+        tk.Label(player_top_bar, text=_('player_playlist_label'), font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0").pack(side="left", padx=(0, 5))
         
         self.player_playlist_combo = ttk.Combobox(player_top_bar, state="readonly", font=("Microsoft JhengHei", 10), width=40)
         self.player_playlist_combo.pack(side="left", padx=5)
         # We will populate this in refresh_url_list later
         
-        self.player_load_btn = tk.Button(player_top_bar, text="Load", command=self.load_selected_playlist, bg="#4CAF50", fg="white", font=("Microsoft JhengHei", 9, "bold"))
+        self.player_load_btn = tk.Button(player_top_bar, text=_('player_load_btn'), command=self.load_selected_playlist, bg="#4CAF50", fg="white", font=("Microsoft JhengHei", 9, "bold"))
         self.player_load_btn.pack(side="left", padx=5)
 
         self.player_frame = tk.LabelFrame(player_main_container, text=_('player_title'), font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0")
@@ -380,7 +380,7 @@ class PlaylistApp:
         speed_frame = tk.Frame(self.library_bottom_frame)
         speed_frame.pack(fill="x", padx=20, pady=(0, 5))
         
-        self.speed_label = tk.Label(speed_frame, text="Speed: --", font=("Microsoft JhengHei", 9), fg="#666", anchor="w")
+        self.speed_label = tk.Label(speed_frame, text=_('speed_ready'), font=("Microsoft JhengHei", 9), fg="#666", anchor="w")
         self.speed_label.pack(fill="x")
         
         # 3. Log and Song Status Section (Inside Library Bottom Pane)
@@ -395,15 +395,15 @@ class PlaylistApp:
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
         
         # Right side: Song Status List
-        self.song_status_frame = tk.LabelFrame(bottom_container, text="Song Status", font=("Microsoft JhengHei", 10, "bold"))
+        self.song_status_frame = tk.LabelFrame(bottom_container, text=_('song_status_title'), font=("Microsoft JhengHei", 10, "bold"))
         self.song_status_frame.pack(side="right", fill="both", expand=True, padx=(5, 0), pady=0)
         
         # Create treeview for song status
         columns = ('Status', 'Song')
         self.song_status_tree = ttk.Treeview(self.song_status_frame, columns=columns, show='tree headings', height=12)
-        self.song_status_tree.heading('#0', text='No.')
-        self.song_status_tree.heading('Status', text='Status')
-        self.song_status_tree.heading('Song', text='Song')
+        self.song_status_tree.heading('#0', text=_('song_status_no'))
+        self.song_status_tree.heading('Status', text=_('song_status_status'))
+        self.song_status_tree.heading('Song', text=_('song_status_song'))
         
         # Configure column widths
         self.song_status_tree.column('#0', width=60)
@@ -506,7 +506,7 @@ class PlaylistApp:
                 else:
                     progress_text += f" ({eta_sec}s)"
             elif current_val >= total_val and total_val > 0:
-                progress_text += " (done)"
+                progress_text += f" {_('progress_done')}"
             
             self.progress_label.config(text=progress_text)
             
@@ -516,21 +516,21 @@ class PlaylistApp:
                 eta_min = int(eta_seconds // 60)
                 eta_sec = int(eta_seconds % 60)
                 if eta_min > 0:
-                    eta_text = f"ETA: {eta_min}:{eta_sec:02d}"
+                    eta_text = f"{_('speed_eta_prefix')} {eta_min}:{eta_sec:02d}"
                 else:
-                    eta_text = f"ETA: {eta_sec}s"
+                    eta_text = f"{_('speed_eta_prefix')} {eta_sec}s"
                 self.speed_label.config(text=eta_text)
             elif current_val >= total_val:
-                self.speed_label.config(text="Completed")
+                self.speed_label.config(text=_('speed_done'))
             elif current_val == 0:
                 # Starting state - show task info
-                self.speed_label.config(text=f"Starting {total_val} tracks")
+                self.speed_label.config(text=_('speed_starting', total_val))
             else:
-                self.speed_label.config(text="Ready")
+                self.speed_label.config(text=_('speed_ready'))
         else:
             self.progress_var.set(0)
             self.progress_label.config(text="")
-            self.speed_label.config(text="Ready")
+            self.speed_label.config(text=_('speed_ready'))
     
     def update_speed_display(self, speed_text):
         now = time.time()
@@ -539,10 +539,10 @@ class PlaylistApp:
         self.last_speed_update = now
         # Only update speed display if not showing ETA or completion
         current_text = self.speed_label.cget("text")
-        if (not current_text.startswith("ETA:") and 
-            current_text != "Completed" and
-            not current_text.startswith("Starting")):
-            self.root.after(0, lambda: self.speed_label.config(text=f"Speed: {speed_text}"))
+        if (not current_text.startswith(_('speed_eta_prefix')) and 
+            current_text != _('speed_done') and
+            not current_text.startswith(_('speed_starting_prefix'))):
+            self.root.after(0, lambda: self.speed_label.config(text=_('speed_value', speed_text)))
 
     def _process_log_queue(self):
         self.log_update_job = None
@@ -572,7 +572,7 @@ class PlaylistApp:
         self.export_btn.config(text=_('export_usb_btn'))
         self.stats_frame.config(text=_('stats_title'))
         self.log_frame.config(text=_('log_title'))
-        self.settings_btn.config(text="Settings")
+        self.settings_btn.config(text=_('settings_btn'))
         self.player_frame.config(text=_('player_title'))
         self.vol_lbl.config(text=_('player_volume', int(self.vol_var.get())))
 
@@ -603,7 +603,7 @@ class PlaylistApp:
         library_path = self.config.get('library_path')
         
         if not playlists_path or not os.path.exists(playlists_path):
-            self.log(f"⚠️ Playlist path missing or invalid: {playlists_path}")
+            self.log(_('playlist_path_missing', playlists_path))
             return
         
         urls = self.config.get('spotify_urls', [])
@@ -802,7 +802,7 @@ class PlaylistApp:
         if "playlist/" in url:
             url = url.split('?')[0]
         else:
-            self.log("Only Spotify playlist URLs are supported.")
+            self.log(_('only_playlist_url'))
             return
             
         urls = self.config.get('spotify_urls', [])
@@ -1018,7 +1018,7 @@ class PlaylistApp:
             self.log(_('error_critical', f"{e}\n{tb_str}"))
             
         self.log(_('update_end'))
-        self.root.after(0, lambda: self.speed_label.config(text="Ready"))
+        self.root.after(0, lambda: self.speed_label.config(text=_('speed_ready')))
         self.root.after(0, lambda: self.progress_label.config(text=""))
         
         # Final refresh with updated audio cache
