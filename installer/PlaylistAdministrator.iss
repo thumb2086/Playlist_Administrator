@@ -14,7 +14,7 @@ SolidCompression=yes
 Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"
 
 [Files]
-Source: "dist\PlaylistAdministrator.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\PlaylistAdministrator.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Playlist Administrator"; Filename: "{app}\PlaylistAdministrator.exe"
