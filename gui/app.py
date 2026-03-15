@@ -119,7 +119,9 @@ class PlaylistApp:
     def proactive_name_fetch(self):
         from core.spotify import scrape_via_spotify_embed
         
-        urls = self.config.get('spotify_urls', [])
+        urls = [u for u in self.config.get('spotify_urls', []) if "playlist/" in u]
+        # Playlists only
+        self.pl_urls = [u for u in urls if "playlist/" in u]
         url_names = self.config.get('url_names', {})
         missing = [u for u in urls if u not in url_names]
         if not missing:
@@ -134,7 +136,7 @@ class PlaylistApp:
         top_bar.pack(fill="x", padx=10, pady=(5, 0))
         
         # Settings Button (Right aligned)
-        self.settings_btn = tk.Button(top_bar, text="⚙️ 設定 (Settings)", command=self.open_settings_window, font=("Microsoft JhengHei", 9))
+        self.settings_btn = tk.Button(top_bar, text="Settings", command=self.open_settings_window, font=("Microsoft JhengHei", 9))
         self.settings_btn.pack(side="right", padx=5)
 
         # Tabs container (Root)
@@ -223,13 +225,15 @@ class PlaylistApp:
         # st_scroll = tk.Scrollbar(st_side, orient="vertical", command=self.st_listbox.yview)
         # st_scroll.pack(side="right", fill="y")
         self.st_listbox.pack(side="left", fill="both", expand=True)
+
+        # Hide non-playlist lists
+        al_side.destroy()
+        ar_side.destroy()
+        st_side.destroy()
         # self.st_listbox.config(yscrollcommand=st_scroll.set)
         
         # Bind Listbox selection for player (automatically switch to Player tab)
         self.pl_listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
-        self.al_listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
-        self.ar_listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
-        self.st_listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
 
         # 2. Action Section (In Tab 1 Top Pane)
         self.action_frame = tk.LabelFrame(self.library_top_frame, text=_('step_2_title'), font=("Microsoft JhengHei", 10, "bold"))
@@ -256,13 +260,13 @@ class PlaylistApp:
         player_top_bar = tk.Frame(player_main_container, bg="#f0f0f0")
         player_top_bar.pack(fill="x", pady=(0, 10))
         
-        tk.Label(player_top_bar, text="選擇播放清單:", font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0").pack(side="left", padx=(0, 5))
+        tk.Label(player_top_bar, text="Playlist:", font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0").pack(side="left", padx=(0, 5))
         
         self.player_playlist_combo = ttk.Combobox(player_top_bar, state="readonly", font=("Microsoft JhengHei", 10), width=40)
         self.player_playlist_combo.pack(side="left", padx=5)
         # We will populate this in refresh_url_list later
         
-        self.player_load_btn = tk.Button(player_top_bar, text="載入並播放", command=self.load_selected_playlist, bg="#4CAF50", fg="white", font=("Microsoft JhengHei", 9, "bold"))
+        self.player_load_btn = tk.Button(player_top_bar, text="Load", command=self.load_selected_playlist, bg="#4CAF50", fg="white", font=("Microsoft JhengHei", 9, "bold"))
         self.player_load_btn.pack(side="left", padx=5)
 
         self.player_frame = tk.LabelFrame(player_main_container, text=_('player_title'), font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0")
@@ -376,7 +380,7 @@ class PlaylistApp:
         speed_frame = tk.Frame(self.library_bottom_frame)
         speed_frame.pack(fill="x", padx=20, pady=(0, 5))
         
-        self.speed_label = tk.Label(speed_frame, text="準備就緒", font=("Microsoft JhengHei", 9), fg="#666", anchor="w")
+        self.speed_label = tk.Label(speed_frame, text="Speed: --", font=("Microsoft JhengHei", 9), fg="#666", anchor="w")
         self.speed_label.pack(fill="x")
         
         # 3. Log and Song Status Section (Inside Library Bottom Pane)
@@ -384,27 +388,27 @@ class PlaylistApp:
         bottom_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         # Left side: Error Log (smaller)
-        self.log_frame = tk.LabelFrame(bottom_container, text=_('log_title') + " (錯誤訊息)", font=("Microsoft JhengHei", 10, "bold"))
+        self.log_frame = tk.LabelFrame(bottom_container, text=_('log_title'), font=("Microsoft JhengHei", 10, "bold"))
         self.log_frame.pack(side="left", fill="both", expand=True, padx=(0, 5), pady=0)
         
         self.log_text = scrolledtext.ScrolledText(self.log_frame, state='disabled', bg="black", fg="white", font=("Consolas", 10), height=10)
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
         
         # Right side: Song Status List
-        self.song_status_frame = tk.LabelFrame(bottom_container, text="歌曲狀態", font=("Microsoft JhengHei", 10, "bold"))
+        self.song_status_frame = tk.LabelFrame(bottom_container, text="Song Status", font=("Microsoft JhengHei", 10, "bold"))
         self.song_status_frame.pack(side="right", fill="both", expand=True, padx=(5, 0), pady=0)
         
         # Create treeview for song status
-        columns = ('狀態', '歌曲名稱')
+        columns = ('Status', 'Song')
         self.song_status_tree = ttk.Treeview(self.song_status_frame, columns=columns, show='tree headings', height=12)
-        self.song_status_tree.heading('#0', text='序號')
-        self.song_status_tree.heading('狀態', text='狀態')
-        self.song_status_tree.heading('歌曲名稱', text='歌曲名稱')
+        self.song_status_tree.heading('#0', text='No.')
+        self.song_status_tree.heading('Status', text='Status')
+        self.song_status_tree.heading('Song', text='Song')
         
         # Configure column widths
         self.song_status_tree.column('#0', width=60)
-        self.song_status_tree.column('狀態', width=80)
-        self.song_status_tree.column('歌曲名稱', width=300)
+        self.song_status_tree.column('Status', width=80)
+        self.song_status_tree.column('Song', width=300)
         
         # Add scrollbar
         song_scroll = ttk.Scrollbar(self.song_status_frame, orient="vertical", command=self.song_status_tree.yview)
@@ -418,8 +422,9 @@ class PlaylistApp:
     def log(self, message, immediate=False):
         # Filter log messages - only show errors and important messages
         msg_str = str(message)
-        is_error = any(keyword in msg_str for keyword in ['❌', '🚫', '🔌', '⚠️', 'Error', 'error', '錯誤', '失敗'])
-        is_important = any(keyword in msg_str for keyword in ['---', '統計完成', '🎉', '歌詞補抓完成', '✅', '成功', '已更新', 'Download complete', '->'])
+        msg_lower = msg_str.lower()
+        is_error = any(keyword in msg_lower for keyword in ['error', 'failed', 'critical', 'warning', 'missing'])
+        is_important = any(keyword in msg_str for keyword in ['---', '->'])
         
         # Don't interfere with player panel - keep it for lyrics only
         
@@ -427,7 +432,7 @@ class PlaylistApp:
             self.log_queue.append(msg_str)
             if self.log_update_job is None:
                 # For important progress messages, use shorter delay
-                delay = 50 if immediate and ("剩" in msg_str or "left" in msg_str.lower()) else 200
+                delay = 50 if immediate and ("left" in msg_lower or "progress" in msg_lower) else 200
                 self.log_update_job = self.root.after(delay, self._process_log_queue)
     
         
@@ -501,7 +506,7 @@ class PlaylistApp:
                 else:
                     progress_text += f" ({eta_sec}s)"
             elif current_val >= total_val and total_val > 0:
-                progress_text += " ✓"
+                progress_text += " (done)"
             
             self.progress_label.config(text=progress_text)
             
@@ -511,21 +516,21 @@ class PlaylistApp:
                 eta_min = int(eta_seconds // 60)
                 eta_sec = int(eta_seconds % 60)
                 if eta_min > 0:
-                    eta_text = f"剩餘時間: {eta_min}:{eta_sec:02d}"
+                    eta_text = f"ETA: {eta_min}:{eta_sec:02d}"
                 else:
-                    eta_text = f"剩餘時間: {eta_sec}秒"
+                    eta_text = f"ETA: {eta_sec}s"
                 self.speed_label.config(text=eta_text)
             elif current_val >= total_val:
-                self.speed_label.config(text="處理完成")
+                self.speed_label.config(text="Completed")
             elif current_val == 0:
                 # Starting state - show task info
-                self.speed_label.config(text=f"準備處理 {total_val} 首歌曲")
+                self.speed_label.config(text=f"Starting {total_val} tracks")
             else:
-                self.speed_label.config(text="準備就緒")
+                self.speed_label.config(text="Ready")
         else:
             self.progress_var.set(0)
             self.progress_label.config(text="")
-            self.speed_label.config(text="準備就緒")
+            self.speed_label.config(text="Ready")
     
     def update_speed_display(self, speed_text):
         now = time.time()
@@ -534,11 +539,10 @@ class PlaylistApp:
         self.last_speed_update = now
         # Only update speed display if not showing ETA or completion
         current_text = self.speed_label.cget("text")
-        if (not current_text.startswith("剩餘時間:") and 
-            not current_text.startswith("預估時間:") and 
-            current_text != "處理完成" and
-            not current_text.startswith("準備處理")):
-            self.root.after(0, lambda: self.speed_label.config(text=f"處理速度: {speed_text}"))
+        if (not current_text.startswith("ETA:") and 
+            current_text != "Completed" and
+            not current_text.startswith("Starting")):
+            self.root.after(0, lambda: self.speed_label.config(text=f"Speed: {speed_text}"))
 
     def _process_log_queue(self):
         self.log_update_job = None
@@ -568,13 +572,13 @@ class PlaylistApp:
         self.export_btn.config(text=_('export_usb_btn'))
         self.stats_frame.config(text=_('stats_title'))
         self.log_frame.config(text=_('log_title'))
-        self.settings_btn.config(text="⚙️ " + _('set_base_folder_btn')) # Reuse key for now or add new one
+        self.settings_btn.config(text="Settings")
         self.player_frame.config(text=_('player_title'))
         self.vol_lbl.config(text=_('player_volume', int(self.vol_var.get())))
 
     def refresh_url_list(self, audio_cache=None):
         # Save current selections and scroll positions
-        lists = [self.pl_listbox, self.al_listbox, self.ar_listbox, self.st_listbox]
+        lists = [self.pl_listbox]
         saves = []
         for lb in lists:
             saves.append({
@@ -583,9 +587,6 @@ class PlaylistApp:
             })
 
         self.pl_listbox.delete(0, tk.END)
-        self.al_listbox.delete(0, tk.END)
-        self.ar_listbox.delete(0, tk.END)
-        self.st_listbox.delete(0, tk.END)
         url_names = self.config.get('url_names', {})
         last_updated = self.config.get('last_updated', {})
         
@@ -664,15 +665,8 @@ class PlaylistApp:
                     else:
                         status_text = f"⏳ {name} ({_('wait_sync')})"
             
-            # Display in appropriate listbox based on URL type
-            if url in self.pl_urls:
-                self.pl_listbox.insert(tk.END, status_text)
-            elif url in self.al_urls:
-                self.al_listbox.insert(tk.END, status_text)
-            elif url in self.st_urls:
-                self.st_listbox.insert(tk.END, status_text)
-            else:
-                self.ar_listbox.insert(tk.END, status_text)
+            # Display in appropriate listbox
+            self.pl_listbox.insert(tk.END, status_text)
 
         # Add local playlists that are not in the Spotify URLs
         processed_names = [url_names.get(u, u) for u in urls]
@@ -687,6 +681,9 @@ class PlaylistApp:
             else:
                 status_text = f"⚠️ {name} ({_('wait_download')}, 缺 {missing} 首)"
                 
+            self.pl_listbox.insert(tk.END, status_text)
+            self.pl_urls.append("local:" + name) # Add dummy URL so double-click / delete works properly
+            continue
             # Classify local files into appropriate categories
             is_artist = name in ["BIDO 曾愷妤", "GENBLUE幻藍小熊", "Jocelyn 9.4.0", "QWER", "幽靈水晶 CRYXTAL", "艾薇 Ivy", "芒果醬 Mango Jump", "草東沒有派對", "7en"]
             is_album = name in ["幸福在歌唱 (電影《陽光女子合唱團》幸福版主題曲)", "Ex-Otogibanashi", "未來少女 NEXT GIRLZ", "未來少女 幽靈水晶"]
@@ -802,8 +799,11 @@ class PlaylistApp:
         if not url: return
         
         # 1. Normalize and check ID collision
-        if "playlist/" in url or "artist/" in url or "album/" in url:
+        if "playlist/" in url:
             url = url.split('?')[0]
+        else:
+            self.log("Only Spotify playlist URLs are supported.")
+            return
             
         urls = self.config.get('spotify_urls', [])
         if url in urls:
@@ -848,10 +848,7 @@ class PlaylistApp:
                     self.url_entry.delete(0, tk.END)
                     
                     # 根據 URL 類型顯示不同的成功訊息
-                    if "album/" in url:
-                        self.log(_('added_album', name))
-                    else:
-                        self.log(_('added_playlist', name))
+                    self.log(_('added_playlist', name))
                 
                 self.update_btn.config(state="normal", text=_('update_all_btn'), bg="#d0f0c0")
 
@@ -870,7 +867,7 @@ class PlaylistApp:
         
         for url in urls:
             normalized = url
-            if "playlist/" in url or "artist/" in url or "album/" in url:
+            if "playlist/" in url:
                 normalized = url.split('?')[0]
             
             if normalized not in seen:
@@ -899,28 +896,15 @@ class PlaylistApp:
 
     def remove_url(self):
         pl_sel = self.pl_listbox.curselection()
-        al_sel = self.al_listbox.curselection()
-        ar_sel = self.ar_listbox.curselection()
-        st_sel = self.st_listbox.curselection()
-        
-        if not pl_sel and not al_sel and not ar_sel and not st_sel: return
+        if not pl_sel:
+            return
         
         urls = self.config.get('spotify_urls', [])
         url_names = self.config.get('url_names', {})
         last_updated = self.config.get('last_updated', {})
         
-        if pl_sel:
-            idx = pl_sel[0]
-            url = self.pl_urls[idx]
-        elif al_sel:
-            idx = al_sel[0]
-            url = self.al_urls[idx]
-        elif ar_sel:
-            idx = ar_sel[0]
-            url = self.ar_urls[idx]
-        else:
-            idx = st_sel[0]
-            url = self.st_urls[idx]
+        idx = pl_sel[0]
+        url = self.pl_urls[idx]
 
         if url.startswith("local:"):
             name = url.split("local:", 1)[1]
@@ -1034,7 +1018,7 @@ class PlaylistApp:
             self.log(_('error_critical', f"{e}\n{tb_str}"))
             
         self.log(_('update_end'))
-        self.root.after(0, lambda: self.speed_label.config(text="準備就緒"))
+        self.root.after(0, lambda: self.speed_label.config(text="Ready"))
         self.root.after(0, lambda: self.progress_label.config(text=""))
         
         # Final refresh with updated audio cache
@@ -1233,10 +1217,8 @@ class PlaylistApp:
         
         idx = selection[0]
         url = None
-        if widget == self.pl_listbox: url = self.pl_urls[idx]
-        elif widget == self.al_listbox: url = self.al_urls[idx]
-        elif widget == self.ar_listbox: url = self.ar_urls[idx]
-        elif widget == self.st_listbox: url = self.st_urls[idx]
+        if widget == self.pl_listbox:
+            url = self.pl_urls[idx]
         
         if not url: return
         
