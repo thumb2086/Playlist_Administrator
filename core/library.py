@@ -361,8 +361,7 @@ def prune_missing_from_playlists(config, log_func, pause_event=None, stop_event=
     library_index = build_library_index(audio_files_cache)
 
     pl_files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
-               glob.glob(os.path.join(playlists_path, "*.m3u")) + \
-               glob.glob(os.path.join(playlists_path, "*.txt"))
+               glob.glob(os.path.join(playlists_path, "*.m3u"))
 
     total_removed = 0
     total_files = 0
@@ -2429,9 +2428,10 @@ def get_detailed_stats(config, audio_files=None):
     all_pl_songs = []
     unique_pl_songs = set()
     unique_pl_tokens = set()
+    skip_markers = ["_unsorted", "single tracks", "_unsorted_songs", "_removed songs", "已移除"]
     for pl_file in pl_files:
-        base = os.path.basename(pl_file)
-        if any(x in base for x in ["_Unsorted", "Single Tracks", "_Unsorted_Songs"]):
+        base = os.path.basename(pl_file).lower()
+        if any(x in base for x in skip_markers):
             continue
         songs = parse_playlist(pl_file)
         all_pl_songs.extend(songs)
