@@ -190,11 +190,12 @@ def _has_m4a_files(root_path):
                 return True
     return False
 
-def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None):
+def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None, status_cb=None):
     """Convert Spotube m4a files into mp3 subfolder inside Spotube."""
     from core.audio_converter import convert_audio_file, check_ffmpeg_available
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import threading
+    from utils.i18n import _
 
     spotube_path, mp3_path = _resolve_spotube_paths(config)
     if not spotube_path or not os.path.exists(spotube_path):
@@ -224,7 +225,7 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
             src = os.path.join(root, fname)
             base = os.path.splitext(fname)[0]
             dest = os.path.join(mp3_path, f"{base}.mp3")
-            tasks.append((src, dest))
+            tasks.append((src, dest, base))
 
     total_tasks = len(tasks)
     if total_tasks == 0:
@@ -234,17 +235,23 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
     converted = 0
     skipped = 0
 
+    if status_cb:
+        for i, (_, _, name) in enumerate(tasks):
+            status_cb(i, _('conv_status_queued'), name)
+
     # Pre-skip tasks that are already up to date
     to_convert = []
-    for src, dest in tasks:
+    for i, (src, dest, name) in enumerate(tasks):
         if os.path.exists(dest):
             try:
                 if os.path.getmtime(dest) >= os.path.getmtime(src):
                     skipped += 1
+                    if status_cb:
+                        status_cb(i, _('conv_status_skipped'), name)
                     continue
             except Exception:
                 pass
-        to_convert.append((src, dest))
+        to_convert.append((i, src, dest, name))
 
     processed = skipped
     if processed and (processed % 10 == 0 or processed == total_tasks):
@@ -263,11 +270,13 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
 
     lock = threading.Lock()
 
-    def _convert_one(src, dest):
+    def _convert_one(i, src, dest, name):
         if stop_event and stop_event.is_set():
             return "cancel"
         if not _wait_if_paused():
             return "cancel"
+        if status_cb:
+            status_cb(i, _('conv_status_working'), name)
         ok = convert_audio_file(src, dest, 'mp3', log_func)
         return "ok" if ok else "fail"
 
@@ -283,11 +292,14 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
         log_func(f" -> Conversion workers: {workers}")
 
     futures = []
+    future_meta = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        for src, dest in to_convert:
+        for i, src, dest, name in to_convert:
             if stop_event and stop_event.is_set():
                 break
-            futures.append(ex.submit(_convert_one, src, dest))
+            fut = ex.submit(_convert_one, i, src, dest, name)
+            futures.append(fut)
+            future_meta[fut] = (i, name)
 
         for f in as_completed(futures):
             result = None
@@ -295,18 +307,28 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
                 result = f.result()
             except Exception:
                 result = "fail"
+            if status_cb and f in future_meta:
+                idx, name = future_meta[f]
+                if result == "ok":
+                    status_cb(idx, _('conv_status_done'), name)
+                elif result == "cancel":
+                    status_cb(idx, _('conv_status_cancelled'), name)
+                else:
+                    status_cb(idx, _('conv_status_failed'), name)
 
-                with lock:
-                    processed += 1
-                    if result == "ok":
-                        converted += 1
-                    else:
-                        skipped += 1
+            with lock:
+                processed += 1
+                if result == "ok":
+                    converted += 1
+                elif result == "cancel":
+                    pass
+                else:
+                    skipped += 1
 
-                    if processed % 10 == 0 or processed == total_tasks:
-                        log_func(f" -> Conversion progress: {processed}/{total_tasks}")
-                    if progress_cb:
-                        progress_cb(processed, total_tasks)
+                if processed % 10 == 0 or processed == total_tasks:
+                    log_func(f" -> Conversion progress: {processed}/{total_tasks}")
+                if progress_cb:
+                    progress_cb(processed, total_tasks)
 
             if stop_event and stop_event.is_set():
                 log_func(" -> Conversion cancelled.")
@@ -2060,12 +2082,17 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         pct = 5 + (float(done) / float(total)) * 35.0
         progress_func(int(pct), 100, None)
 
+    status_cb = None
+    if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
+        status_cb = stats.app.update_song_status
+
     convert_spotube_m4a_to_mp3(
         config,
         log_func,
         pause_event=getattr(stats, 'pause_event', None),
         stop_event=getattr(stats, 'stop_event', None),
-        progress_cb=_conv_progress
+        progress_cb=_conv_progress,
+        status_cb=status_cb
     )
 
     if progress_func:
