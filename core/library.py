@@ -216,7 +216,7 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
 
     # Build task list first for progress reporting
     tasks = []
-    for root, _, files in os.walk(spotube_path):
+    for root, dirnames, files in os.walk(spotube_path):
         if os.path.normpath(root).lower().startswith(os.path.normpath(mp3_path).lower()):
             continue
         for fname in files:
