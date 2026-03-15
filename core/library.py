@@ -2330,11 +2330,13 @@ def get_detailed_stats(config, audio_files=None):
         all_files = [f for f in glob.glob(search_pattern, recursive=True) if os.path.isfile(f)]
         audio_files = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
     
-    total_songs = len(audio_files)
-    flac_count = len([f for f in audio_files if f.lower().endswith(('.flac', '.wav'))])
-    lossy_count = total_songs - flac_count
-    mp3_count = len([f for f in audio_files if f.lower().endswith('.mp3')])
-    m4a_count = len([f for f in audio_files if f.lower().endswith('.m4a')])
+    # Count unique tracks (dedupe m4a/mp3/etc with same normalized tokens)
+    # placeholder: filled after tokenization
+    total_songs = 0
+    flac_count = 0
+    lossy_count = 0
+    mp3_count = 0
+    m4a_count = 0
     total_size_bytes = 0
     for f in audio_files:
         try:
@@ -2381,6 +2383,11 @@ def get_detailed_stats(config, audio_files=None):
                 token_to_exts.setdefault(tokens_tuple, set()).add(ext)
 
     unique_library_tracks = len(library_tokens)
+    total_songs = unique_library_tracks
+    flac_count = len([t for t, exts in token_to_exts.items() if exts.intersection({'.flac', '.wav'})])
+    lossy_count = len([t for t, exts in token_to_exts.items() if exts.intersection({'.mp3', '.m4a', '.webm'})])
+    mp3_count = len([t for t, exts in token_to_exts.items() if '.mp3' in exts])
+    m4a_count = len([t for t, exts in token_to_exts.items() if '.m4a' in exts])
     unconverted_count = 0
     for tokens_tuple, exts in token_to_exts.items():
         if '.m4a' in exts and '.mp3' not in exts:
