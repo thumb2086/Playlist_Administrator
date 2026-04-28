@@ -515,8 +515,11 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
                     search_pattern = os.path.join(library_path, "**", "*")
                     all_files = glob.glob(search_pattern, recursive=True)
                     audio_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
-                    from core.library import build_library_index, find_song_in_library, find_song_exact_format
+                    from core.library import build_library_index, build_metadata_index, find_song_in_library, find_song_exact_format
+                    from core.library import find_song_simple_match
                     lib_index = build_library_index(audio_cache)
+                    mp3_files = [f for f in audio_cache if f.lower().endswith('.mp3')]
+                    metadata_index = build_metadata_index(mp3_files)
 
                 # Only write M3U files for playlists/albums/artists
                 if "track/" not in sp_url:
@@ -531,6 +534,8 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
                             actual_path = None
                             if config.get('prefer_mp3_playlists', True):
                                 actual_path = find_song_exact_format(clean_track, 'mp3', lib_index)
+                                if not actual_path and metadata_index:
+                                    actual_path = find_song_in_library(clean_track, lib_index, metadata_index=metadata_index)
                             if not actual_path:
                                 actual_path = find_song_in_library(clean_track, lib_index)
                             if not actual_path:
