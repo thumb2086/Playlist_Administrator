@@ -6,10 +6,90 @@ import random
 import requests
 import json
 import hashlib
+from functools import lru_cache
 from bs4 import BeautifulSoup
 from utils.helpers import sanitize_filename, normalize_name
-from utils.config import ensure_dirs
+from utils.config import ensure_dirs, get_data_file
 from core.spotify import get_spotify_name
+
+DEFAULT_ARTIST_ALIASES = {
+    'claire kuo': '??',
+    'jolin': '???',
+    'jolin tsai': '???',
+    'crowd lu': '???',
+    'pets tseng': '???',
+    'evangeline wong': '???',
+    'sabrina': '???',
+    'sabrina hu': '???',
+    'eric chou': '???',
+    'shi shi': '???',
+    'boon hui lu': '???',
+    'vicky chen': '???',
+    'feng ze': '???',
+    'ivy': '??',
+    'genblue': '????',
+    'lbi': '??',
+    'erin': '??',
+    'eleanor': '???',
+    'ann bai': '??',
+    'diana wang': '???',
+    'ethan': '???',
+}
+
+
+def _artist_aliases_file_path():
+    try:
+        return get_data_file('artist_aliases.json')
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=1)
+def _load_artist_aliases_cached(cache_key):
+    alias_map = dict(DEFAULT_ARTIST_ALIASES)
+    alias_file = _artist_aliases_file_path()
+    if not alias_file or not os.path.exists(alias_file):
+        return alias_map
+
+    try:
+        with open(alias_file, 'r', encoding='utf-8') as f:
+            loaded = json.load(f)
+    except Exception:
+        return alias_map
+
+    if not isinstance(loaded, dict):
+        return alias_map
+
+    for key, value in loaded.items():
+        if not key:
+            continue
+
+        if isinstance(value, str) and value.strip():
+            alias_map[key.strip().lower()] = value.strip()
+            continue
+
+        if isinstance(value, list):
+            canonical = key.strip()
+            if not canonical:
+                continue
+            for alias in value:
+                if isinstance(alias, str) and alias.strip():
+                    alias_map[alias.strip().lower()] = canonical
+
+    return alias_map
+
+
+def get_artist_aliases():
+    alias_file = _artist_aliases_file_path()
+    cache_key = None
+
+    if alias_file and os.path.exists(alias_file):
+        try:
+            cache_key = (alias_file, os.path.getmtime(alias_file))
+        except OSError:
+            cache_key = (alias_file, None)
+
+    return _load_artist_aliases_cached(cache_key)
 
 def get_playlist_type(spotify_url):
     """Determines the type of Spotify URL (Playlist, Album, Artist)"""
