@@ -297,6 +297,83 @@ def cmd_convert_playlist(args):
     return 0
 
 
+def _write_debug_tracks(path, tracks):
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        for index, track in enumerate(tracks, 1):
+            f.write(f"{index}. {track}\n")
+
+
+def _print_track_list(title, tracks):
+    print(f"\n{title} ({len(tracks)}):")
+    for index, track in enumerate(tracks, 1):
+        print(f"{index}. {track}")
+
+
+def cmd_fetch_playlist(args):
+    from core.spotify_playlist_fetcher import (
+        compare_track_lists,
+        fetch_legacy_embed_playlist,
+        fetch_redesigned_playlist,
+    )
+
+    import requests
+
+    session = requests.Session()
+    redesigned = fetch_redesigned_playlist(args.url, session)
+    legacy = fetch_legacy_embed_playlist(args.url, session)
+    diff = compare_track_lists(redesigned.tracks, legacy.tracks)
+
+    print(f"URL: {args.url}")
+    print(f"Redesigned source: {redesigned.source}")
+    print(f"Redesigned status: {redesigned.status_code}")
+    if redesigned.playlist_name:
+        print(f"Redesigned playlist: {redesigned.playlist_name}")
+    if redesigned.error:
+        print(f"Redesigned error: {redesigned.error}")
+    print(f"Redesigned tracks: {len(redesigned.tracks)}")
+
+    print(f"Legacy source: {legacy.source}")
+    print(f"Legacy status: {legacy.status_code}")
+    if legacy.playlist_name:
+        print(f"Legacy playlist: {legacy.playlist_name}")
+    if legacy.error:
+        print(f"Legacy error: {legacy.error}")
+    print(f"Legacy tracks: {len(legacy.tracks)}")
+
+    print(f"Only redesigned: {len(diff['only_new'])}")
+    for track in diff["only_new"]:
+        print(f"+ {track}")
+
+    print(f"Only legacy: {len(diff['only_legacy'])}")
+    for track in diff["only_legacy"]:
+        print(f"- {track}")
+
+    if diff["same_order_differences"]:
+        print(f"Order/content differences: {len(diff['same_order_differences'])}")
+        for line in diff["same_order_differences"][: args.max_order_diff]:
+            print(line)
+
+    for probe in args.probe or []:
+        in_redesigned = probe in redesigned.tracks
+        in_legacy = probe in legacy.tracks
+        print(
+            "Probe: "
+            f"{probe} | redesigned={'yes' if in_redesigned else 'no'} "
+            f"| legacy={'yes' if in_legacy else 'no'}"
+        )
+
+    if args.show_tracks:
+        _print_track_list("Redesigned tracks", redesigned.tracks)
+        _print_track_list("Legacy tracks", legacy.tracks)
+
+    if args.output:
+        _write_debug_tracks(args.output, redesigned.tracks)
+        print(f"Wrote redesigned tracks to: {args.output}")
+
+    return 0 if redesigned.tracks else 1
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description="Playlist Administrator command line tools")
     parser.add_argument(
@@ -330,6 +407,17 @@ def build_parser():
     convert_parser.add_argument("--file", help="Path to a Spotify debug track list.")
     convert_parser.add_argument("--dry-run", action="store_true", help="Print planned conversions without writing MP3 files.")
     convert_parser.set_defaults(func=cmd_convert_playlist)
+
+    fetch_parser = subparsers.add_parser(
+        "fetch-playlist",
+        help="Fetch a Spotify playlist with the redesigned scraper and compare it with the legacy parser.",
+    )
+    fetch_parser.add_argument("url", help="Spotify playlist URL.")
+    fetch_parser.add_argument("--show-tracks", action="store_true", help="Print both full track lists.")
+    fetch_parser.add_argument("--output", help="Write redesigned track list to a debug text file.")
+    fetch_parser.add_argument("--max-order-diff", type=int, default=20, help="Maximum order differences to print.")
+    fetch_parser.add_argument("--probe", action="append", help="Track name to check in both fetched lists.")
+    fetch_parser.set_defaults(func=cmd_fetch_playlist)
 
     return parser
 
