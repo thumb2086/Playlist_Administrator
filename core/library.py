@@ -661,6 +661,7 @@ def prune_missing_from_playlists(config, log_func, pause_event=None, stop_event=
 
     total_removed = 0
     total_files = 0
+    skip_markers = ["_unsorted", "single tracks", "_unsorted_songs", "_removed songs", "已移除"]
 
     for pl_file in pl_files:
         if stop_event and stop_event.is_set():
@@ -668,6 +669,9 @@ def prune_missing_from_playlists(config, log_func, pause_event=None, stop_event=
             break
         if pause_event:
             pause_event.wait()
+        base = os.path.basename(pl_file).lower()
+        if any(marker in base for marker in skip_markers):
+            continue
         total_files += 1
         removed = 0
         try:

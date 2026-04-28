@@ -312,7 +312,9 @@ def _print_track_list(title, tracks):
 
 def cmd_fetch_playlist(args):
     from core.spotify_playlist_fetcher import (
+        comparable_track_name,
         compare_track_lists,
+        fetch_browser_open_playlist,
         fetch_legacy_embed_playlist,
         fetch_redesigned_playlist,
     )
@@ -320,11 +322,26 @@ def cmd_fetch_playlist(args):
     import requests
 
     session = requests.Session()
+    browser = fetch_browser_open_playlist(
+        args.url,
+        args.browser_timeout,
+        headless=not args.browser_visible,
+    ) if args.browser else None
     redesigned = fetch_redesigned_playlist(args.url, session)
     legacy = fetch_legacy_embed_playlist(args.url, session)
-    diff = compare_track_lists(redesigned.tracks, legacy.tracks)
+    primary = browser if browser and browser.tracks else redesigned
+    diff = compare_track_lists(primary.tracks, legacy.tracks)
 
     print(f"URL: {args.url}")
+    if browser:
+        print(f"Browser source: {browser.source}")
+        print(f"Browser status: {browser.status_code}")
+        if browser.playlist_name:
+            print(f"Browser playlist: {browser.playlist_name}")
+        if browser.error:
+            print(f"Browser error: {browser.error}")
+        print(f"Browser tracks: {len(browser.tracks)}")
+
     print(f"Redesigned source: {redesigned.source}")
     print(f"Redesigned status: {redesigned.status_code}")
     if redesigned.playlist_name:
@@ -341,7 +358,8 @@ def cmd_fetch_playlist(args):
         print(f"Legacy error: {legacy.error}")
     print(f"Legacy tracks: {len(legacy.tracks)}")
 
-    print(f"Only redesigned: {len(diff['only_new'])}")
+    primary_label = "browser" if browser and browser.tracks else "redesigned"
+    print(f"Only {primary_label}: {len(diff['only_new'])}")
     for track in diff["only_new"]:
         print(f"+ {track}")
 
@@ -355,23 +373,26 @@ def cmd_fetch_playlist(args):
             print(line)
 
     for probe in args.probe or []:
-        in_redesigned = probe in redesigned.tracks
-        in_legacy = probe in legacy.tracks
+        probe_key = comparable_track_name(probe)
+        in_primary = probe_key in {comparable_track_name(track) for track in primary.tracks}
+        in_legacy = probe_key in {comparable_track_name(track) for track in legacy.tracks}
         print(
             "Probe: "
-            f"{probe} | redesigned={'yes' if in_redesigned else 'no'} "
+            f"{probe} | {primary_label}={'yes' if in_primary else 'no'} "
             f"| legacy={'yes' if in_legacy else 'no'}"
         )
 
     if args.show_tracks:
+        if browser:
+            _print_track_list("Browser tracks", browser.tracks)
         _print_track_list("Redesigned tracks", redesigned.tracks)
         _print_track_list("Legacy tracks", legacy.tracks)
 
     if args.output:
-        _write_debug_tracks(args.output, redesigned.tracks)
-        print(f"Wrote redesigned tracks to: {args.output}")
+        _write_debug_tracks(args.output, primary.tracks)
+        print(f"Wrote {primary_label} tracks to: {args.output}")
 
-    return 0 if redesigned.tracks else 1
+    return 0 if primary.tracks else 1
 
 
 def build_parser():
@@ -417,6 +438,9 @@ def build_parser():
     fetch_parser.add_argument("--output", help="Write redesigned track list to a debug text file.")
     fetch_parser.add_argument("--max-order-diff", type=int, default=20, help="Maximum order differences to print.")
     fetch_parser.add_argument("--probe", action="append", help="Track name to check in both fetched lists.")
+    fetch_parser.add_argument("--browser", action="store_true", help="Render open.spotify.com in local headless Chrome and read the DOM.")
+    fetch_parser.add_argument("--browser-visible", action="store_true", help="Use a visible Chrome window for browser scraping.")
+    fetch_parser.add_argument("--browser-timeout", type=int, default=45, help="Seconds to wait for browser-rendered tracks.")
     fetch_parser.set_defaults(func=cmd_fetch_playlist)
 
     return parser

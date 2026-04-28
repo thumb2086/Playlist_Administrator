@@ -1,5 +1,12 @@
 import json
+import os
 import re
+import shutil
+import socket
+import subprocess
+import tempfile
+import time
+import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -148,6 +155,10 @@ def _dedupe_keep_order(values: Iterable[str]) -> list[str]:
     return result
 
 
+def comparable_track_name(value: str) -> str:
+    return re.sub(r"\s+", " ", value.replace("\u00a0", " ")).strip()
+
+
 def _best_candidate(candidates: list[tuple[str, list[str]]]) -> tuple[str, list[str]] | None:
     if not candidates:
         return None
@@ -227,14 +238,235 @@ def _tracks_from_html_rows(soup: BeautifulSoup) -> list[str]:
 
 
 def compare_track_lists(new_tracks: list[str], old_tracks: list[str]) -> dict[str, list[str]]:
-    new_set = set(new_tracks)
-    old_set = set(old_tracks)
+    new_set = {comparable_track_name(track) for track in new_tracks}
+    old_set = {comparable_track_name(track) for track in old_tracks}
     return {
-        "only_new": [track for track in new_tracks if track not in old_set],
-        "only_legacy": [track for track in old_tracks if track not in new_set],
+        "only_new": [track for track in new_tracks if comparable_track_name(track) not in old_set],
+        "only_legacy": [track for track in old_tracks if comparable_track_name(track) not in new_set],
         "same_order_differences": [
             f"{index + 1}. new={new} | legacy={old}"
             for index, (new, old) in enumerate(zip(new_tracks, old_tracks))
-            if new != old
+            if comparable_track_name(new) != comparable_track_name(old)
         ],
     }
+
+
+def _find_chrome_executable() -> str | None:
+    candidates = [
+        os.environ.get("CHROME_PATH"),
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        shutil.which("chrome"),
+        shutil.which("chrome.exe"),
+        shutil.which("msedge"),
+        shutil.which("msedge.exe"),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _free_local_port() -> int:
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+async def _cdp_fetch_rendered_tracks(sp_url: str, timeout_seconds: int, headless: bool) -> PlaylistFetchResult:
+    try:
+        import websockets
+    except ImportError as exc:
+        return PlaylistFetchResult("browser_open_page", sp_url, None, [], None, f"websockets is required: {exc}")
+
+    chrome = _find_chrome_executable()
+    if not chrome:
+        return PlaylistFetchResult("browser_open_page", sp_url, None, [], None, "Chrome or Edge executable not found")
+
+    port = _free_local_port()
+    profile_dir = tempfile.mkdtemp(prefix="playlist-admin-chrome-")
+    chrome_args = [
+        chrome,
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-extensions",
+        "--window-size=1600,1200",
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={profile_dir}",
+        sp_url,
+    ]
+    if headless:
+        chrome_args.insert(1, "--headless=new")
+
+    proc = subprocess.Popen(
+        chrome_args,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    try:
+        tabs = None
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=1) as resp:
+                    tabs = json.loads(resp.read().decode("utf-8"))
+                if tabs:
+                    break
+            except Exception:
+                time.sleep(0.1)
+
+        if not tabs:
+            return PlaylistFetchResult("browser_open_page", sp_url, None, [], None, "Chrome DevTools did not start")
+
+        page_target = None
+        for tab in tabs:
+            if tab.get("type") == "page" and "open.spotify.com" in tab.get("url", ""):
+                page_target = tab
+                break
+        if not page_target:
+            for tab in tabs:
+                if tab.get("type") == "page":
+                    page_target = tab
+                    break
+        if not page_target:
+            return PlaylistFetchResult("browser_open_page", sp_url, None, [], None, "No Chrome page target found")
+
+        websocket_url = page_target["webSocketDebuggerUrl"]
+        async with websockets.connect(websocket_url, max_size=30_000_000) as ws:
+            msg_id = 0
+
+            async def command(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+                nonlocal msg_id
+                msg_id += 1
+                await ws.send(json.dumps({"id": msg_id, "method": method, "params": params or {}}))
+                while True:
+                    message = json.loads(await ws.recv())
+                    if message.get("id") == msg_id:
+                        return message
+
+            await command("Page.enable")
+            await command("Runtime.enable")
+
+            expression = r"""
+(() => {
+  const clean = (value) => (value || '').replace(/\s+/g, ' ').trim();
+  const rows = [...document.querySelectorAll('[data-testid="tracklist-row"], div[role="row"]')];
+  const tracks = [];
+  for (const row of rows) {
+    const rowText = clean(row.innerText);
+    if (!rowText || /^#?\s*標題\s+專輯/i.test(rowText)) continue;
+
+    const trackLinks = [...row.querySelectorAll('a[href*="/track/"]')];
+    let title = clean((trackLinks[0] && trackLinks[0].innerText) || '');
+    const artistLinks = [...row.querySelectorAll('a[href*="/artist/"]')]
+      .map((link) => clean(link.innerText))
+      .filter(Boolean);
+
+    if (!title) {
+      const lines = row.innerText.split('\n').map(clean).filter(Boolean);
+      title = lines.find((line) => !/^\d+$/.test(line) && !/^\d+:\d{2}$/.test(line)) || '';
+    }
+
+    let artists = [...new Set(artistLinks)].join(', ');
+    if (!artists && title) {
+      const lines = row.innerText.split('\n').map(clean).filter(Boolean);
+      const titleIndex = lines.indexOf(title);
+      if (titleIndex >= 0 && lines[titleIndex + 1] && !/^\d+:\d{2}$/.test(lines[titleIndex + 1])) {
+        artists = lines[titleIndex + 1];
+      }
+    }
+
+    if (title && artists) tracks.push(`${title} - ${artists}`);
+    else if (title) tracks.push(title);
+  }
+  return {
+    title: document.title,
+    playlistName: clean(document.querySelector('[data-testid="entityTitle"] h1')?.innerText || document.querySelector('h1')?.innerText || ''),
+    tracks: [...new Set(tracks)],
+    bodySample: document.body.innerText.slice(0, 1000)
+  };
+})()
+"""
+
+            scroll_expression = r"""
+(() => {
+  const scrollables = [...document.querySelectorAll('main, div')]
+    .filter((el) => el.scrollHeight > el.clientHeight + 200)
+    .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight));
+  const el = scrollables[0] || document.scrollingElement || document.documentElement;
+  const before = el.scrollTop;
+  el.scrollTop = before + Math.max(700, Math.floor(el.clientHeight * 0.8));
+  window.scrollBy(0, 700);
+  return { before, after: el.scrollTop, height: el.scrollHeight, client: el.clientHeight };
+})()
+"""
+
+            last_value = None
+            collected: list[str] = []
+            unchanged_rounds = 0
+            while time.time() < deadline:
+                result = await command(
+                    "Runtime.evaluate",
+                    {"expression": expression, "returnByValue": True, "awaitPromise": False},
+                )
+                last_value = result.get("result", {}).get("result", {}).get("value")
+                if isinstance(last_value, dict):
+                    before_count = len(collected)
+                    collected = _dedupe_keep_order([*collected, *last_value.get("tracks", [])])
+                    if len(collected) >= 50:
+                        return PlaylistFetchResult(
+                            "browser_open_page:dom",
+                            sp_url,
+                            last_value.get("playlistName") or None,
+                            collected,
+                            200,
+                        )
+                    if len(collected) == before_count:
+                        unchanged_rounds += 1
+                    else:
+                        unchanged_rounds = 0
+
+                await command("Runtime.evaluate", {"expression": scroll_expression, "returnByValue": True})
+                if len(collected) >= 20 and unchanged_rounds >= 8:
+                    tracks = _dedupe_keep_order(collected)
+                    return PlaylistFetchResult(
+                        "browser_open_page:dom",
+                        sp_url,
+                        last_value.get("playlistName") if isinstance(last_value, dict) else None,
+                        tracks,
+                        200,
+                    )
+                time.sleep(1)
+
+            sample = ""
+            if isinstance(last_value, dict):
+                sample = last_value.get("bodySample", "")
+            return PlaylistFetchResult(
+                "browser_open_page:dom",
+                sp_url,
+                None,
+                [],
+                200,
+                f"Timed out waiting for rendered tracks. Sample: {sample[:200]}",
+            )
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        shutil.rmtree(profile_dir, ignore_errors=True)
+
+
+def fetch_browser_open_playlist(
+    sp_url: str,
+    timeout_seconds: int = 45,
+    headless: bool = True,
+) -> PlaylistFetchResult:
+    import asyncio
+
+    return asyncio.run(_cdp_fetch_rendered_tracks(sp_url, timeout_seconds, headless))
