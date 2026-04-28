@@ -549,7 +549,9 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
                     from core.library import build_library_index, build_metadata_index, find_song_in_library, find_song_exact_format, find_song_simple_match
                     lib_index = build_library_index(audio_cache)
                     mp3_files = [f for f in audio_cache if f.lower().endswith('.mp3')]
+                    mp3_index = build_library_index(mp3_files)
                     metadata_index = build_metadata_index(mp3_files)
+                    all_metadata_index = build_metadata_index(audio_cache)
                     log_func(f" -> 音樂庫索引建立完成: {len(audio_cache)} 個音訊檔案, {len(lib_index)} 個索引項目")
                     # Debug: show first few audio files found
                     if audio_cache:
@@ -586,9 +588,9 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
                                     actual_path = find_song_exact_format(clean_track, 'mp3', lib_index)
                                 # Final MP3 fallback: use title metadata when Spotube filename is abbreviated.
                                 if not actual_path and metadata_index:
-                                    actual_path = find_song_in_library(clean_track, lib_index, metadata_index=metadata_index)
-                            if not actual_path:
-                                actual_path = find_song_in_library(clean_track, lib_index)
+                                    actual_path = find_song_in_library(clean_track, mp3_index, metadata_index=metadata_index)
+                            if not actual_path and not config.get('prefer_mp3_playlists', True):
+                                actual_path = find_song_in_library(clean_track, lib_index, metadata_index=all_metadata_index)
                             if not actual_path:
                                 missing_tracks += 1
                                 # Debug: log all missing tracks

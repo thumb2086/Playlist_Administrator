@@ -9,6 +9,11 @@ import tempfile
 from pathlib import Path
 
 
+def _metadata_match_key(value):
+    import re
+    return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(value or "").lower())
+
+
 def _migrate_m4a_metadata_to_mp3(m4a_path, mp3_path, log_func=None):
     """
     Migrate metadata from M4A to MP3 using mutagen.
@@ -89,6 +94,7 @@ def _enrich_metadata_from_spotify_cache(file_path, log_func=None):
         import json
         from utils.config import CONFIG_DIR
         from utils.helpers import sanitize_filename
+        from mutagen.easyid3 import EasyID3
         from mutagen.mp3 import MP3
         from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, APIC
         
@@ -126,6 +132,24 @@ def _enrich_metadata_from_spotify_cache(file_path, log_func=None):
         
         if not spotify_meta:
             return False
+
+        try:
+            current_easy = EasyID3(file_path)
+            current_title = current_easy.get('title', [None])[0]
+        except Exception:
+            current_title = None
+
+        spotify_title = spotify_meta.get('title')
+        if current_title and spotify_title:
+            current_key = _metadata_match_key(current_title)
+            spotify_key = _metadata_match_key(spotify_title)
+            if current_key and spotify_key and current_key != spotify_key:
+                if log_func:
+                    log_func(
+                        "    ⚠️ Spotify cache title mismatch; skipped enrichment "
+                        f"({current_title} != {spotify_title})"
+                    )
+                return False
         
         # Apply to MP3
         mp3 = MP3(file_path)

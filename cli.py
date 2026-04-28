@@ -146,7 +146,9 @@ def cmd_match(args):
     audio_files = _audio_files(config["library_path"])
     lib_index = build_library_index(audio_files)
     mp3_files = [path for path in audio_files if path.lower().endswith(".mp3")]
+    mp3_index = build_library_index(mp3_files)
     metadata_index = build_metadata_index(mp3_files)
+    all_metadata_index = build_metadata_index(audio_files)
 
     found = []
     missing = []
@@ -163,11 +165,11 @@ def cmd_match(args):
                 path = find_song_exact_format(track, "mp3", lib_index)
                 method = "exact"
             if not path and metadata_index:
-                path = find_song_in_library(track, lib_index, metadata_index=metadata_index)
+                path = find_song_in_library(track, mp3_index, metadata_index=metadata_index)
                 method = "metadata"
 
-        if not path:
-            path = find_song_in_library(track, lib_index, metadata_index=metadata_index)
+        if not path and not args.prefer_mp3:
+            path = find_song_in_library(track, lib_index, metadata_index=all_metadata_index)
             method = "library"
 
         if path:
@@ -179,7 +181,8 @@ def cmd_match(args):
     print(f"Tracks: {len(tracks)}")
     print(f"Audio files: {len(audio_files)}")
     print(f"Index entries: {len(lib_index)}")
-    print(f"Metadata entries: {len(metadata_index)}")
+    print(f"MP3 metadata entries: {len(metadata_index)}")
+    print(f"All metadata entries: {len(all_metadata_index)}")
     print(f"Matched: {len(found)}")
     print(f"Missing: {len(missing)}")
     print(f"Methods: {method_counts}")

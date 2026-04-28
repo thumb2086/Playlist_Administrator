@@ -34,6 +34,8 @@ DEFAULT_ARTIST_ALIASES = {
     'ann bai': '白安',
     'diana wang': '王詩安',
     'ethan': '陳威全',
+    'chih siou': '持修',
+    'show luo': '羅志祥',
 }
 
 
@@ -289,6 +291,107 @@ def _get_m4a_cache_key(spotube_path, mp3_path):
             cache_str += f"{f}:0\n"
     return hashlib.md5(cache_str.encode('utf-8')).hexdigest(), m4a_files
 
+def _audio_metadata_identity(file_path):
+    """Return normalized title/artist metadata for conversion freshness checks."""
+    try:
+        from mutagen import File as MutagenFile
+    except ImportError:
+        return None
+
+    try:
+        audio = MutagenFile(file_path, easy=True)
+        if not audio or not audio.tags:
+            return None
+        title = audio.tags.get('title', [None])[0]
+        artist = audio.tags.get('artist', [None])[0]
+        if not title and not artist:
+            return None
+        return (
+            tuple(get_normalized_tokens(title or "")),
+            tuple(get_normalized_tokens(artist or "")),
+        )
+    except Exception:
+        return None
+
+def _audio_metadata_filename_stem(file_path):
+    """Build a stable filename stem from audio title/artist metadata."""
+    try:
+        from mutagen import File as MutagenFile
+    except ImportError:
+        return None
+
+    try:
+        audio = MutagenFile(file_path, easy=True)
+        if not audio or not audio.tags:
+            return None
+        title = (audio.tags.get('title', [None])[0] or "").strip()
+        artist = (audio.tags.get('artist', [None])[0] or "").strip()
+        if not title:
+            return None
+
+        stem = title
+        if artist:
+            title_tokens = set(get_normalized_tokens(title))
+            artist_tokens = set(get_normalized_tokens(artist))
+            if not artist_tokens or not artist_tokens <= title_tokens:
+                stem = f"{title} - {artist}"
+        return _sanitize_metadata_filename(stem)
+    except Exception:
+        return None
+
+def _sanitize_metadata_filename(name):
+    """Sanitize metadata-derived names without stripping meaningful title text."""
+    import re
+
+    cleaned = str(name or "").replace('\xa0', ' ').replace('\u200b', '').strip()
+    cleaned = re.sub(r'[<>:"/\\|?*]', '_', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip('. -')
+    return (cleaned or "Unknown")[:200]
+
+def _metadata_based_mp3_path(src, mp3_path):
+    stem = _audio_metadata_filename_stem(src)
+    if not stem:
+        stem = os.path.splitext(os.path.basename(src))[0]
+    return os.path.join(mp3_path, f"{stem}.mp3"), stem
+
+def _move_matching_legacy_mp3(src, legacy_dest, metadata_dest, log_func):
+    if os.path.normcase(os.path.abspath(legacy_dest)) == os.path.normcase(os.path.abspath(metadata_dest)):
+        return
+    if not os.path.exists(legacy_dest):
+        return
+    if not _converted_mp3_matches_source(src, legacy_dest):
+        return
+
+    try:
+        if os.path.exists(metadata_dest):
+            if _converted_mp3_matches_source(src, metadata_dest):
+                os.remove(legacy_dest)
+                if log_func:
+                    log_func(f"    Renamed metadata MP3 already exists; removed old name: {os.path.basename(legacy_dest)}")
+            return
+
+        os.replace(legacy_dest, metadata_dest)
+        if log_func:
+            log_func(f"    Renamed MP3 by metadata: {os.path.basename(legacy_dest)} -> {os.path.basename(metadata_dest)}")
+    except Exception as e:
+        if log_func:
+            log_func(f"    Could not rename MP3 by metadata: {os.path.basename(legacy_dest)} ({e})")
+
+def _converted_mp3_matches_source(src, dest):
+    """Treat an MP3 as stale when readable metadata differs from its M4A source."""
+    src_identity = _audio_metadata_identity(src)
+    dest_identity = _audio_metadata_identity(dest)
+    if not src_identity or not dest_identity:
+        return True
+
+    src_title, src_artist = src_identity
+    dest_title, dest_artist = dest_identity
+    if src_title and dest_title and src_title != dest_title:
+        return False
+    if src_artist and dest_artist and src_artist != dest_artist:
+        return False
+    return True
+
 def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None, status_cb=None):
     """Convert Spotube m4a files into mp3 subfolder inside Spotube."""
     from core.audio_converter import convert_audio_file, check_ffmpeg_available
@@ -334,10 +437,11 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
     if last_cache_key == current_cache_key and m4a_files:
         all_mp3_exist = True
         for src in m4a_files:
-            fname = os.path.basename(src)
-            base = os.path.splitext(fname)[0]
-            dest = os.path.join(mp3_path, f"{base}.mp3")
-            if not os.path.exists(dest):
+            base = os.path.splitext(os.path.basename(src))[0]
+            legacy_dest = os.path.join(mp3_path, f"{base}.mp3")
+            dest, _ = _metadata_based_mp3_path(src, mp3_path)
+            _move_matching_legacy_mp3(src, legacy_dest, dest, log_func)
+            if not os.path.exists(dest) or not _converted_mp3_matches_source(src, dest):
                 all_mp3_exist = False
                 break
         if all_mp3_exist:
@@ -358,10 +462,11 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
         # Skip files in the mp3 output directory
         if os.path.normpath(src).lower().startswith(os.path.normpath(mp3_path).lower()):
             continue
-        fname = os.path.basename(src)
-        base = os.path.splitext(fname)[0]
-        dest = os.path.join(mp3_path, f"{base}.mp3")
-        tasks.append((src, dest, base))
+        base = os.path.splitext(os.path.basename(src))[0]
+        legacy_dest = os.path.join(mp3_path, f"{base}.mp3")
+        dest, name = _metadata_based_mp3_path(src, mp3_path)
+        _move_matching_legacy_mp3(src, legacy_dest, dest, log_func)
+        tasks.append((src, dest, name))
 
     total_tasks = len(tasks)
     if total_tasks == 0:
@@ -381,7 +486,7 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
     for i, (src, dest, name) in enumerate(tasks):
         if os.path.exists(dest):
             try:
-                if os.path.getmtime(dest) >= os.path.getmtime(src):
+                if os.path.getmtime(dest) >= os.path.getmtime(src) and _converted_mp3_matches_source(src, dest):
                     skipped += 1
                     if status_cb:
                         status_cb(i, _('conv_status_skipped'), name)
@@ -820,8 +925,10 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
              right_part = parts[1].strip()
              if not target_artist:
                  # Spotify playlist rows are saved as "Title - Artist", while older
-                 # paths in the app may still use "Artist - Title". Try both.
-                 target_artist_options.extend([right_part, left_part])
+                 # paths in the app may still use "Artist - Title". The Spotify
+                 # sync path now writes Title - Artist, so only the right side is
+                 # valid artist evidence here.
+                 target_artist_options.append(right_part)
              title_part = left_part
              candidate_tokens = tuple(get_normalized_tokens(left_part))
              if candidate_tokens:
@@ -1270,9 +1377,11 @@ def find_song_simple_match(song_name, target_extension, library_source):
     # Extract title only for fallback matching
     title_only = None
     title_tokens = None
+    artist_tokens = None
     if ' - ' in song_name:
-        title_only = song_name.split(' - ', 1)[0].strip()
+        title_only, artist_part = [part.strip() for part in song_name.split(' - ', 1)]
         title_tokens = tuple(get_normalized_tokens(title_only))
+        artist_tokens = tuple(get_normalized_tokens(artist_part))
     
     best_match = None
     best_score = 0
@@ -1316,9 +1425,10 @@ def find_song_simple_match(song_name, target_extension, library_source):
                 if title_tokens:
                     title_set = set(title_tokens)
                     file_set = set(file_tokens)
+                    artist_set = set(artist_tokens or ())
                     
                     # All title tokens must be present in file tokens
-                    if title_set <= file_set:
+                    if title_set <= file_set and (not artist_set or artist_set & file_set):
                         return file_path
                     
                     # OR: At least 80% of title tokens match AND longest token matches
@@ -1330,13 +1440,15 @@ def find_song_simple_match(song_name, target_extension, library_source):
                         if title_match_ratio >= 0.8:
                             # Additional check: longest title token must match
                             longest_title = max(title_set, key=len) if title_set else None
-                            if longest_title and longest_title in file_set:
+                            if longest_title and longest_title in file_set and (not artist_set or artist_set & file_set):
                                 return file_path
             
             # Partial token match (for fuzzy matching) - STRICT threshold
             if query_tokens and file_tokens:
                 query_set = set(query_tokens)
                 file_set = set(file_tokens)
+                title_set = set(title_tokens or ())
+                artist_set = set(artist_tokens or ())
                 common = query_set & file_set
                 min_size = min(len(query_set), len(file_set))
                 
@@ -1344,6 +1456,10 @@ def find_song_simple_match(song_name, target_extension, library_source):
                     match_ratio = len(common) / min_size
                     # Require at least 80% match for fuzzy matching
                     if match_ratio >= 0.8:
+                        if title_set and not (title_set & file_set):
+                            continue
+                        if artist_set and not (artist_set & file_set):
+                            continue
                         # Additional check: longest query token must match
                         longest_query = max(query_set, key=len) if query_set else None
                         if longest_query and longest_query in file_set:
@@ -1369,9 +1485,10 @@ def find_song_simple_match(song_name, target_extension, library_source):
             if title_only and title_tokens:
                 title_set = set(title_tokens)
                 file_set = set(file_tokens)
+                artist_set = set(artist_tokens or ())
                 
                 # All title tokens must be present
-                if title_set <= file_set:
+                if title_set <= file_set and (not artist_set or artist_set & file_set):
                     return file_path
                 
                 # OR: 80% coverage with longest token verification
@@ -1380,19 +1497,25 @@ def find_song_simple_match(song_name, target_extension, library_source):
                     match_ratio = len(common) / len(title_set)
                     if match_ratio >= 0.8:
                         longest_title = max(title_set, key=len) if title_set else None
-                        if longest_title and longest_title in file_set:
+                        if longest_title and longest_title in file_set and (not artist_set or artist_set & file_set):
                             return file_path
             
             # Partial token match (STRICT threshold)
             if query_tokens and file_tokens:
                 query_set = set(query_tokens)
                 file_set = set(file_tokens)
+                title_set = set(title_tokens or ())
+                artist_set = set(artist_tokens or ())
                 common = query_set & file_set
                 min_size = min(len(query_set), len(file_set))
                 
                 if min_size > 0:
                     match_ratio = len(common) / min_size
                     if match_ratio >= 0.8:
+                        if title_set and not (title_set & file_set):
+                            continue
+                        if artist_set and not (artist_set & file_set):
+                            continue
                         longest_query = max(query_set, key=len) if query_set else None
                         if longest_query and longest_query in file_set:
                             if len(common) > best_score:
@@ -1414,10 +1537,12 @@ def find_song_exact_format(song_name, target_extension, library_source):
     # Extract title part for flexible matching. Spotify playlist rows are saved
     # as "Title - Artist", so do not use the artist side as a title fallback.
     title_part = song_name
+    artist_tokens = tuple()
     if ' - ' in song_name:
         parts = song_name.split(' - ', 1)
         if len(parts) == 2:
             title_part = parts[0].strip()
+            artist_tokens = tuple(get_normalized_tokens(parts[1].strip()))
     title_tokens = tuple(get_normalized_tokens(title_part))
     
     found_files = []
@@ -1501,6 +1626,9 @@ def find_song_exact_format(song_name, target_extension, library_source):
                         score = overlap_count * (coverage + 0.5)
                 
                 if score > 0:
+                    artist_set = set(artist_tokens)
+                    if artist_set and not (artist_set & set(index_tokens)):
+                        continue
                     ext_candidates = paths if isinstance(paths, list) else [paths]
                     for file_path in ext_candidates:
                         if file_path.lower().endswith(target_ext):
@@ -1534,10 +1662,11 @@ def find_song_exact_format(song_name, target_extension, library_source):
                 if fuzzy_source:
                     title_set = set(fuzzy_source)
                     file_set = set(file_tokens)
+                    artist_set = set(artist_tokens)
                     overlap = len(title_set & file_set)
                     min_size = min(len(title_set), len(file_set))
                     if min_size > 0 and overlap / min_size >= 0.5:
-                        is_match = True
+                        is_match = not artist_set or bool(artist_set & file_set)
             
             if is_match:
                 if file_path.lower().endswith(target_ext):
