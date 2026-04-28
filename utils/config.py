@@ -98,6 +98,7 @@ def load_config():
         'dab_password': "",
         'auto_metadata': False,
         'spotube_folder_name': 'spotube',
+        'spotube_m4a_subfolder': 'm4a',
         'spotube_mp3_subfolder': 'mp3',
         'prefer_mp3_playlists': True,
         'spotube_convert_workers': 4,
@@ -128,6 +129,8 @@ def derive_paths(config):
 
         lower_entries = {e.lower() for e in entries}
         if 'spotube' in lower_entries:
+            return True
+        if {'m4a', 'mp3'} & lower_entries and 'playlists' in lower_entries:
             return True
 
         for name in entries:

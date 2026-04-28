@@ -256,13 +256,18 @@ def unblock_files(directory, log_func):
 def _resolve_spotube_paths(config):
     library_path = config.get('library_path')
     spotube_name = config.get('spotube_folder_name', 'spotube')
+    m4a_subfolder = config.get('spotube_m4a_subfolder', 'm4a')
     mp3_subfolder = config.get('spotube_mp3_subfolder', 'mp3')
     if not spotube_name or spotube_name in ('.', './'):
         spotube_path = library_path
     else:
         spotube_path = os.path.join(library_path, spotube_name)
+    if m4a_subfolder:
+        m4a_path = os.path.join(spotube_path, m4a_subfolder)
+    else:
+        m4a_path = spotube_path
     mp3_path = os.path.join(spotube_path, mp3_subfolder)
-    return spotube_path, mp3_path
+    return m4a_path, mp3_path
 
 def _has_m4a_files(root_path):
     if not root_path or not os.path.exists(root_path):
@@ -290,6 +295,14 @@ def _get_m4a_cache_key(spotube_path, mp3_path):
         except:
             cache_str += f"{f}:0\n"
     return hashlib.md5(cache_str.encode('utf-8')).hexdigest(), m4a_files
+
+def _m4a_files_from_source(m4a_path, mp3_path):
+    m4a_pattern = os.path.join(m4a_path, "**", "*.m4a")
+    m4a_files = glob.glob(m4a_pattern, recursive=True)
+    return [
+        f for f in m4a_files
+        if not os.path.normpath(f).lower().startswith(os.path.normpath(mp3_path).lower())
+    ]
 
 def _audio_metadata_identity(file_path):
     """Return normalized title/artist metadata for conversion freshness checks."""
@@ -392,7 +405,7 @@ def _converted_mp3_matches_source(src, dest):
         return False
     return True
 
-def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None, status_cb=None):
+def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None, status_cb=None, source_files=None):
     """Convert Spotube m4a files into mp3 subfolder inside Spotube."""
     from core.audio_converter import convert_audio_file, check_ffmpeg_available
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -400,15 +413,15 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
     from utils.i18n import _
     from utils.config import get_data_file
 
-    spotube_path, mp3_path = _resolve_spotube_paths(config)
-    if not spotube_path or not os.path.exists(spotube_path):
+    m4a_path, mp3_path = _resolve_spotube_paths(config)
+    if not m4a_path or not os.path.exists(m4a_path):
         library_path = config.get('library_path')
         if _has_m4a_files(library_path):
-            log_func(f" -> Spotube folder not found, fallback to library root: {library_path}")
-            spotube_path = library_path
-            mp3_path = os.path.join(spotube_path, config.get('spotube_mp3_subfolder', 'mp3'))
+            log_func(f" -> Spotube M4A folder not found, fallback to library root: {library_path}")
+            m4a_path = library_path
+            mp3_path = os.path.join(library_path, config.get('spotube_mp3_subfolder', 'mp3'))
         else:
-            log_func(f" -> Spotube folder not found: {spotube_path}")
+            log_func(f" -> Spotube M4A folder not found: {m4a_path}")
             return 0, 0
 
     if not check_ffmpeg_available():
@@ -417,24 +430,29 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
 
     os.makedirs(mp3_path, exist_ok=True)
 
-    # Check if M4A files have changed since last run
-    current_cache_key, m4a_files = _get_m4a_cache_key(spotube_path, mp3_path)
+    if source_files is not None:
+        m4a_files = sorted({os.path.normpath(f) for f in source_files if f and f.lower().endswith('.m4a')})
+        current_cache_key = None
+        last_cache_key = None
+    else:
+        # Check if M4A files have changed since last run
+        current_cache_key, m4a_files = _get_m4a_cache_key(m4a_path, mp3_path)
     cache_file = get_data_file('m4a_cache.json')
-    last_cache_key = None
-    try:
-        if os.path.exists(cache_file):
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                cache_data = json.load(f)
-                last_cache_key = cache_data.get('cache_key')
-            log_func(f"    Cache file exists, last_key={last_cache_key[:8] if last_cache_key else None}, current_key={current_cache_key[:8]}")
-        else:
-            log_func(f"    No cache file found at: {cache_file}")
-    except Exception as e:
-        log_func(f"    Cache read error: {e}")
-        pass
+    if source_files is None:
+        try:
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                    last_cache_key = cache_data.get('cache_key')
+                log_func(f"    Cache file exists, last_key={last_cache_key[:8] if last_cache_key else None}, current_key={current_cache_key[:8]}")
+            else:
+                log_func(f"    No cache file found at: {cache_file}")
+        except Exception as e:
+            log_func(f"    Cache read error: {e}")
+            pass
 
     # If cache matches and all MP3s exist, skip conversion
-    if last_cache_key == current_cache_key and m4a_files:
+    if source_files is None and last_cache_key == current_cache_key and m4a_files:
         all_mp3_exist = True
         for src in m4a_files:
             base = os.path.splitext(os.path.basename(src))[0]
@@ -449,11 +467,12 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
             return 0, 0, 0
 
     # Save current cache key
-    try:
-        with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump({'cache_key': current_cache_key}, f)
-    except:
-        pass
+    if source_files is None:
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump({'cache_key': current_cache_key}, f)
+        except:
+            pass
 
     # Build task list first for progress reporting
     tasks = []

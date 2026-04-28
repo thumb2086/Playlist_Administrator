@@ -107,7 +107,15 @@ def cmd_scrape(args):
 
 def _default_debug_file(config):
     playlists_path = config.get("playlists_path") or "."
-    return os.path.join(playlists_path, "_spotify_debug.txt")
+    debug_file = os.path.join(playlists_path, "_spotify_debug.txt")
+    if os.path.exists(debug_file):
+        return debug_file
+
+    daily_mix = os.path.join(playlists_path, "Daily Mix 1.m3u8")
+    if os.path.exists(daily_mix):
+        return daily_mix
+
+    return debug_file
 
 
 def _read_spotify_debug(debug_file):
@@ -116,6 +124,13 @@ def _read_spotify_debug(debug_file):
         for raw_line in f:
             line = raw_line.strip()
             if not line:
+                continue
+            if line.startswith("#EXTINF:"):
+                _, track_name = line.split(",", 1) if "," in line else ("", "")
+                if track_name:
+                    tracks.append(track_name.strip())
+                continue
+            if line.startswith("#") or line.lower().endswith((".mp3", ".m4a", ".flac", ".wav", ".webm")):
                 continue
             if ". " in line:
                 prefix, rest = line.split(". ", 1)
@@ -200,6 +215,88 @@ def cmd_match(args):
     return 1 if missing and args.fail_on_missing else 0
 
 
+def cmd_convert_playlist(args):
+    from core.library import (
+        _resolve_spotube_paths,
+        build_library_index,
+        build_metadata_index,
+        convert_spotube_m4a_to_mp3,
+        find_song_exact_format,
+        find_song_in_library,
+        find_song_simple_match,
+    )
+
+    config = _load_config(args.config)
+    debug_file = args.file or _default_debug_file(config)
+    tracks = _read_spotify_debug(debug_file)
+    m4a_path, mp3_path = _resolve_spotube_paths(config)
+
+    mp3_files = _audio_files(mp3_path) if os.path.isdir(mp3_path) else []
+    mp3_index = build_library_index(mp3_files)
+    mp3_metadata = build_metadata_index(mp3_files)
+
+    m4a_files = [
+        path for path in _audio_files(m4a_path)
+        if path.lower().endswith(".m4a")
+    ] if os.path.isdir(m4a_path) else []
+    m4a_index = build_library_index(m4a_files)
+    m4a_metadata = build_metadata_index(m4a_files)
+
+    already_done = []
+    missing_sources = []
+    source_files = []
+    seen_sources = set()
+
+    for track in tracks:
+        mp3_match = find_song_simple_match(track, "mp3", mp3_index)
+        if not mp3_match:
+            mp3_match = find_song_exact_format(track, "mp3", mp3_index)
+        if not mp3_match and mp3_metadata:
+            mp3_match = find_song_in_library(track, mp3_index, metadata_index=mp3_metadata)
+
+        if mp3_match:
+            already_done.append((track, mp3_match))
+            continue
+
+        source = find_song_in_library(track, m4a_index, metadata_index=m4a_metadata)
+        if source and source.lower().endswith(".m4a"):
+            norm_source = os.path.normpath(source)
+            if norm_source not in seen_sources:
+                source_files.append(norm_source)
+                seen_sources.add(norm_source)
+        else:
+            missing_sources.append(track)
+
+    print(f"Tracks: {len(tracks)}")
+    print(f"Existing MP3 matches: {len(already_done)}")
+    print(f"M4A sources to convert: {len(source_files)}")
+    print(f"Missing M4A sources: {len(missing_sources)}")
+
+    if missing_sources:
+        print("\nMissing M4A sources:")
+        for track in missing_sources:
+            print(f"- {track}")
+
+    if args.dry_run:
+        if source_files:
+            print("\nWould convert:")
+            for path in source_files:
+                print(f"- {path}")
+        return 0
+
+    if not source_files:
+        print("No playlist M4A files need conversion.")
+        return 0
+
+    converted, skipped, total = convert_spotube_m4a_to_mp3(
+        config,
+        _print_log,
+        source_files=source_files,
+    )
+    print(f"Conversion summary: {converted} converted, {skipped} skipped, {total} total")
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description="Playlist Administrator command line tools")
     parser.add_argument(
@@ -225,6 +322,14 @@ def build_parser():
     match_parser.add_argument("--verbose", "-v", action="store_true", help="Print every matched path.")
     match_parser.add_argument("--fail-on-missing", action="store_true", help="Exit with code 1 when tracks are missing.")
     match_parser.set_defaults(func=cmd_match)
+
+    convert_parser = subparsers.add_parser(
+        "convert-playlist",
+        help="Convert only M4A files needed by a Spotify debug track list.",
+    )
+    convert_parser.add_argument("--file", help="Path to a Spotify debug track list.")
+    convert_parser.add_argument("--dry-run", action="store_true", help="Print planned conversions without writing MP3 files.")
+    convert_parser.set_defaults(func=cmd_convert_playlist)
 
     return parser
 
