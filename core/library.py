@@ -13,27 +13,27 @@ from utils.config import ensure_dirs, get_data_file
 from core.spotify import get_spotify_name
 
 DEFAULT_ARTIST_ALIASES = {
-    'claire kuo': '??',
-    'jolin': '???',
-    'jolin tsai': '???',
-    'crowd lu': '???',
-    'pets tseng': '???',
-    'evangeline wong': '???',
-    'sabrina': '???',
-    'sabrina hu': '???',
-    'eric chou': '???',
-    'shi shi': '???',
-    'boon hui lu': '???',
-    'vicky chen': '???',
-    'feng ze': '???',
-    'ivy': '??',
-    'genblue': '????',
-    'lbi': '??',
-    'erin': '??',
-    'eleanor': '???',
-    'ann bai': '??',
-    'diana wang': '???',
-    'ethan': '???',
+    'claire kuo': '郭靜',
+    'jolin': '蔡依林',
+    'jolin tsai': '蔡依林',
+    'crowd lu': '盧廣仲',
+    'pets tseng': '曾沛慈',
+    'evangeline wong': '王艷薇',
+    'sabrina': '胡恂舞',
+    'sabrina hu': '胡恂舞',
+    'eric chou': '周興哲',
+    'shi shi': '孫盛希',
+    'boon hui lu': '文慧如',
+    'vicky chen': '陳忻玥',
+    'feng ze': '邱鋒澤',
+    'ivy': '艾薇',
+    'genblue': '幻藍小熊',
+    'lbi': '利比',
+    'erin': '連穎',
+    'eleanor': '李芷婷',
+    'ann bai': '白安',
+    'diana wang': '王詩安',
+    'ethan': '陳威全',
 }
 
 
@@ -271,12 +271,31 @@ def _has_m4a_files(root_path):
                 return True
     return False
 
+def _get_m4a_cache_key(spotube_path, mp3_path):
+    """Generate a cache key based on M4A file paths and modification times."""
+    m4a_pattern = os.path.join(spotube_path, "**", "*.m4a")
+    m4a_files = glob.glob(m4a_pattern, recursive=True)
+    # Filter out files in mp3 subfolder
+    m4a_files = [f for f in m4a_files if not os.path.normpath(f).lower().startswith(os.path.normpath(mp3_path).lower())]
+    # Sort for consistent hashing
+    m4a_files.sort()
+    # Build a string of file paths with their modification times
+    cache_str = ""
+    for f in m4a_files:
+        try:
+            mtime = os.path.getmtime(f)
+            cache_str += f"{f}:{mtime}\n"
+        except:
+            cache_str += f"{f}:0\n"
+    return hashlib.md5(cache_str.encode('utf-8')).hexdigest(), m4a_files
+
 def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None, status_cb=None):
     """Convert Spotube m4a files into mp3 subfolder inside Spotube."""
     from core.audio_converter import convert_audio_file, check_ffmpeg_available
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import threading
     from utils.i18n import _
+    from utils.config import get_data_file
 
     spotube_path, mp3_path = _resolve_spotube_paths(config)
     if not spotube_path or not os.path.exists(spotube_path):
@@ -295,18 +314,54 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
 
     os.makedirs(mp3_path, exist_ok=True)
 
-    # Build task list first for progress reporting
-    tasks = []
-    for root, dirnames, files in os.walk(spotube_path):
-        if os.path.normpath(root).lower().startswith(os.path.normpath(mp3_path).lower()):
-            continue
-        for fname in files:
-            if not fname.lower().endswith('.m4a'):
-                continue
-            src = os.path.join(root, fname)
+    # Check if M4A files have changed since last run
+    current_cache_key, m4a_files = _get_m4a_cache_key(spotube_path, mp3_path)
+    cache_file = get_data_file('m4a_cache.json')
+    last_cache_key = None
+    try:
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+                last_cache_key = cache_data.get('cache_key')
+            log_func(f"    Cache file exists, last_key={last_cache_key[:8] if last_cache_key else None}, current_key={current_cache_key[:8]}")
+        else:
+            log_func(f"    No cache file found at: {cache_file}")
+    except Exception as e:
+        log_func(f"    Cache read error: {e}")
+        pass
+
+    # If cache matches and all MP3s exist, skip conversion
+    if last_cache_key == current_cache_key and m4a_files:
+        all_mp3_exist = True
+        for src in m4a_files:
+            fname = os.path.basename(src)
             base = os.path.splitext(fname)[0]
             dest = os.path.join(mp3_path, f"{base}.mp3")
-            tasks.append((src, dest, base))
+            if not os.path.exists(dest):
+                all_mp3_exist = False
+                break
+        if all_mp3_exist:
+            log_func(" -> Converting Spotube M4A to MP3 (skipped - no changes)")
+            return 0, 0, 0
+
+    # Save current cache key
+    try:
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump({'cache_key': current_cache_key}, f)
+    except:
+        pass
+
+    # Build task list first for progress reporting
+    tasks = []
+    
+    for src in m4a_files:
+        # Skip files in the mp3 output directory
+        if os.path.normpath(src).lower().startswith(os.path.normpath(mp3_path).lower()):
+            continue
+        fname = os.path.basename(src)
+        base = os.path.splitext(fname)[0]
+        dest = os.path.join(mp3_path, f"{base}.mp3")
+        tasks.append((src, dest, base))
 
     total_tasks = len(tasks)
     if total_tasks == 0:
@@ -351,31 +406,64 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
         return not (stop_event and stop_event.is_set())
 
     lock = threading.Lock()
+    # Semaphore for dynamic worker count control - allows changing workers during pause
+    worker_sem = threading.Semaphore(0)  # Start blocked, will release based on config
+
+    def _get_current_workers():
+        """Get current worker count from config - can be changed during pause"""
+        w = config.get('spotube_convert_workers', 4)
+        try:
+            w = int(w)
+        except Exception:
+            w = 4
+        if w < 1:
+            w = 1
+        return w
+
+    def _init_semaphore():
+        """Initialize semaphore with current worker count"""
+        current_workers = _get_current_workers()
+        # Clear any existing permits and set new count
+        while worker_sem._value > 0:
+            try:
+                worker_sem.acquire(blocking=False)
+            except:
+                break
+        for _ in range(current_workers):
+            worker_sem.release()
+        return current_workers
 
     def _convert_one(i, src, dest, name):
         if stop_event and stop_event.is_set():
             return "cancel"
-        if not _wait_if_paused():
-            return "cancel"
-        if status_cb:
-            status_cb(i, _('conv_status_working'), name)
-        ok = convert_audio_file(src, dest, 'mp3', log_func)
-        return "ok" if ok else "fail"
+        
+        # Acquire semaphore slot (respects current worker limit)
+        worker_sem.acquire()
+        try:
+            if stop_event and stop_event.is_set():
+                return "cancel"
+            if not _wait_if_paused():
+                return "cancel"
+            # Re-initialize semaphore after pause to pick up config changes
+            if pause_event and not pause_event.is_set():
+                _init_semaphore()
+            if status_cb:
+                status_cb(i, _('conv_status_working'), name)
+            ok = convert_audio_file(src, dest, 'mp3', log_func)
+            return "ok" if ok else "fail"
+        finally:
+            worker_sem.release()
 
-    workers = config.get('spotube_convert_workers', 4)
-    try:
-        workers = int(workers)
-    except Exception:
-        workers = 4
-    if workers < 1:
-        workers = 1
-
+    # Initialize semaphore with current config
+    initial_workers = _init_semaphore()
     if to_convert:
-        log_func(f" -> Conversion workers: {workers}")
+        log_func(f" -> Conversion workers: {initial_workers} (can be changed during pause)")
 
     futures = []
     future_meta = {}
-    with ThreadPoolExecutor(max_workers=workers) as ex:
+    # Use a larger thread pool but control concurrency via semaphore
+    # This allows dynamic worker adjustment
+    with ThreadPoolExecutor(max_workers=max(16, initial_workers * 2)) as ex:
         for i, src, dest, name in to_convert:
             if stop_event and stop_event.is_set():
                 break
@@ -424,6 +512,9 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
     return converted, skipped, total_tasks
 
 def _resolve_playlist_entry_path(entry, playlists_path):
+    from urllib.parse import unquote
+    # Decode URI-encoded paths (e.g., %E5%A4%A2%E6%83%B3 -> 夢想)
+    entry = unquote(entry)
     if os.path.isabs(entry):
         return os.path.normpath(entry)
     return os.path.normpath(os.path.join(playlists_path, entry))
@@ -571,6 +662,15 @@ def get_normalized_tokens(text):
         # If conversion fails, keep original text
         pass
 
+    # 2.4 Map common English artist names to Chinese for better matching.
+    # Built-in aliases can be extended by adding a data/artist_aliases.json file.
+    for eng_name, chn_name in get_artist_aliases().items():
+        try:
+            normalized_alias = convert(chn_name, 'zh-cn')
+        except Exception:
+            normalized_alias = chn_name
+        text = re.sub(r'\b' + re.escape(eng_name) + r'\b', normalized_alias, text, flags=re.IGNORECASE)
+
     # 2.5 Remove "E" prefix artifact (common in Spotify scrapes)
     # Improved: work at word boundaries, not just start of string
     text = re.sub(r'(?:^|(?<=[^a-z0-9]))e(?=[a-z\u4e00-\u9fff\u3040-\u30ff])', '', text)
@@ -638,7 +738,8 @@ def build_metadata_index(audio_files, log_func=None):
     """
     try:
         from mutagen.flac import FLAC
-        from mutagen.id3 import ID3, EasyID3
+        from mutagen.easyid3 import EasyID3
+        from mutagen.id3 import ID3
         from mutagen.mp4 import MP4
         from pathlib import Path
     except ImportError:
@@ -708,16 +809,29 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
     # If explicit artist provided, we use it.
     # Otherwise, try to extract from "Artist - Title" format in the query itself.
     target_artist = artist
-    
+    target_artist_options = [artist] if artist else []
+
     title_part = song_name
+    title_token_candidates = []
     if ' - ' in song_name:
          parts = song_name.split(' - ', 1)
          if len(parts) == 2:
+             left_part = parts[0].strip()
+             right_part = parts[1].strip()
              if not target_artist:
-                 target_artist = parts[0].strip()
-             title_part = parts[1].strip()
+                 # Spotify playlist rows are saved as "Title - Artist", while older
+                 # paths in the app may still use "Artist - Title". Try both.
+                 target_artist_options.extend([right_part, left_part])
+             title_part = left_part
+             candidate_tokens = tuple(get_normalized_tokens(left_part))
+             if candidate_tokens:
+                 title_token_candidates.append(candidate_tokens)
     
     title_tokens = tuple(get_normalized_tokens(title_part))
+    if title_tokens and title_tokens not in title_token_candidates:
+        title_token_candidates.insert(0, title_tokens)
+    if query_tokens and query_tokens not in title_token_candidates:
+        title_token_candidates.append(query_tokens)
     
     # Helper to check if a candidate file matches the artist
     def verify_artist(file_path, target_artist):
@@ -729,7 +843,7 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
         # 1. Check Metadata
         try:
             from mutagen.flac import FLAC
-            from mutagen.id3 import EasyID3
+            from mutagen.easyid3 import EasyID3
             from mutagen.mp4 import MP4
             
             meta_artist = None
@@ -798,13 +912,22 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
         collect_candidates(query_tokens)
         
         # 2. Title-only match (renamed files)
-        if not candidates and title_tokens:
-            collect_candidates(title_tokens)
+        if not candidates:
+            for candidate_tokens in title_token_candidates:
+                if candidate_tokens == query_tokens:
+                    continue
+                collect_candidates(candidate_tokens)
+                if candidates:
+                    break
         
         # 3. Flexible matching (simplified: check overlap between search tokens and file tokens)
         if not candidates:
-            fuzzy_source = title_tokens if title_tokens else query_tokens
-            if fuzzy_source:
+            fuzzy_sources = [tokens for tokens in title_token_candidates if tokens != query_tokens] or [query_tokens]
+            for fuzzy_source in fuzzy_sources:
+                if candidates:
+                    break
+                if not fuzzy_source:
+                    continue
                 title_set = set(fuzzy_source)
                 for index_tokens, paths in library_source.items():
                     if not index_tokens: continue
@@ -814,12 +937,23 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
                     overlap = len(title_set & index_set)
                     min_size = min(len(title_set), len(index_set))
                     
-                    # STRICTER MATCHING: Require at least 75% for small sets, 60% for large
-                    threshold = 0.75 if min_size <= 4 else 0.6
+                    # STRICTER MATCHING: Higher thresholds to reduce false positives
+                    # Small sets (1-3 tokens): require 100% match
+                    # Medium sets (4-5 tokens): require 90% match  
+                    # Large sets (6+ tokens): require 80% match
+                    if min_size <= 3:
+                        threshold = 1.0  # 100% for very small sets
+                    elif min_size <= 5:
+                        threshold = 0.9  # 90% for small-medium sets
+                    else:
+                        threshold = 0.8  # 80% for larger sets
+                    
                     if min_size > 0 and overlap / min_size >= threshold:
-                        # At least 75% of the smaller token set matches
-                        if isinstance(paths, list): candidates.extend(paths)
-                        else: candidates.append(paths)
+                        # Additional check: must have at least 2 matching tokens OR 100% match
+                        # This prevents single-word matches like "love" matching wrong songs
+                        if overlap >= 2 or (overlap == 1 and min_size == 1):
+                            if isinstance(paths, list): candidates.extend(paths)
+                            else: candidates.append(paths)
 
     elif isinstance(library_source, list):
         # Legacy List Mode
@@ -833,19 +967,31 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
             
             if file_tokens == query_tokens:
                 candidates.append(file_path)
-            elif title_tokens and file_tokens == title_tokens:
+            elif any(file_tokens == candidate_tokens for candidate_tokens in title_token_candidates if candidate_tokens != query_tokens):
                 candidates.append(file_path)
-            elif title_tokens:
+            elif title_token_candidates:
                 # Flexible matching with overlap
-                title_set = set(title_tokens)
-                file_set = set(file_tokens)
-                overlap = len(title_set & file_set)
-                min_size = min(len(title_set), len(file_set))
-                
-                # STRICTER MATCHING: Require at least 75% for small sets
-                threshold = 0.75 if min_size <= 4 else 0.6
-                if min_size > 0 and overlap / min_size >= threshold:
-                    candidates.append(file_path)
+                for candidate_tokens in title_token_candidates:
+                    if candidate_tokens == query_tokens:
+                        continue
+                    title_set = set(candidate_tokens)
+                    file_set = set(file_tokens)
+                    overlap = len(title_set & file_set)
+                    min_size = min(len(title_set), len(file_set))
+                    
+                    # STRICTER MATCHING: Higher thresholds to reduce false positives
+                    if min_size <= 3:
+                        threshold = 1.0  # 100% for very small sets
+                    elif min_size <= 5:
+                        threshold = 0.9  # 90% for small-medium sets
+                    else:
+                        threshold = 0.8  # 80% for larger sets
+                        
+                    if min_size > 0 and overlap / min_size >= threshold:
+                        # Additional check: must have at least 2 matching tokens OR 100% match
+                        if overlap >= 2 or (overlap == 1 and min_size == 1):
+                            candidates.append(file_path)
+                            break
 
     # 3. Metadata Index Lookup (Pass 2)
     current_best_candidate = None
@@ -857,17 +1003,25 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
              if isinstance(res_paths, list): candidates.extend(res_paths)
              else: candidates.append(res_paths)
         
-        # Check title vs metadata title
-        if title_tokens:
-            res_paths = metadata_index.get(title_tokens)
+        # Check title vs metadata title. Support both "Artist - Title" and
+        # "Title - Artist" because Spotube/Spotify sources are not consistent.
+        for candidate_tokens in title_token_candidates:
+            if candidate_tokens == query_tokens:
+                continue
+            res_paths = metadata_index.get(candidate_tokens)
             if res_paths: 
                 if isinstance(res_paths, list): candidates.extend(res_paths)
                 else: candidates.append(res_paths)
+                break
         
         # Fuzzy/Subset Check on Metadata Index
         if not candidates:
-            fuzzy_tokens = title_tokens if title_tokens else query_tokens
-            if fuzzy_tokens:
+            fuzzy_sources = [tokens for tokens in title_token_candidates if tokens != query_tokens] or [query_tokens]
+            for fuzzy_tokens in fuzzy_sources:
+                if candidates:
+                    break
+                if not fuzzy_tokens:
+                    continue
                 for meta_tokens, paths in metadata_index.items():
                     if not meta_tokens: continue
                     is_match = False
@@ -901,10 +1055,11 @@ def find_song_in_library(song_name, library_source, metadata_index=None, artist=
             seen.add(c)
     
     # If artist is provided, filter or rank candidates
-    if target_artist:
+    target_artist_options = [a for a in target_artist_options if a]
+    if target_artist_options:
         verified_candidates = []
         for c in unique_candidates:
-            if verify_artist(c, target_artist):
+            if any(verify_artist(c, candidate_artist) for candidate_artist in target_artist_options):
                 # Also verify duration if available
                 if verify_duration(c, target_duration):
                     verified_candidates.append(c)
@@ -934,7 +1089,8 @@ def _search_by_metadata(title_tokens, file_list):
     """Helper function to search files by metadata title - LEGACY SLOW FALLBACK"""
     try:
         from mutagen.flac import FLAC
-        from mutagen.id3 import ID3, EasyID3
+        from mutagen.easyid3 import EasyID3
+        from mutagen.id3 import ID3
         from mutagen.mp4 import MP4
         from pathlib import Path
         
@@ -1029,14 +1185,23 @@ def find_song_prefer_flac(song_name, library_source, target_duration=None):
             if file_tokens == query_tokens:
                 is_match = True
             else:
-                # Check overlap (Stricter: 75%)
+                # Check overlap with higher thresholds to reduce false positives
                 query_set = set(query_tokens)
                 file_set = set(file_tokens)
                 overlap = len(query_set & file_set)
-                min_size = min(len(query_set), len(file_set))
-                threshold = 0.75 if min_size <= 4 else 0.6
+                min_size = min(len(query_set), len(file_tokens))
+                
+                if min_size <= 3:
+                    threshold = 1.0  # 100% for very small sets
+                elif min_size <= 5:
+                    threshold = 0.9  # 90% for small-medium sets
+                else:
+                    threshold = 0.8  # 80% for larger sets
+                    
                 if min_size > 0 and overlap / min_size >= threshold:
-                    is_match = True
+                    # Additional check: at least 2 tokens match OR 100% match
+                    if overlap >= 2 or (overlap == 1 and min_size == 1):
+                        is_match = True
             
             if is_match:
                 found_files.append(file_path)
@@ -1048,14 +1213,24 @@ def find_song_prefer_flac(song_name, library_source, target_duration=None):
             if not index_tokens: continue
             index_set = set(index_tokens)
             overlap = len(query_set & index_set)
-            min_size = min(len(query_set), len(index_set))
-            threshold = 0.75 if min_size <= 4 else 0.6
+            min_size = min(len(query_set), len(index_tokens))
+            
+            if min_size <= 3:
+                threshold = 1.0  # 100% for very small sets
+            elif min_size <= 5:
+                threshold = 0.9  # 90% for small-medium sets
+            else:
+                threshold = 0.8  # 80% for larger sets
+                
             if min_size > 0 and overlap / min_size >= threshold:
-                if isinstance(paths, list): found_files.extend(paths)
-                else: found_files.append(paths)
+                # Additional check: at least 2 tokens match
+                if overlap >= 2:
+                    if isinstance(paths, list): found_files.extend(paths)
+                    else: found_files.append(paths)
     
     if not found_files:
         return None
+        
     
     # --- Filter by Duration if requested ---
     if target_duration:
@@ -1072,6 +1247,160 @@ def find_song_prefer_flac(song_name, library_source, target_duration=None):
     # Then return any other format
     return found_files[0]
 
+def find_song_simple_match(song_name, target_extension, library_source):
+    """
+    Simple filename matching for Spotube downloads.
+    Uses the same tokenization as build_library_index for proper index matching.
+    
+    Args:
+        song_name: Track name from Spotify (format: "Title - Artist")
+        target_extension: File extension to match (e.g., '.mp3')
+        library_source: Dictionary index of audio files (token_tuple -> paths)
+    
+    Returns:
+        Path to matching file, or None if not found
+    """
+    target_ext = target_extension.lower()
+    if not target_ext.startswith('.'):
+        target_ext = '.' + target_ext
+    
+    # Build query tokens using same method as index
+    query_tokens = tuple(get_normalized_tokens(song_name))
+    
+    # Extract title only for fallback matching
+    title_only = None
+    title_tokens = None
+    if ' - ' in song_name:
+        title_only = song_name.split(' - ', 1)[0].strip()
+        title_tokens = tuple(get_normalized_tokens(title_only))
+    
+    best_match = None
+    best_score = 0
+    
+    if isinstance(library_source, dict):
+        # Fast path: direct token lookup in index
+        if query_tokens and query_tokens in library_source:
+            paths = library_source[query_tokens]
+            if isinstance(paths, list):
+                for file_path in paths:
+                    if file_path.lower().endswith(target_ext):
+                        return file_path
+            elif paths.lower().endswith(target_ext):
+                return paths
+        
+        # Fallback: iterate and check filename
+        for index_tokens, paths in library_source.items():
+            # Get all paths that match the target extension
+            if isinstance(paths, list):
+                matching_paths = [p for p in paths if p.lower().endswith(target_ext)]
+                if not matching_paths:
+                    continue
+                file_path = matching_paths[0]
+            else:
+                if not paths.lower().endswith(target_ext):
+                    continue
+                file_path = paths
+            
+            # Get filename without extension
+            filename = os.path.basename(file_path)
+            name_no_ext = os.path.splitext(filename)[0]
+            file_tokens = tuple(get_normalized_tokens(name_no_ext))
+            
+            # Exact token match
+            if query_tokens == file_tokens:
+                return file_path
+            
+            # Title-only match (handles Chinese/English artist name differences)
+            if title_only:
+                # STRICT: Check if ALL title tokens are in file tokens with high threshold
+                if title_tokens:
+                    title_set = set(title_tokens)
+                    file_set = set(file_tokens)
+                    
+                    # All title tokens must be present in file tokens
+                    if title_set <= file_set:
+                        return file_path
+                    
+                    # OR: At least 80% of title tokens match AND longest token matches
+                    # This prevents "Fish" matching to "Can You Feel The Love Tonight"
+                    common = title_set & file_set
+                    if len(title_set) > 0:
+                        title_match_ratio = len(common) / len(title_set)
+                        # Must have at least 80% title coverage
+                        if title_match_ratio >= 0.8:
+                            # Additional check: longest title token must match
+                            longest_title = max(title_set, key=len) if title_set else None
+                            if longest_title and longest_title in file_set:
+                                return file_path
+            
+            # Partial token match (for fuzzy matching) - STRICT threshold
+            if query_tokens and file_tokens:
+                query_set = set(query_tokens)
+                file_set = set(file_tokens)
+                common = query_set & file_set
+                min_size = min(len(query_set), len(file_set))
+                
+                if min_size > 0:
+                    match_ratio = len(common) / min_size
+                    # Require at least 80% match for fuzzy matching
+                    if match_ratio >= 0.8:
+                        # Additional check: longest query token must match
+                        longest_query = max(query_set, key=len) if query_set else None
+                        if longest_query and longest_query in file_set:
+                            if len(common) > best_score:
+                                best_score = len(common)
+                                best_match = file_path
+    
+    elif isinstance(library_source, list):
+        # Legacy list mode - build tokens on the fly
+        for file_path in library_source:
+            if not file_path.lower().endswith(target_ext):
+                continue
+            
+            filename = os.path.basename(file_path)
+            name_no_ext = os.path.splitext(filename)[0]
+            file_tokens = tuple(get_normalized_tokens(name_no_ext))
+            
+            # Exact token match
+            if query_tokens == file_tokens:
+                return file_path
+            
+            # Title-only match (STRICT)
+            if title_only and title_tokens:
+                title_set = set(title_tokens)
+                file_set = set(file_tokens)
+                
+                # All title tokens must be present
+                if title_set <= file_set:
+                    return file_path
+                
+                # OR: 80% coverage with longest token verification
+                common = title_set & file_set
+                if len(title_set) > 0:
+                    match_ratio = len(common) / len(title_set)
+                    if match_ratio >= 0.8:
+                        longest_title = max(title_set, key=len) if title_set else None
+                        if longest_title and longest_title in file_set:
+                            return file_path
+            
+            # Partial token match (STRICT threshold)
+            if query_tokens and file_tokens:
+                query_set = set(query_tokens)
+                file_set = set(file_tokens)
+                common = query_set & file_set
+                min_size = min(len(query_set), len(file_set))
+                
+                if min_size > 0:
+                    match_ratio = len(common) / min_size
+                    if match_ratio >= 0.8:
+                        longest_query = max(query_set, key=len) if query_set else None
+                        if longest_query and longest_query in file_set:
+                            if len(common) > best_score:
+                                best_score = len(common)
+                                best_match = file_path
+    
+    return best_match
+
 def find_song_exact_format(song_name, target_extension, library_source):
     """ 
     Find song in library that strictly matches the target extension (e.g., '.mp3', '.flac')
@@ -1082,12 +1411,13 @@ def find_song_exact_format(song_name, target_extension, library_source):
     if not query_tokens:
         return None
     
-    # Extract title part for flexible matching
+    # Extract title part for flexible matching. Spotify playlist rows are saved
+    # as "Title - Artist", so do not use the artist side as a title fallback.
     title_part = song_name
     if ' - ' in song_name:
         parts = song_name.split(' - ', 1)
         if len(parts) == 2:
-            title_part = parts[1].strip()
+            title_part = parts[0].strip()
     title_tokens = tuple(get_normalized_tokens(title_part))
     
     found_files = []
@@ -1138,7 +1468,16 @@ def find_song_exact_format(song_name, target_extension, library_source):
                     fuzzy_set = set(fuzzy_tokens)
                     overlap_count = len(index_set & fuzzy_set)
                     
-                    if overlap_count / len(fuzzy_set) >= 0.75: # Stricter
+                    # Higher thresholds to reduce false positives
+                    min_size = len(fuzzy_set)
+                    if min_size <= 3:
+                        required_ratio = 1.0  # 100% for very small sets
+                    elif min_size <= 5:
+                        required_ratio = 0.9  # 90% for small-medium sets
+                    else:
+                        required_ratio = 0.8  # 80% for larger sets
+                    
+                    if overlap_count / len(fuzzy_set) >= required_ratio:
                         coverage = overlap_count / len(index_tokens)
                         score = overlap_count * (coverage + 0.5) # Bonus for higher coverage
                 
@@ -1148,7 +1487,16 @@ def find_song_exact_format(song_name, target_extension, library_source):
                     fuzzy_set = set(fuzzy_tokens)
                     overlap_count = len(index_set & fuzzy_set)
                     
-                    if overlap_count / len(index_set) >= 0.75: # Stricter
+                    # Higher thresholds to reduce false positives
+                    min_size = len(index_set)
+                    if min_size <= 3:
+                        required_ratio = 1.0  # 100% for very small sets
+                    elif min_size <= 5:
+                        required_ratio = 0.9  # 90% for small-medium sets
+                    else:
+                        required_ratio = 0.8  # 80% for larger sets
+                    
+                    if overlap_count / len(index_set) >= required_ratio:
                         coverage = overlap_count / len(fuzzy_set)
                         score = overlap_count * (coverage + 0.5)
                 
@@ -1274,7 +1622,7 @@ def move_unsorted_songs(config, log_func):
     for s in songs_in_playlists:
         t = tuple(get_normalized_tokens(s))
         if t: playlist_tokens.add(t)
-    log_func(f" -> 播放清單歌曲數(去重): {len(playlist_tokens)} / 總條目: {total_playlist_entries}")
+    log_func(f" -> 所有播放清單歌曲數(去重): {len(playlist_tokens)} / 總條目: {total_playlist_entries}")
         
     # 2. Identify orphan files in Music root and subdirectories
     search_pattern = os.path.join(library_path, "**", "*")

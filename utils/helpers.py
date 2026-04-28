@@ -75,3 +75,32 @@ def download_image(url, timeout=10):
     except Exception:
         pass
     return None
+
+
+def encode_uri_path(path):
+    """
+    URI encode a file path for M3U8 compatibility with Echo Nightly.
+    Encodes special characters like 「」, ..., spaces, Chinese characters,
+    while preserving forward slashes as path separators.
+    
+    Args:
+        path: File path string (should already use forward slashes)
+    
+    Returns:
+        URI encoded path string safe for M3U8
+    """
+    import urllib.parse
+    
+    # Split by forward slash to preserve path structure
+    parts = path.split('/')
+    
+    # Encode each path component separately
+    encoded_parts = []
+    for part in parts:
+        # Use urllib.parse.quote for URI encoding
+        # safe='' means encode everything including spaces
+        encoded = urllib.parse.quote(part, safe='')
+        encoded_parts.append(encoded)
+    
+    # Rejoin with forward slashes
+    return '/'.join(encoded_parts)

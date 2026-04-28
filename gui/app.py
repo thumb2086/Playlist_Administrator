@@ -25,6 +25,10 @@ class PlaylistApp:
 
         self.config = load_config()
         
+        # Load language from config (fix: ensure language is restored after restart/cancel)
+        lang = self.config.get('language', 'zh-TW')
+        I18N.set_language(lang)
+        
         # Log config path for debugging
         from utils.config import CONFIG_FILE
         self.log(f"--- 系統啟動 | 設定檔路徑: {CONFIG_FILE} ---", immediate=True)
@@ -1181,6 +1185,10 @@ class PlaylistApp:
         btn = tk.Button(win, text=_('start_export_btn'), command=lambda: self.start_selective_export(win), bg="#ffd0d0", font=("Microsoft JhengHei", 11, "bold"))
         btn.pack(fill='x', padx=20, pady=10)
         
+    def on_listbox_select(self, event):
+        # Removed automatic playlist loading - user must click the Load button explicitly
+        pass
+        
     def start_selective_export(self, win):
         from tkinter import messagebox
         selections = self.export_lb.curselection()
@@ -1205,73 +1213,11 @@ class PlaylistApp:
 
     def _export_thread_selective(self, selected_files, export_quality):
         try:
-            export_usb_logic(self.config, selected_files, self.log, export_quality=export_quality)
+            export_usb_logic(self.config, selected_files, export_quality, self.log, self.update_progress)
         except Exception as e:
-             self.log(_('export_error', e))
-
-    # --- Player Logic ---
-    def on_listbox_select(self, event):
-        widget = event.widget
-        selection = widget.curselection()
-        if not selection: return
-        
-        idx = selection[0]
-        url = None
-        if widget == self.pl_listbox:
-            url = self.pl_urls[idx]
-        
-        if not url: return
-        
-        name = self.config.get('url_names', {}).get(url)
-        if not name: return
-        
-        # Load playlist into player
-        threading.Thread(target=self.load_playlist_into_player, args=(name,), daemon=True).start()
-        
-        # Automatically switch to Player tab
-        try:
-            self.notebook.select(self.tab_player)
-        except: pass
-
-    def load_playlist_into_player(self, pl_name):
-        from core.library import parse_playlist
-        # Try .m3u8 then .m3u
-        pl_file = None
-        for ext in ['.m3u8', '.m3u']:
-            test_file = os.path.join(self.config['playlists_path'], f"{pl_name}{ext}")
-            if os.path.exists(test_file):
-                pl_file = test_file
-                break
-        
-        if not pl_file: return
-        
-        song_names = parse_playlist(pl_file)
-        if not song_names: return
-        
-        # Find actual file paths
-        from core.library import build_library_index, find_song_in_library
-        library_path = self.config['library_path']
-        search_pattern = os.path.join(library_path, "**", "*")
-        all_files = glob.glob(search_pattern, recursive=True)
-        audio_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
-        lib_index = build_library_index(audio_cache)
-        
-        valid_songs = []
-        for s in song_names:
-            path = find_song_in_library(s, lib_index)
-            if path and os.path.exists(path):
-                valid_songs.append(path)
-        
-        if valid_songs:
-            self.original_playlist_order = list(valid_songs)
-            self.current_playlist_songs = list(valid_songs)
-            
-            if self.shuffle_var.get():
-                import random
-                random.shuffle(self.current_playlist_songs)
-            
-            self.current_song_idx = 0
-            self.root.after(0, lambda: self.play_song(self.current_playlist_songs[0]))
+            self.log(f"Export Error: {e}")
+        finally:
+            self.root.after(0, lambda: self.export_btn.config(state="normal", text=_('start_export_btn'), bg="#ffd0d0"))
 
     def play_song(self, song_path):
         try:

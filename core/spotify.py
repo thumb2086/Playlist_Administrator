@@ -134,6 +134,8 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
         log_func(f" -> 讀取 Spotify track URL 快取失敗: {map_e}")
         track_url_map = {}
     track_map_updated = False
+    track_map_added = 0
+    track_map_changed = 0
 
     for sp_url in target_urls:
         if stats and stats.stop_event and stats.stop_event.is_set():
@@ -244,8 +246,15 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
                                 
                                 single_track_url = _extract_track_spotify_url(entity)
                                 if single_track_url:
-                                    track_url_map[_song_key(full_track_name)] = single_track_url
-                                    track_map_updated = True
+                                    track_key = _song_key(full_track_name)
+                                    previous_track_url = track_url_map.get(track_key)
+                                    if previous_track_url != single_track_url:
+                                        if previous_track_url is None:
+                                            track_map_added += 1
+                                        else:
+                                            track_map_changed += 1
+                                        track_url_map[track_key] = single_track_url
+                                        track_map_updated = True
                                 
                                 # --- NEW: Metadata caching for single track ---
                                 try:
@@ -358,6 +367,7 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
                                         (entity.get('tracks') and entity.get('tracks').get('data'))
                             
                             if track_list:
+                                log_func(f" -> JSON 解析: 找到 {len(track_list)} 首歌曲")
                                 import re
                                 def clean_artist_name(name):
                                     # Remove "E" prefix (Explicit tag artifact)
@@ -366,18 +376,38 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
 
                                 for item in track_list:
                                     track = item.get('track', item)
-                                    name = track.get('name')
+                                    
+                                    # Handle both old and new JSON formats
+                                    # Old format: name, artists[]
+                                    # New format: title, subtitle
+                                    name = track.get('name') or track.get('title')
                                     artists = track.get('artists', [])
                                     
-                                    if name and artists:
+                                    if artists and len(artists) > 0:
                                         artist_name = clean_artist_name(artists[0].get('name'))
-                                        full_track_name = f"{artist_name} - {name}"
+                                    else:
+                                        # Try new format: subtitle field contains artist
+                                        artist_name = clean_artist_name(track.get('subtitle'))
+                                    
+                                    if name:
+                                        if artist_name:
+                                            # Use "title - artist" format to match Spotify/Spotube naming convention
+                                            full_track_name = f"{name} - {artist_name}"
+                                        else:
+                                            full_track_name = name
                                         tracks.append(full_track_name)
                                         
                                         track_url = _extract_track_spotify_url(track)
                                         if track_url:
-                                            track_url_map[_song_key(full_track_name)] = track_url
-                                            track_map_updated = True
+                                            track_key = _song_key(full_track_name)
+                                            previous_track_url = track_url_map.get(track_key)
+                                            if previous_track_url != track_url:
+                                                if previous_track_url is None:
+                                                    track_map_added += 1
+                                                else:
+                                                    track_map_changed += 1
+                                                track_url_map[track_key] = track_url
+                                                track_map_updated = True
                                         
                                         # --- NEW: Extract and save rich metadata ---
                                         try:
@@ -427,7 +457,7 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
             if not tracks and "track/" not in sp_url:
                  rows = soup.find_all("li", class_=lambda x: x and "TracklistRow_trackListRow" in x)
                  if rows:
-                     log_func(_('html_fallback', len(rows)))
+                     log_func(f" -> HTML 備援解析: 找到 {len(rows)} 首歌曲")
                      import re
                      def clean_html_text(text):
                          # Aggressively clean "E" prefix which often appears in HTML scraping
@@ -508,6 +538,7 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
 
                     # Get library path from config to calculate relative path
                     library_path = config.get('library_path', 'Music')
+                    log_func(f" -> 掃描音樂庫: {library_path}")
                     
                     # Build index to resolve actual filenames (handles "E" prefix and diff extensions)
                     log_func(_('scanning_lib'))
@@ -515,31 +546,53 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
                     search_pattern = os.path.join(library_path, "**", "*")
                     all_files = glob.glob(search_pattern, recursive=True)
                     audio_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
-                    from core.library import build_library_index, build_metadata_index, find_song_in_library, find_song_exact_format
-                    from core.library import find_song_simple_match
+                    from core.library import build_library_index, build_metadata_index, find_song_in_library, find_song_exact_format, find_song_simple_match
                     lib_index = build_library_index(audio_cache)
                     mp3_files = [f for f in audio_cache if f.lower().endswith('.mp3')]
                     metadata_index = build_metadata_index(mp3_files)
+                    log_func(f" -> 音樂庫索引建立完成: {len(audio_cache)} 個音訊檔案, {len(lib_index)} 個索引項目")
+                    # Debug: show first few audio files found
+                    if audio_cache:
+                        log_func(f"    範例檔案: {os.path.basename(audio_cache[0])}")
+                        if len(audio_cache) > 1:
+                            log_func(f"    範例檔案: {os.path.basename(audio_cache[1])}")
 
                 # Only write M3U files for playlists/albums/artists
                 if "track/" not in sp_url:
-                    with open(m3u_path, 'w', encoding='utf-8-sig', newline='') as f:
-                        f.write("#EXTM3U\r\n")
+                    # Echo Nightly compatible format: UTF-8 (NO BOM), LF line endings, URI encoded paths
+                    with open(m3u_path, 'w', encoding='utf-8', newline='\n') as f:
+                        f.write("#EXTM3U\n")
                         missing_tracks = 0
                         kept_tracks = 0
+                        # Debug: write Spotify tracks to file for diagnosis
+                        if tracks:
+                            log_func(f"    Spotify 抓取共 {len(tracks)} 首")
+                            debug_file = os.path.join(config.get('playlists_path', '.'), '_spotify_debug.txt')
+                            with open(debug_file, 'w', encoding='utf-8') as dbg_f:
+                                for i, track in enumerate(tracks):
+                                    dbg_f.write(f"{i+1}. {track}\n")
+                        
                         for track in tracks:
                             clean_track = track.strip()
                             
                             # Find actual file in library
                             actual_path = None
                             if config.get('prefer_mp3_playlists', True):
-                                actual_path = find_song_exact_format(clean_track, 'mp3', lib_index)
+                                # For Spotube: use simple exact match first (filenames match Spotify exactly)
+                                if config.get('spotube_exact_match', True):
+                                    actual_path = find_song_simple_match(clean_track, 'mp3', lib_index)
+                                # Fallback to fuzzy matching if simple match fails
+                                if not actual_path:
+                                    actual_path = find_song_exact_format(clean_track, 'mp3', lib_index)
+                                # Final MP3 fallback: use title metadata when Spotube filename is abbreviated.
                                 if not actual_path and metadata_index:
                                     actual_path = find_song_in_library(clean_track, lib_index, metadata_index=metadata_index)
                             if not actual_path:
                                 actual_path = find_song_in_library(clean_track, lib_index)
                             if not actual_path:
                                 missing_tracks += 1
+                                # Debug: log all missing tracks
+                                log_func(f"    ⚠️ 找不到: {clean_track}")
                                 continue
                             kept_tracks += 1
                             
@@ -561,16 +614,43 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
                                 # Fallback to absolute path if relative path fails
                                 rel_path = abs_song_path
                             
+
                             # Standardization: Forward slashes (/) are best for M3U8 and avoid separator issues
-                            m3u_entry_path = rel_path.replace('\\', '/')
+                            from utils.helpers import encode_uri_path
+                            m3u_entry_path = encode_uri_path(rel_path.replace('\\', '/'))
                             
-                            # Write EXTINF and the relative path with CRLF
-                            f.write(f"#EXTINF:-1,{clean_track}\r\n")
-                            f.write(f"{m3u_entry_path}\r\n")
+                            # Write EXTINF and the relative path with LF (Echo Nightly compatible)
+                            f.write(f"#EXTINF:-1,{clean_track}\n")
+                            f.write(f"{m3u_entry_path}\n")
                     log_func(_('saved_tracks', kept_tracks, os.path.basename(m3u_path)))
                     if missing_tracks > 0:
-                        log_func(f" -> Removed {missing_tracks} missing tracks from {os.path.basename(m3u_path)}")
+                        log_func(f" -> 略過 {missing_tracks} 首本機找不到的歌曲，未寫入 {os.path.basename(m3u_path)}")
                     if stats: stats.playlists_scanned += 1
+                    
+                    # Snapshot diff: Track removed songs across sync sessions
+                    try:
+                        from core.snapshot_manager import (
+                            load_snapshot_cache, detect_removed_songs,
+                            update_snapshot, save_snapshot_cache,
+                            append_to_removed_songs_m3u8
+                        )
+                        
+                        cache_data = load_snapshot_cache()
+                        old_tracks = cache_data.get("playlists", {}).get(pl_name, {}).get("tracks", [])
+                        removed = detect_removed_songs(old_tracks, tracks)
+                        
+                        if removed:
+                            # Append removed songs to _Removed Songs.m3u8
+                            appended = append_to_removed_songs_m3u8(removed, config, lib_index)
+                            if appended > 0:
+                                log_func(f" -> 發現並記錄 {appended} 首下架歌曲到 '_Removed Songs.m3u8'")
+                        
+                        # Update snapshot with current tracks
+                        update_snapshot(cache_data, pl_name, tracks)
+                        save_snapshot_cache(cache_data)
+                    except Exception as snapshot_e:
+                        # Non-critical: log but don't fail the sync
+                        log_func(f" -> 快照更新提示: {snapshot_e}")
                 else:
                     # For single tracks, just log that they were processed
                     log_func(f" -> 單曲已處理: {tracks[0]}")
@@ -585,6 +665,9 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
         try:
             with open(track_map_path, 'w', encoding='utf-8') as tf:
                 json.dump(track_url_map, tf, ensure_ascii=False, indent=2)
-            log_func(f" -> Spotify track URL 快取已更新: {len(track_url_map)} 首")
+            log_func(
+                " -> Spotify track URL 快取已更新: "
+                f"本次新增 {track_map_added} 首、更新 {track_map_changed} 首，快取總計 {len(track_url_map)} 首"
+            )
         except Exception as map_write_e:
             log_func(f" -> Spotify track URL 快取寫入失敗: {map_write_e}")

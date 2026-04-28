@@ -101,6 +101,7 @@ def load_config():
         'spotube_mp3_subfolder': 'mp3',
         'prefer_mp3_playlists': True,
         'spotube_convert_workers': 4,
+        'spotube_exact_match': True,  # Use simple filename matching for Spotube downloads
     }
     for key, value in defaults.items():
         config.setdefault(key, value)
