@@ -215,9 +215,16 @@ def _enrich_metadata_from_spotify_cache(file_path, log_func=None):
             log_func(f"    ⚠️ Spotify enrichment failed: {str(e)}")
         return False
 
-def convert_audio_file(input_path, output_path, target_format, log_func=None):
+def convert_audio_file(input_path, output_path, target_format, log_func=None, ffmpeg_path=None):
     """
     Convert audio file to target format using ffmpeg
+    
+    Args:
+        input_path: Path to input audio file
+        output_path: Path for output audio file
+        target_format: Target format ('mp3' or 'flac')
+        log_func: Optional logging function
+        ffmpeg_path: Path to ffmpeg executable (optional, defaults to 'ffmpeg')
     
     Args:
         input_path: Path to input audio file
@@ -248,10 +255,13 @@ def convert_audio_file(input_path, output_path, target_format, log_func=None):
             return True
         
         # Prepare ffmpeg command
+        # Use provided ffmpeg_path or default to 'ffmpeg'
+        ffmpeg_cmd = ffmpeg_path if ffmpeg_path else 'ffmpeg'
+        
         if target_format == 'mp3':
             # High quality MP3 conversion with metadata preservation
             cmd = [
-                'ffmpeg', '-y',  # Overwrite output files
+                ffmpeg_cmd, '-y',  # Overwrite output files
                 '-i', input_path,
                 '-map_metadata', '0',  # Copy metadata from input
                 '-codec:a', 'libmp3lame',
@@ -262,7 +272,7 @@ def convert_audio_file(input_path, output_path, target_format, log_func=None):
         elif target_format == 'flac':
             # Lossless FLAC conversion with metadata preservation
             cmd = [
-                'ffmpeg', '-y',
+                ffmpeg_cmd, '-y',
                 '-i', input_path,
                 '-map_metadata', '0',  # Copy metadata from input
                 '-codec:a', 'flac',

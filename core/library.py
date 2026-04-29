@@ -402,6 +402,7 @@ def _converted_mp3_matches_source(src, dest):
 def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None, status_cb=None, source_files=None):
     """Convert Spotube m4a files into mp3 subfolder inside Spotube."""
     from core.audio_converter import convert_audio_file, check_ffmpeg_available
+    from core.ffmpeg_installer import get_ffmpeg_path
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import threading
     from utils.i18n import _
@@ -450,7 +451,7 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
         for src in m4a_files:
             base = os.path.splitext(os.path.basename(src))[0]
             legacy_dest = os.path.join(mp3_path, f"{base}.mp3")
-            dest, _ = _metadata_based_mp3_path(src, mp3_path)
+            dest, dummy_name = _metadata_based_mp3_path(src, mp3_path)
             _move_matching_legacy_mp3(src, legacy_dest, dest, log_func)
             if not os.path.exists(dest) or not _converted_mp3_matches_source(src, dest):
                 all_mp3_exist = False
@@ -546,7 +547,7 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
                 worker_sem.acquire(blocking=False)
             except:
                 break
-        for _ in range(current_workers):
+        for dummy in range(current_workers):
             worker_sem.release()
         return current_workers
 
@@ -566,7 +567,8 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
                 _init_semaphore()
             if status_cb:
                 status_cb(i, _('conv_status_working'), name)
-            ok = convert_audio_file(src, dest, 'mp3', log_func)
+            ffmpeg_path = get_ffmpeg_path(config)
+            ok = convert_audio_file(src, dest, 'mp3', log_func, ffmpeg_path)
             return "ok" if ok else "fail"
         finally:
             worker_sem.release()
