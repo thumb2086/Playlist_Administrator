@@ -282,15 +282,34 @@ def convert_audio_file(input_path, output_path, target_format, log_func=None):
         if os.name == 'nt':
             creationflags = subprocess.CREATE_NO_WINDOW
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            creationflags=creationflags,
-            timeout=300  # 5 minute timeout per file
-        )
+        # Fix encoding issues on Windows with Chinese filenames
+        if os.name == 'nt':
+            # On Windows, don't use text mode to avoid encoding issues
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                creationflags=creationflags,
+                timeout=300  # 5 minute timeout per file
+            )
+            # Decode output manually with error handling
+            try:
+                stdout = result.stdout.decode('utf-8', errors='replace')
+                stderr = result.stderr.decode('utf-8', errors='replace')
+            except:
+                stdout = str(result.stdout)
+                stderr = str(result.stderr)
+        else:
+            # On Unix systems, use text mode
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=300  # 5 minute timeout per file
+            )
+            stdout = result.stdout
+            stderr = result.stderr
         
         if result.returncode == 0:
             if log_func:
@@ -311,7 +330,7 @@ def convert_audio_file(input_path, output_path, target_format, log_func=None):
         else:
             if log_func:
                 log_func(f"  ❌ Conversion failed: {os.path.basename(input_path)}")
-                log_func(f"     Error: {result.stderr.strip()}")
+                log_func(f"     Error: {stderr.strip()}")
             return False
             
     except subprocess.TimeoutExpired:

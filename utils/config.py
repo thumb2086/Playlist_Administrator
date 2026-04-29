@@ -136,6 +136,9 @@ def derive_paths(config):
             return True
         if {'m4a', 'mp3'} & lower_entries and 'playlists' in lower_entries:
             return True
+        # If there's a playlists folder, consider it a music root
+        if 'playlists' in lower_entries:
+            return True
 
         for name in entries:
             if name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')):

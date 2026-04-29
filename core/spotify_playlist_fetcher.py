@@ -108,7 +108,7 @@ class SpotifyWebAPI:
     AUTH_URL = "https://accounts.spotify.com/authorize"
     TOKEN_URL = "https://accounts.spotify.com/api/token"
     API_BASE = "https://api.spotify.com/v1"
-    REDIRECT_URI = "http://localhost:8888/callback"
+    REDIRECT_URI = "http://127.0.0.1:8888/callback"
     
     def __init__(self, client_id: str | None = None, client_secret: str | None = None, 
                  access_token: str | None = None, refresh_token: str | None = None):
@@ -201,7 +201,7 @@ class SpotifyWebAPI:
                 pass  # 抑制伺服器日誌輸出
         
         # 啟動伺服器
-        server = HTTPServer(("localhost", 8888), CallbackHandler)
+        server = HTTPServer(("127.0.0.1", 8888), CallbackHandler)
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
         server_thread.start()
         
