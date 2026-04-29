@@ -174,6 +174,17 @@ class PlaylistApp:
         self.url_entry = tk.Entry(self.url_frame, font=("Microsoft JhengHei", 10))
         self.url_entry.pack(side="top", fill="x", padx=10, pady=5)
         
+        # Hint about dynamic playlists
+        hint_label = tk.Label(
+            self.url_frame,
+            text="提示：用 Web Playback SDK 可以取得較新的動態清單（如 Daily Mix），原本的方式取得是相對舊的清單",
+            font=("Microsoft JhengHei", 9),
+            fg="#666666",
+            wraplength=500,
+            justify="left"
+        )
+        hint_label.pack(side="top", fill="x", padx=10, pady=(0, 5))
+        
         btn_frame = tk.Frame(self.url_frame)
         btn_frame.pack(fill="x", padx=5, pady=5)
         
@@ -197,6 +208,10 @@ class PlaylistApp:
         # pl_scroll.pack(side="right", fill="y")
         self.pl_listbox.pack(side="left", fill="both", expand=True)
         # self.pl_listbox.config(yscrollcommand=pl_scroll.set)
+        
+        # Button to view songs in selected playlist
+        self.view_songs_btn = tk.Button(pl_side, text="查看歌曲", command=self.view_playlist_songs, font=("Microsoft JhengHei", 9), bg="#e3f2fd")
+        self.view_songs_btn.pack(side="bottom", fill="x", pady=(5, 0))
 
         # Middle: Albums
         al_side = tk.Frame(list_container)
@@ -434,7 +449,8 @@ class PlaylistApp:
         
         if is_error or is_important:
             self.log_queue.append(msg_str)
-            if self.log_update_job is None:
+            # Only schedule update if log_text is initialized
+            if self.log_update_job is None and hasattr(self, 'log_text') and self.log_text is not None:
                 # For important progress messages, use shorter delay
                 delay = 50 if immediate and ("left" in msg_lower or "progress" in msg_lower) else 200
                 self.log_update_job = self.root.after(delay, self._process_log_queue)
@@ -551,6 +567,10 @@ class PlaylistApp:
     def _process_log_queue(self):
         self.log_update_job = None
         if not self.log_queue:
+            return
+        
+        # Safety check: ensure log_text is initialized
+        if not hasattr(self, 'log_text') or self.log_text is None:
             return
 
         self.log_text.config(state='normal')
@@ -744,9 +764,131 @@ class PlaylistApp:
         self.config['last_updated'] = {}
         from utils.config import save_config
         save_config(self.config)
-        self.refresh_url_list()
-        self.update_stats_ui()
-        self.log(_('reset_done'))
+
+    def view_playlist_songs(self):
+        """Open a window showing all songs in the selected playlist"""
+        selection = self.pl_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("提示", "請先選擇一個播放清單")
+            return
+        
+        index = selection[0]
+        if index >= len(self.pl_urls):
+            messagebox.showwarning("提示", "無效的選擇")
+            return
+        
+        url = self.pl_urls[index]
+        url_names = self.config.get('url_names', {})
+        
+        # Get playlist name
+        if url.startswith("local:"):
+            playlist_name = url[6:]
+        else:
+            playlist_name = url_names.get(url, url)
+        
+        # Find playlist file
+        playlists_path = self.config.get('playlists_path', '')
+        playlist_file = None
+        for ext in ['.m3u8', '.m3u', '.txt']:
+            candidate = os.path.join(playlists_path, f"{playlist_name}{ext}")
+            if os.path.exists(candidate):
+                playlist_file = candidate
+                break
+        
+        # Create window
+        win = tk.Toplevel(self.root)
+        win.title(f"歌曲列表 - {playlist_name}")
+        win.geometry("500x650")
+        win.transient(self.root)
+        
+        # Title label
+        tk.Label(win, text=f"📀 {playlist_name}", font=("Microsoft JhengHei", 14, "bold")).pack(pady=10)
+        
+        # Fetch method info
+        fetch_method = self.config.get('spotify_fetch_method', 'embed')
+        has_client_id = bool(self.config.get('spotify_client_id'))
+        
+        method_text = {
+            'embed': '📄 Embed 頁面抓取（無需登入）',
+            'api': '� OAuth 使用者授權（登入 Spotify）',
+            'auto': '⚡ 自動選擇'
+        }.get(fetch_method, f'📄 {fetch_method}')
+        
+        if fetch_method == 'auto':
+            actual_method = 'api' if has_client_id else 'embed'
+            method_detail = 'OAuth 登入' if has_client_id else 'Embed 頁面'
+            method_text += f" → 使用 {method_detail}"
+        
+        tk.Label(win, text=f"取得方式: {method_text}", font=("Microsoft JhengHei", 9), fg="#666666").pack()
+        
+        # Last updated info
+        last_updated = self.config.get('last_updated', {})
+        if url in last_updated:
+            tk.Label(win, text=f"上次同步: {last_updated[url]}", font=("Microsoft JhengHei", 9), fg="#666666").pack(pady=(0, 5))
+        
+        # Song count label
+        self.song_count_lbl = tk.Label(win, text="載入中...", font=("Microsoft JhengHei", 10))
+        self.song_count_lbl.pack()
+        
+        # Listbox with scrollbar
+        frame = tk.Frame(win)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        scrollbar = tk.Scrollbar(frame)
+        scrollbar.pack(side="right", fill="y")
+        
+        song_listbox = tk.Listbox(frame, font=("Microsoft JhengHei", 10), yscrollcommand=scrollbar.set)
+        song_listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=song_listbox.yview)
+        
+        songs = []
+        if playlist_file and os.path.exists(playlist_file):
+            try:
+                with open(playlist_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        # Skip empty lines and comments
+                        if not line or line.startswith('#'):
+                            # Parse #EXTINF for song name
+                            if line.startswith('#EXTINF:'):
+                                if ',' in line:
+                                    song_name = line.split(',', 1)[1]
+                                    songs.append(song_name)
+                            continue
+                        # Skip file paths
+                        if not line.endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')):
+                            if line and not line.startswith('http'):
+                                songs.append(line)
+            except Exception as e:
+                self.log(f"讀取播放清單失敗: {e}")
+        
+        # If no songs parsed from file, try debug file or show message
+        if not songs:
+            debug_file = os.path.join(playlists_path, '_spotify_debug.txt')
+            if os.path.exists(debug_file):
+                try:
+                    with open(debug_file, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                # Remove numbering like "1. "
+                                if '. ' in line[:5]:
+                                    parts = line.split('. ', 1)
+                                    if len(parts) == 2 and parts[0].isdigit():
+                                        line = parts[1]
+                                songs.append(line)
+                except Exception as e:
+                    self.log(f"讀取 debug 檔案失敗: {e}")
+        
+        # Update listbox
+        for song in songs:
+            song_listbox.insert(tk.END, song)
+        
+        # Update count label
+        self.song_count_lbl.config(text=f"共 {len(songs)} 首歌曲")
+        
+        # Close button
+        tk.Button(win, text="關閉", command=win.destroy, width=10).pack(pady=10)
 
     def update_stats_ui(self, audio_cache=None):
         def _bg_update():

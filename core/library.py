@@ -2667,7 +2667,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
         status_cb = stats.app.update_song_status
 
-    convert_spotube_m4a_to_mp3(
+    converted, skipped, total = convert_spotube_m4a_to_mp3(
         config,
         log_func,
         pause_event=getattr(stats, 'pause_event', None),
@@ -2675,6 +2675,30 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         progress_cb=_conv_progress,
         status_cb=status_cb
     )
+    
+    # Track converted songs in stats for reporting
+    if converted > 0:
+        log_func(f" -> M4A 轉 MP3: {converted} 首轉換完成")
+        # Add converted songs to stats (they are in the mp3 folder now)
+        m4a_path, mp3_path = _resolve_spotube_paths(config)
+        if mp3_path and os.path.exists(mp3_path):
+            import glob
+            mp3_files = glob.glob(os.path.join(mp3_path, "*.mp3"))
+            # Add recently modified files (converted in this run)
+            for mp3_file in mp3_files:
+                try:
+                    mtime = os.path.getmtime(mp3_file)
+                    # If modified in last 5 minutes, consider it newly converted
+                    if time.time() - mtime < 300:
+                        song_name = os.path.splitext(os.path.basename(mp3_file))[0]
+                        if song_name not in stats.songs_downloaded:
+                            stats.songs_downloaded.append(song_name)
+                            # Also track in playlist_updates for Spotube
+                            if 'Spotube 轉換' not in stats.playlist_updates:
+                                stats.playlist_updates['Spotube 轉換'] = []
+                            stats.playlist_updates['Spotube 轉換'].append(song_name)
+                except:
+                    pass
 
     if progress_func:
         progress_func(40, 100, None)

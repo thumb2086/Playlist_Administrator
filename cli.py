@@ -312,87 +312,78 @@ def _print_track_list(title, tracks):
 
 def cmd_fetch_playlist(args):
     from core.spotify_playlist_fetcher import (
-        comparable_track_name,
         compare_track_lists,
-        fetch_browser_open_playlist,
         fetch_legacy_embed_playlist,
-        fetch_redesigned_playlist,
+        fetch_via_web_api,
     )
 
     import requests
 
     session = requests.Session()
-    browser = fetch_browser_open_playlist(
-        args.url,
-        args.browser_timeout,
-        headless=not args.browser_visible,
-    ) if args.browser else None
-    redesigned = fetch_redesigned_playlist(args.url, session)
-    legacy = fetch_legacy_embed_playlist(args.url, session)
-    primary = browser if browser and browser.tracks else redesigned
-    diff = compare_track_lists(primary.tracks, legacy.tracks)
-
-    print(f"URL: {args.url}")
-    if browser:
-        print(f"Browser source: {browser.source}")
-        print(f"Browser status: {browser.status_code}")
-        if browser.playlist_name:
-            print(f"Browser playlist: {browser.playlist_name}")
-        if browser.error:
-            print(f"Browser error: {browser.error}")
-        print(f"Browser tracks: {len(browser.tracks)}")
-
-    print(f"Redesigned source: {redesigned.source}")
-    print(f"Redesigned status: {redesigned.status_code}")
-    if redesigned.playlist_name:
-        print(f"Redesigned playlist: {redesigned.playlist_name}")
-    if redesigned.error:
-        print(f"Redesigned error: {redesigned.error}")
-    print(f"Redesigned tracks: {len(redesigned.tracks)}")
-
-    print(f"Legacy source: {legacy.source}")
-    print(f"Legacy status: {legacy.status_code}")
-    if legacy.playlist_name:
-        print(f"Legacy playlist: {legacy.playlist_name}")
-    if legacy.error:
-        print(f"Legacy error: {legacy.error}")
-    print(f"Legacy tracks: {len(legacy.tracks)}")
-
-    primary_label = "browser" if browser and browser.tracks else "redesigned"
-    print(f"Only {primary_label}: {len(diff['only_new'])}")
-    for track in diff["only_new"]:
-        print(f"+ {track}")
-
-    print(f"Only legacy: {len(diff['only_legacy'])}")
-    for track in diff["only_legacy"]:
-        print(f"- {track}")
-
-    if diff["same_order_differences"]:
-        print(f"Order/content differences: {len(diff['same_order_differences'])}")
-        for line in diff["same_order_differences"][: args.max_order_diff]:
-            print(line)
-
-    for probe in args.probe or []:
-        probe_key = comparable_track_name(probe)
-        in_primary = probe_key in {comparable_track_name(track) for track in primary.tracks}
-        in_legacy = probe_key in {comparable_track_name(track) for track in legacy.tracks}
-        print(
-            "Probe: "
-            f"{probe} | {primary_label}={'yes' if in_primary else 'no'} "
-            f"| legacy={'yes' if in_legacy else 'no'}"
+    
+    # 決定使用哪種方法
+    method = args.method
+    if method == "auto":
+        # 檢查是否有 API 金鑰
+        import os
+        has_api_keys = bool(
+            os.environ.get("SPOTIFY_CLIENT_ID") and 
+            os.environ.get("SPOTIFY_CLIENT_SECRET")
         )
+        method = "api" if has_api_keys else "embed"
+    
+    # 執行對應的抓取方法
+    if method == "api":
+        print(f"[方法] Spotify Web API（免費帳號可用）")
+        result = fetch_via_web_api(args.url)
+    else:
+        print(f"[方法] Embed 頁面抓取（最快速，無需認證）")
+        result = fetch_legacy_embed_playlist(args.url, session)
+    
+    # 同時執行另一種方法作為比較（如果要求的話）
+    compare_result = None
+    if args.compare:
+        if method == "api":
+            compare_result = fetch_legacy_embed_playlist(args.url, session)
+        else:
+            compare_result = fetch_via_web_api(args.url)
+    
+    print(f"\nURL: {args.url}")
+    print(f"來源: {result.source}")
+    print(f"狀態碼: {result.status_code}")
+    if result.playlist_name:
+        print(f"播放清單名稱: {result.playlist_name}")
+    if result.error:
+        print(f"錯誤: {result.error}")
+    print(f"曲目數量: {len(result.tracks)}")
+    
+    # 比較結果
+    if compare_result and compare_result.tracks:
+        print(f"\n比較方法 ({compare_result.source}): {len(compare_result.tracks)} 首")
+        diff = compare_track_lists(result.tracks, compare_result.tracks)
+        
+        print(f"\n只在主要方法中: {len(diff['only_new'])}")
+        for track in diff["only_new"][:10]:  # 只顯示前 10 個
+            print(f"+ {track}")
+        if len(diff['only_new']) > 10:
+            print(f"... 還有 {len(diff['only_new']) - 10} 首")
+        
+        print(f"\n只在比較方法中: {len(diff['only_legacy'])}")
+        for track in diff["only_legacy"][:10]:
+            print(f"- {track}")
+        if len(diff['only_legacy']) > 10:
+            print(f"... 還有 {len(diff['only_legacy']) - 10} 首")
+    
+    if args.show_tracks and result.tracks:
+        print(f"\n曲目列表:")
+        for i, track in enumerate(result.tracks, 1):
+            print(f"{i}. {track}")
 
-    if args.show_tracks:
-        if browser:
-            _print_track_list("Browser tracks", browser.tracks)
-        _print_track_list("Redesigned tracks", redesigned.tracks)
-        _print_track_list("Legacy tracks", legacy.tracks)
+    if args.output and result.tracks:
+        _write_debug_tracks(args.output, result.tracks)
+        print(f"已寫入曲目到: {args.output}")
 
-    if args.output:
-        _write_debug_tracks(args.output, primary.tracks)
-        print(f"Wrote {primary_label} tracks to: {args.output}")
-
-    return 0 if primary.tracks else 1
+    return 0 if result.tracks else 1
 
 
 def build_parser():
@@ -431,16 +422,18 @@ def build_parser():
 
     fetch_parser = subparsers.add_parser(
         "fetch-playlist",
-        help="Fetch a Spotify playlist with the redesigned scraper and compare it with the legacy parser.",
+        help="使用 embed 頁面或 Spotify Web API 取得播放清單曲目。",
     )
-    fetch_parser.add_argument("url", help="Spotify playlist URL.")
-    fetch_parser.add_argument("--show-tracks", action="store_true", help="Print both full track lists.")
-    fetch_parser.add_argument("--output", help="Write redesigned track list to a debug text file.")
-    fetch_parser.add_argument("--max-order-diff", type=int, default=20, help="Maximum order differences to print.")
-    fetch_parser.add_argument("--probe", action="append", help="Track name to check in both fetched lists.")
-    fetch_parser.add_argument("--browser", action="store_true", help="Render open.spotify.com in local headless Chrome and read the DOM.")
-    fetch_parser.add_argument("--browser-visible", action="store_true", help="Use a visible Chrome window for browser scraping.")
-    fetch_parser.add_argument("--browser-timeout", type=int, default=45, help="Seconds to wait for browser-rendered tracks.")
+    fetch_parser.add_argument("url", help="Spotify 播放清單 URL。")
+    fetch_parser.add_argument(
+        "--method", 
+        choices=["auto", "embed", "api"], 
+        default="auto",
+        help='取得方式：auto（自動選擇）、embed（embed頁面，最快）、api（Web API，需 Client ID/Secret）。預設為 auto。'
+    )
+    fetch_parser.add_argument("--show-tracks", action="store_true", help="顯示完整曲目列表。")
+    fetch_parser.add_argument("--output", help="將曲目列表寫入 debug 文字檔。")
+    fetch_parser.add_argument("--compare", action="store_true", help="同時使用另一種方法取得並比較結果。")
     fetch_parser.set_defaults(func=cmd_fetch_playlist)
 
     return parser
