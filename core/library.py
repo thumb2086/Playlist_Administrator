@@ -10,6 +10,7 @@ from functools import lru_cache
 from bs4 import BeautifulSoup
 from utils.helpers import sanitize_filename, normalize_name
 from utils.config import ensure_dirs, get_data_file
+from utils.i18n import _
 from core.spotify import get_spotify_name
 
 DEFAULT_ARTIST_ALIASES = {

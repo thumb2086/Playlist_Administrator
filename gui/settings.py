@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from utils.config import save_config, prompt_and_set_base_path
 from utils.i18n import I18N, _
+from utils.version import __version__, GITHUB_OWNER, GITHUB_REPO
 
 class SettingsWindow:
     def __init__(self, parent, config, on_close_callback=None):
@@ -97,6 +98,25 @@ class SettingsWindow:
         
         tk.Label(lf_structure, text=structure_text, font=("Consolas", 9), fg="#333333", justify="left").pack(anchor="w", pady=5)
 
+        # 5. About Section (at bottom of right column)
+        lf_about = tk.LabelFrame(right_column, text="關於 (About)", font=("Microsoft JhengHei", 10, "bold"), padx=10, pady=8)
+        lf_about.pack(fill="x", pady=(0, 10))
+        
+        # Version
+        tk.Label(lf_about, text=f"版本: v{__version__}", font=("Microsoft JhengHei", 10)).pack(anchor="w")
+        
+        # Repository link
+        repo_url = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
+        repo_label = tk.Label(lf_about, text=f"儲存庫: {repo_url}", font=("Consolas", 9), fg="#0066cc", cursor="hand2")
+        repo_label.pack(anchor="w")
+        repo_label.bind("<Button-1>", lambda e: self._open_url(repo_url))
+        
+        # Author link
+        author_url = f"https://github.com/{GITHUB_OWNER}"
+        author_label = tk.Label(lf_about, text=f"作者: {GITHUB_OWNER}", font=("Microsoft JhengHei", 10), fg="#0066cc", cursor="hand2")
+        author_label.pack(anchor="w")
+        author_label.bind("<Button-1>", lambda e: self._open_url(author_url))
+
         # Buttons (outside scrollable area)
         btn_frame = tk.Frame(self.top)
         btn_frame.pack(side="bottom", fill="x", pady=10)
@@ -108,6 +128,10 @@ class SettingsWindow:
         new_path = filedialog.askdirectory(initialdir=self.path_var.get())
         if new_path:
             self.path_var.set(new_path)
+
+    def _open_url(self, url):
+        import webbrowser
+        webbrowser.open(url)
 
     def save_settings(self):
         # 1. Detect Changes

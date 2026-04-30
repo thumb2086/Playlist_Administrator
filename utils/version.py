@@ -3,8 +3,8 @@ Version information for Playlist Administrator
 """
 
 # Current version - update this when releasing a new version
-# v1.5.0 - Embed-only Spotify workflow, update checks, and refreshed UI
-__version__ = "1.5.0"
+# v1.5.1 - Fix i18n import bug and add version info to settings
+__version__ = "1.5.1"
 
 # GitHub repository info for update checking
 GITHUB_OWNER = "thumb2086"
