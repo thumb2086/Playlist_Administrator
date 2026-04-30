@@ -7,17 +7,22 @@ from tkinter import ttk, scrolledtext, messagebox
 from collections import deque
 from utils.config import load_config, save_config, ensure_dirs, prompt_and_set_base_path, derive_paths
 from utils.i18n import I18N, _
+from utils.version_checker import should_check_for_updates, perform_update_check
+from utils.version import get_version
 from core.library import UpdateStats, update_library_logic, export_usb_logic, get_detailed_stats
 
 class PlaylistApp:
     def __init__(self, root):
         self.root = root
-        self.root.title(_('app_title'))
+        self.app_version = get_version()
+        self.root.title(f"{_('app_title')} v{self.app_version}")
         self.root.geometry("1100x800")
-        
-        # --- UI Throttling & Batching --- 
+
+        # --- UI Throttling & Batching ---
         self.last_progress_update = 0
         self.last_speed_update = 0
+        self.progress_update_job = None
+        self.pending_progress = None
         self.log_queue = deque()
         self.log_update_job = None
         self.last_full_refresh = 0
@@ -56,6 +61,31 @@ class PlaylistApp:
         
         # Proactively fetch names on startup for URLs without names
         threading.Thread(target=self.proactive_name_fetch, daemon=True).start()
+
+        # Check for updates on startup (after a short delay to let UI load)
+        if should_check_for_updates(self.config):
+            self.root.after(3000, self._check_version_update)
+
+    def _check_version_update(self):
+        """Check for updates and show dialog if available"""
+        def check():
+            result = perform_update_check(self.config, log_func=self.log, silent=True)
+
+            # Skip if user chose to skip this version
+            skipped_version = self.config.get('skipped_version')
+            if skipped_version and result.get('latest_version') == skipped_version:
+                return
+
+            # Show dialog if update available
+            if result.get('has_update'):
+                self.root.after(0, lambda: self._show_update_dialog(result))
+
+        threading.Thread(target=check, daemon=True).start()
+
+    def _show_update_dialog(self, update_info):
+        """Show update notification dialog"""
+        from gui.update_dialog import UpdateDialog
+        UpdateDialog(self.root, update_info)
 
     def first_run_wizard(self):
         """Prompt for language on first run"""
@@ -487,7 +517,7 @@ class PlaylistApp:
         if now - self.last_progress_update < 0.1 and current is not None and total is not None and current < total: # Throttle, but always show final update
             return
         self.last_progress_update = now
-        
+
         # Validate current and total parameters first
         try:
             current_val = int(current) if current is not None else 0
@@ -503,7 +533,19 @@ class PlaylistApp:
             total_val = 0
         if current_val > total_val and total_val > 0:
             current_val = total_val
-        
+
+        self.pending_progress = (current_val, total_val, eta)
+        if self.progress_update_job is None:
+            self.progress_update_job = self.root.after(0, self._apply_pending_progress)
+
+    def _apply_pending_progress(self):
+        self.progress_update_job = None
+        if not self.pending_progress:
+            return
+
+        current_val, total_val, eta = self.pending_progress
+        self.pending_progress = None
+
         if total_val > 0:
             pct = (current_val / total_val) * 100
             self.progress_var.set(pct)
@@ -755,8 +797,8 @@ class PlaylistApp:
     def load_selected_playlist(self):
         selected = self.player_playlist_combo.get()
         if selected:
-            self.load_playlist_into_player(selected)
-            self.log(f"-> 播放器已載入歌單: {selected}")
+            # self.load_playlist_into_player(selected)  # TODO: Implement or remove
+            self.log(f"-> 已選擇歌單: {selected}")
         else:
             messagebox.showwarning("提示", "請先選擇一個播放清單")
 

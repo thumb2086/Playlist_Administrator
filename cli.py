@@ -215,88 +215,6 @@ def cmd_match(args):
     return 1 if missing and args.fail_on_missing else 0
 
 
-def cmd_convert_playlist(args):
-    from core.library import (
-        _resolve_spotube_paths,
-        build_library_index,
-        build_metadata_index,
-        convert_spotube_m4a_to_mp3,
-        find_song_exact_format,
-        find_song_in_library,
-        find_song_simple_match,
-    )
-
-    config = _load_config(args.config)
-    debug_file = args.file or _default_debug_file(config)
-    tracks = _read_spotify_debug(debug_file)
-    m4a_path, mp3_path = _resolve_spotube_paths(config)
-
-    mp3_files = _audio_files(mp3_path) if os.path.isdir(mp3_path) else []
-    mp3_index = build_library_index(mp3_files)
-    mp3_metadata = build_metadata_index(mp3_files)
-
-    m4a_files = [
-        path for path in _audio_files(m4a_path)
-        if path.lower().endswith(".m4a")
-    ] if os.path.isdir(m4a_path) else []
-    m4a_index = build_library_index(m4a_files)
-    m4a_metadata = build_metadata_index(m4a_files)
-
-    already_done = []
-    missing_sources = []
-    source_files = []
-    seen_sources = set()
-
-    for track in tracks:
-        mp3_match = find_song_simple_match(track, "mp3", mp3_index)
-        if not mp3_match:
-            mp3_match = find_song_exact_format(track, "mp3", mp3_index)
-        if not mp3_match and mp3_metadata:
-            mp3_match = find_song_in_library(track, mp3_index, metadata_index=mp3_metadata)
-
-        if mp3_match:
-            already_done.append((track, mp3_match))
-            continue
-
-        source = find_song_in_library(track, m4a_index, metadata_index=m4a_metadata)
-        if source and source.lower().endswith(".m4a"):
-            norm_source = os.path.normpath(source)
-            if norm_source not in seen_sources:
-                source_files.append(norm_source)
-                seen_sources.add(norm_source)
-        else:
-            missing_sources.append(track)
-
-    print(f"Tracks: {len(tracks)}")
-    print(f"Existing MP3 matches: {len(already_done)}")
-    print(f"M4A sources to convert: {len(source_files)}")
-    print(f"Missing M4A sources: {len(missing_sources)}")
-
-    if missing_sources:
-        print("\nMissing M4A sources:")
-        for track in missing_sources:
-            print(f"- {track}")
-
-    if args.dry_run:
-        if source_files:
-            print("\nWould convert:")
-            for path in source_files:
-                print(f"- {path}")
-        return 0
-
-    if not source_files:
-        print("No playlist M4A files need conversion.")
-        return 0
-
-    converted, skipped, total = convert_spotube_m4a_to_mp3(
-        config,
-        _print_log,
-        source_files=source_files,
-    )
-    print(f"Conversion summary: {converted} converted, {skipped} skipped, {total} total")
-    return 0
-
-
 def _write_debug_tracks(path, tracks):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
@@ -311,43 +229,16 @@ def _print_track_list(title, tracks):
 
 
 def cmd_fetch_playlist(args):
-    from core.spotify_playlist_fetcher import (
-        compare_track_lists,
-        fetch_legacy_embed_playlist,
-        fetch_via_web_api,
-    )
+    from core.spotify_playlist_fetcher import fetch_legacy_embed_playlist
 
     import requests
 
     session = requests.Session()
-    
-    # 決定使用哪種方法
-    method = args.method
-    if method == "auto":
-        # 檢查是否有 API 金鑰
-        import os
-        has_api_keys = bool(
-            os.environ.get("SPOTIFY_CLIENT_ID") and 
-            os.environ.get("SPOTIFY_CLIENT_SECRET")
-        )
-        method = "api" if has_api_keys else "embed"
-    
-    # 執行對應的抓取方法
-    if method == "api":
-        print(f"[方法] Spotify Web API（免費帳號可用）")
-        result = fetch_via_web_api(args.url)
-    else:
-        print(f"[方法] Embed 頁面抓取（最快速，無需認證）")
-        result = fetch_legacy_embed_playlist(args.url, session)
-    
-    # 同時執行另一種方法作為比較（如果要求的話）
-    compare_result = None
-    if args.compare:
-        if method == "api":
-            compare_result = fetch_legacy_embed_playlist(args.url, session)
-        else:
-            compare_result = fetch_via_web_api(args.url)
-    
+
+    # 使用 Embed 頁面抓取
+    print(f"[方法] Embed 頁面抓取（無需認證）")
+    result = fetch_legacy_embed_playlist(args.url, session)
+
     print(f"\nURL: {args.url}")
     print(f"來源: {result.source}")
     print(f"狀態碼: {result.status_code}")
@@ -356,24 +247,7 @@ def cmd_fetch_playlist(args):
     if result.error:
         print(f"錯誤: {result.error}")
     print(f"曲目數量: {len(result.tracks)}")
-    
-    # 比較結果
-    if compare_result and compare_result.tracks:
-        print(f"\n比較方法 ({compare_result.source}): {len(compare_result.tracks)} 首")
-        diff = compare_track_lists(result.tracks, compare_result.tracks)
-        
-        print(f"\n只在主要方法中: {len(diff['only_new'])}")
-        for track in diff["only_new"][:10]:  # 只顯示前 10 個
-            print(f"+ {track}")
-        if len(diff['only_new']) > 10:
-            print(f"... 還有 {len(diff['only_new']) - 10} 首")
-        
-        print(f"\n只在比較方法中: {len(diff['only_legacy'])}")
-        for track in diff["only_legacy"][:10]:
-            print(f"- {track}")
-        if len(diff['only_legacy']) > 10:
-            print(f"... 還有 {len(diff['only_legacy']) - 10} 首")
-    
+
     if args.show_tracks and result.tracks:
         print(f"\n曲目列表:")
         for i, track in enumerate(result.tracks, 1):
@@ -412,28 +286,13 @@ def build_parser():
     match_parser.add_argument("--fail-on-missing", action="store_true", help="Exit with code 1 when tracks are missing.")
     match_parser.set_defaults(func=cmd_match)
 
-    convert_parser = subparsers.add_parser(
-        "convert-playlist",
-        help="Convert only M4A files needed by a Spotify debug track list.",
-    )
-    convert_parser.add_argument("--file", help="Path to a Spotify debug track list.")
-    convert_parser.add_argument("--dry-run", action="store_true", help="Print planned conversions without writing MP3 files.")
-    convert_parser.set_defaults(func=cmd_convert_playlist)
-
     fetch_parser = subparsers.add_parser(
         "fetch-playlist",
-        help="使用 embed 頁面或 Spotify Web API 取得播放清單曲目。",
+        help="使用 Embed 頁面取得 Spotify 播放清單曲目。",
     )
     fetch_parser.add_argument("url", help="Spotify 播放清單 URL。")
-    fetch_parser.add_argument(
-        "--method", 
-        choices=["auto", "embed", "api"], 
-        default="auto",
-        help='取得方式：auto（自動選擇）、embed（embed頁面，最快）、api（Web API，需 Client ID/Secret）。預設為 auto。'
-    )
     fetch_parser.add_argument("--show-tracks", action="store_true", help="顯示完整曲目列表。")
     fetch_parser.add_argument("--output", help="將曲目列表寫入 debug 文字檔。")
-    fetch_parser.add_argument("--compare", action="store_true", help="同時使用另一種方法取得並比較結果。")
     fetch_parser.set_defaults(func=cmd_fetch_playlist)
 
     return parser

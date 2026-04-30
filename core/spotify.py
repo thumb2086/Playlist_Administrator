@@ -576,21 +576,18 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
                         
                         for track in tracks:
                             clean_track = track.strip()
-                            
-                            # Find actual file in library
+
+                            # Find actual file in library (MP3 only)
                             actual_path = None
-                            if config.get('prefer_mp3_playlists', True):
-                                # For Spotube: use simple exact match first (filenames match Spotify exactly)
-                                if config.get('spotube_exact_match', True):
-                                    actual_path = find_song_simple_match(clean_track, 'mp3', lib_index)
-                                # Fallback to fuzzy matching if simple match fails
-                                if not actual_path:
-                                    actual_path = find_song_exact_format(clean_track, 'mp3', lib_index)
-                                # Final MP3 fallback: use title metadata when Spotube filename is abbreviated.
-                                if not actual_path and metadata_index:
-                                    actual_path = find_song_in_library(clean_track, mp3_index, metadata_index=metadata_index)
-                            if not actual_path and not config.get('prefer_mp3_playlists', True):
-                                actual_path = find_song_in_library(clean_track, lib_index, metadata_index=all_metadata_index)
+                            # For Spotube: use simple exact match first (filenames match Spotify exactly)
+                            if config.get('spotube_exact_match', True):
+                                actual_path = find_song_simple_match(clean_track, 'mp3', lib_index)
+                            # Fallback to fuzzy matching if simple match fails
+                            if not actual_path:
+                                actual_path = find_song_exact_format(clean_track, 'mp3', lib_index)
+                            # Final MP3 fallback: use title metadata when Spotube filename is abbreviated.
+                            if not actual_path and metadata_index:
+                                actual_path = find_song_in_library(clean_track, mp3_index, metadata_index=metadata_index)
                             if not actual_path:
                                 missing_tracks += 1
                                 # Debug: log all missing tracks
