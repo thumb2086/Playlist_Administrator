@@ -257,46 +257,24 @@ def _resolve_spotube_paths(config):
     library_path = config.get('library_path')
     m4a_subfolder = config.get('spotube_m4a_subfolder', 'm4a')
     mp3_subfolder = config.get('spotube_mp3_subfolder', 'mp3')
-    
-    # Put m4a/mp3 folders directly in library root (not under spotube folder)
     m4a_path = os.path.join(library_path, m4a_subfolder)
     mp3_path = os.path.join(library_path, mp3_subfolder)
     return m4a_path, mp3_path
 
-def _has_m4a_files(root_path):
-    if not root_path or not os.path.exists(root_path):
-        return False
-    for root, _, files in os.walk(root_path):
-        for fname in files:
-            if fname.lower().endswith('.m4a'):
-                return True
-    return False
-
 def _get_m4a_cache_key(m4a_path, mp3_path):
-    """Generate a cache key based on M4A file paths and modification times."""
     m4a_pattern = os.path.join(m4a_path, "**", "*.m4a")
     m4a_files = glob.glob(m4a_pattern, recursive=True)
-    # Filter out files in mp3 subfolder
-    m4a_files = [f for f in m4a_files if not os.path.normpath(f).lower().startswith(os.path.normpath(mp3_path).lower())]
-    # Sort for consistent hashing
+    mp3_norm = os.path.normpath(mp3_path).lower()
+    m4a_files = [f for f in m4a_files if not os.path.normpath(f).lower().startswith(mp3_norm)]
     m4a_files.sort()
-    # Build a string of file paths with their modification times
+
     cache_str = ""
     for f in m4a_files:
         try:
-            mtime = os.path.getmtime(f)
-            cache_str += f"{f}:{mtime}\n"
-        except:
+            cache_str += f"{f}:{os.path.getmtime(f)}\n"
+        except Exception:
             cache_str += f"{f}:0\n"
     return hashlib.md5(cache_str.encode('utf-8')).hexdigest(), m4a_files
-
-def _m4a_files_from_source(m4a_path, mp3_path):
-    m4a_pattern = os.path.join(m4a_path, "**", "*.m4a")
-    m4a_files = glob.glob(m4a_pattern, recursive=True)
-    return [
-        f for f in m4a_files
-        if not os.path.normpath(f).lower().startswith(os.path.normpath(mp3_path).lower())
-    ]
 
 def _audio_metadata_identity(file_path):
     """Return normalized title/artist metadata for conversion freshness checks."""
@@ -399,26 +377,100 @@ def _converted_mp3_matches_source(src, dest):
         return False
     return True
 
+def _source_match_names(src):
+    names = []
+    filename_stem = os.path.splitext(os.path.basename(src))[0]
+    if filename_stem:
+        names.append(filename_stem)
+
+    metadata_stem = _audio_metadata_filename_stem(src)
+    if metadata_stem and metadata_stem not in names:
+        names.append(metadata_stem)
+
+    identity = _audio_metadata_identity(src)
+    if identity:
+        title_tokens, artist_tokens = identity
+        if title_tokens:
+            names.append(" ".join(title_tokens))
+        if title_tokens and artist_tokens:
+            names.append(f"{' '.join(title_tokens)} - {' '.join(artist_tokens)}")
+
+    deduped = []
+    seen = set()
+    for name in names:
+        key = tuple(get_normalized_tokens(name))
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(name)
+    return deduped
+
+def _build_playlist_song_index(playlists_path):
+    if not playlists_path or not os.path.exists(playlists_path):
+        return {}
+
+    files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
+            glob.glob(os.path.join(playlists_path, "*.m3u")) + \
+            glob.glob(os.path.join(playlists_path, "*.txt"))
+    skip_markers = ["_unsorted", "single tracks", "_unsorted_songs", "_removed songs", "已移除"]
+    index = {}
+    for pl_file in files:
+        base = os.path.basename(pl_file).lower()
+        if any(marker in base for marker in skip_markers):
+            continue
+        for song_name in parse_playlist(pl_file):
+            tokens = tuple(get_normalized_tokens(song_name))
+            if tokens:
+                index.setdefault(tokens, song_name)
+            if ' - ' in song_name:
+                title = song_name.split(' - ', 1)[0].strip()
+                tokens = tuple(get_normalized_tokens(title))
+                if tokens:
+                    index.setdefault(tokens, song_name)
+    return index
+
+def _matches_playlist_index(src, playlist_index):
+    if not playlist_index:
+        return False
+    for name in _source_match_names(src):
+        tokens = tuple(get_normalized_tokens(name))
+        if tokens in playlist_index:
+            return True
+        token_set = set(tokens)
+        if token_set:
+            for playlist_tokens in playlist_index:
+                playlist_set = set(playlist_tokens)
+                min_size = min(len(token_set), len(playlist_set))
+                if min_size and len(token_set & playlist_set) / min_size >= 0.9:
+                    return True
+    return False
+
+def _find_existing_mp3_for_source(src, mp3_index, metadata_index=None):
+    for name in _source_match_names(src):
+        found = find_song_exact_format(name, 'mp3', mp3_index)
+        if not found and metadata_index:
+            found = find_song_in_library(name, mp3_index, metadata_index=metadata_index)
+            if found and not found.lower().endswith('.mp3'):
+                found = None
+        if found and os.path.exists(found) and _converted_mp3_matches_source(src, found):
+            return found
+    return None
+
 def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None, status_cb=None, source_files=None):
-    """Convert Spotube m4a files into mp3 subfolder inside Spotube."""
-    from core.audio_converter import convert_audio_file, check_ffmpeg_available
-    from core.ffmpeg_installer import get_ffmpeg_path
+    """Convert Spotube M4A files to MP3, skipping cached or unmatched files."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import threading
-    from utils.i18n import _
+    from core.audio_converter import convert_audio_file
+    from core.ffmpeg_installer import ensure_ffmpeg_available, get_ffmpeg_path
     from utils.config import get_data_file
+    from utils.i18n import _
 
     m4a_path, mp3_path = _resolve_spotube_paths(config)
-    
-    # Create m4a_path if it doesn't exist
     if not os.path.exists(m4a_path):
-        log_func(f" -> Creating M4A folder: {m4a_path}")
         os.makedirs(m4a_path, exist_ok=True)
+        log_func(f" -> Creating M4A folder: {m4a_path}")
 
-    # Auto-install FFmpeg if not available
-    from core.ffmpeg_installer import ensure_ffmpeg_available
     if not ensure_ffmpeg_available(config, log_func):
-        log_func(" -> FFmpeg 安裝失敗。Skip M4A -> MP3 conversion.")
+        log_func(" -> FFmpeg unavailable. Skip M4A -> MP3 conversion.")
         return 0, 0, 0
 
     os.makedirs(mp3_path, exist_ok=True)
@@ -426,55 +478,26 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
     if source_files is not None:
         m4a_files = sorted({os.path.normpath(f) for f in source_files if f and f.lower().endswith('.m4a')})
         current_cache_key = None
-        last_cache_key = None
     else:
-        # Check if M4A files have changed since last run
         current_cache_key, m4a_files = _get_m4a_cache_key(m4a_path, mp3_path)
-        last_cache_key = None  # Initialize before use
-    cache_file = get_data_file('m4a_cache.json')
-    if source_files is None:
-        try:
-            if os.path.exists(cache_file):
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    cache_data = json.load(f)
-                    last_cache_key = cache_data.get('cache_key')
-                log_func(f"    Cache file exists, last_key={last_cache_key[:8] if last_cache_key else None}, current_key={current_cache_key[:8]}")
-            else:
-                log_func(f"    No cache file found at: {cache_file}")
-        except Exception as e:
-            log_func(f"    Cache read error: {e}")
-            pass
 
-    # If cache matches and all MP3s exist, skip conversion
-    if source_files is None and last_cache_key == current_cache_key and m4a_files:
-        all_mp3_exist = True
-        for src in m4a_files:
-            base = os.path.splitext(os.path.basename(src))[0]
-            legacy_dest = os.path.join(mp3_path, f"{base}.mp3")
-            dest, dummy_name = _metadata_based_mp3_path(src, mp3_path)
-            _move_matching_legacy_mp3(src, legacy_dest, dest, log_func)
-            if not os.path.exists(dest) or not _converted_mp3_matches_source(src, dest):
-                all_mp3_exist = False
-                break
-        if all_mp3_exist:
-            log_func(" -> Converting Spotube M4A to MP3 (skipped - no changes)")
-            return 0, 0, 0
+    if not m4a_files:
+        log_func(" -> No M4A files found for conversion.")
+        return 0, 0, 0
 
-    # Save current cache key
-    if source_files is None:
-        try:
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump({'cache_key': current_cache_key}, f)
-        except:
-            pass
+    search_pattern = os.path.join(config.get('library_path'), "**", "*")
+    all_files = [f for f in glob.glob(search_pattern, recursive=True) if os.path.isfile(f)]
+    mp3_files = [f for f in all_files if f.lower().endswith('.mp3')]
+    mp3_index = build_library_index(mp3_files)
+    metadata_index = build_metadata_index(mp3_files)
+    playlist_index = _build_playlist_song_index(config.get('playlists_path')) if config.get('spotube_convert_matched_only', False) else None
 
-    # Build task list first for progress reporting
     tasks = []
-    
+    skipped = 0
     for src in m4a_files:
-        # Skip files in the mp3 output directory
         if os.path.normpath(src).lower().startswith(os.path.normpath(mp3_path).lower()):
             continue
+
         base = os.path.splitext(os.path.basename(src))[0]
         legacy_dest = os.path.join(mp3_path, f"{base}.mp3")
         dest, name = _metadata_based_mp3_path(src, mp3_path)
@@ -486,17 +509,25 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
         log_func(" -> No M4A files found for conversion.")
         return 0, 0, 0
 
-    converted = 0
-    skipped = 0
-
     if status_cb:
-        for i, task in enumerate(tasks):
-            name = task[2]
+        for i, (_, _, name) in enumerate(tasks):
             status_cb(i, _('conv_status_queued'), name)
 
-    # Pre-skip tasks that are already up to date
     to_convert = []
     for i, (src, dest, name) in enumerate(tasks):
+        if playlist_index is not None and not _matches_playlist_index(src, playlist_index):
+            skipped += 1
+            if status_cb:
+                status_cb(i, _('conv_status_skipped'), f"{name} (not in playlist)")
+            continue
+
+        existing_mp3 = _find_existing_mp3_for_source(src, mp3_index, metadata_index)
+        if existing_mp3:
+            skipped += 1
+            if status_cb:
+                status_cb(i, _('conv_status_skipped'), name)
+            continue
+
         if os.path.exists(dest):
             try:
                 if os.path.getmtime(dest) >= os.path.getmtime(src) and _converted_mp3_matches_source(src, dest):
@@ -506,11 +537,10 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
                     continue
             except Exception:
                 pass
+
         to_convert.append((i, src, dest, name))
 
     processed = skipped
-    if processed and (processed % 10 == 0 or processed == total_tasks):
-        log_func(f" -> Conversion progress: {processed}/{total_tasks}")
     if progress_cb:
         progress_cb(processed, total_tasks)
 
@@ -523,81 +553,41 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
             pause_event.wait(0.2)
         return not (stop_event and stop_event.is_set())
 
-    lock = threading.Lock()
-    # Semaphore for dynamic worker count control - allows changing workers during pause
-    worker_sem = threading.Semaphore(0)  # Start blocked, will release based on config
-
-    def _get_current_workers():
-        """Get current worker count from config - can be changed during pause"""
-        w = config.get('spotube_convert_workers', 4)
+    def _worker_count():
         try:
-            w = int(w)
+            return max(1, int(config.get('spotube_convert_workers', 4)))
         except Exception:
-            w = 4
-        if w < 1:
-            w = 1
-        return w
+            return 4
 
-    def _init_semaphore():
-        """Initialize semaphore with current worker count"""
-        current_workers = _get_current_workers()
-        # Clear any existing permits and set new count
-        while worker_sem._value > 0:
-            try:
-                worker_sem.acquire(blocking=False)
-            except:
-                break
-        for dummy in range(current_workers):
-            worker_sem.release()
-        return current_workers
+    lock = threading.Lock()
+    converted = 0
 
     def _convert_one(i, src, dest, name):
-        if stop_event and stop_event.is_set():
+        if stop_event and stop_event.is_set() or not _wait_if_paused():
             return "cancel"
-        
-        # Acquire semaphore slot (respects current worker limit)
-        worker_sem.acquire()
-        try:
-            if stop_event and stop_event.is_set():
-                return "cancel"
-            if not _wait_if_paused():
-                return "cancel"
-            # Re-initialize semaphore after pause to pick up config changes
-            if pause_event and not pause_event.is_set():
-                _init_semaphore()
-            if status_cb:
-                status_cb(i, _('conv_status_working'), name)
-            ffmpeg_path = get_ffmpeg_path(config)
-            ok = convert_audio_file(src, dest, 'mp3', log_func, ffmpeg_path)
-            return "ok" if ok else "fail"
-        finally:
-            worker_sem.release()
+        if status_cb:
+            status_cb(i, _('conv_status_working'), name)
+        ok = convert_audio_file(src, dest, 'mp3', log_func, get_ffmpeg_path(config))
+        return "ok" if ok else "fail"
 
-    # Initialize semaphore with current config
-    initial_workers = _init_semaphore()
     if to_convert:
-        log_func(f" -> Conversion workers: {initial_workers} (can be changed during pause)")
+        log_func(f" -> Conversion workers: {_worker_count()}")
 
-    futures = []
-    future_meta = {}
-    # Use a larger thread pool but control concurrency via semaphore
-    # This allows dynamic worker adjustment
-    with ThreadPoolExecutor(max_workers=max(16, initial_workers * 2)) as ex:
-        for i, src, dest, name in to_convert:
-            if stop_event and stop_event.is_set():
-                break
-            fut = ex.submit(_convert_one, i, src, dest, name)
-            futures.append(fut)
-            future_meta[fut] = (i, name)
-
-        for f in as_completed(futures):
-            result = None
+    with ThreadPoolExecutor(max_workers=_worker_count()) as ex:
+        future_meta = {
+            ex.submit(_convert_one, i, src, dest, name): (i, name)
+            for i, src, dest, name in to_convert
+            if not (stop_event and stop_event.is_set())
+        }
+        for future in as_completed(future_meta):
+            result = "fail"
             try:
-                result = f.result()
+                result = future.result()
             except Exception:
                 result = "fail"
-            if status_cb and f in future_meta:
-                idx, name = future_meta[f]
+
+            idx, name = future_meta[future]
+            if status_cb:
                 if result == "ok":
                     status_cb(idx, _('conv_status_done'), name)
                 elif result == "cancel":
@@ -609,23 +599,23 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
                 processed += 1
                 if result == "ok":
                     converted += 1
-                elif result == "cancel":
-                    pass
                 else:
                     skipped += 1
-
-                if processed % 10 == 0 or processed == total_tasks:
-                    log_func(f" -> Conversion progress: {processed}/{total_tasks}")
                 if progress_cb:
                     progress_cb(processed, total_tasks)
+                if processed % 10 == 0 or processed == total_tasks:
+                    log_func(f" -> Conversion progress: {processed}/{total_tasks}")
 
             if stop_event and stop_event.is_set():
                 log_func(" -> Conversion cancelled.")
                 break
 
-        if stop_event and stop_event.is_set():
-            for f in futures:
-                f.cancel()
+    if source_files is None and current_cache_key:
+        try:
+            with open(get_data_file('m4a_cache.json'), 'w', encoding='utf-8') as f:
+                json.dump({'cache_key': current_cache_key}, f)
+        except Exception:
+            pass
 
     log_func(f" -> Spotube conversion done: {converted} converted, {skipped} skipped")
     return converted, skipped, total_tasks
@@ -656,7 +646,7 @@ def prune_missing_from_playlists(config, log_func, pause_event=None, stop_event=
 
     total_removed = 0
     total_files = 0
-    skip_markers = ["_unsorted", "single tracks", "_unsorted_songs", "_removed songs", "已移除"]
+    skip_markers = ["_unsorted", "single tracks", "_unsorted_songs"]
 
     for pl_file in pl_files:
         if stop_event and stop_event.is_set():
@@ -1695,48 +1685,6 @@ def find_song_exact_format(song_name, target_extension, library_source):
         
     return None
 
-def rename_explicit_files(library_path, log_func):
-    """ Renames files starting with 'E' prefix and standardizes all filenames to be safe for players """
-    import re
-    from utils.helpers import sanitize_filename
-    search_pattern = os.path.join(library_path, "**", "*")
-    all_files = glob.glob(search_pattern, recursive=True)
-    count = 0
-    from utils.i18n import _
-    
-    for f in all_files:
-        if not os.path.isfile(f): continue
-        dir_name = os.path.dirname(f)
-        old_filename = os.path.basename(f)
-        
-        # 1. Strip 'E' prefix artifact
-        clean_name = old_filename
-        if re.match(r'^E[A-Z\u4e00-\u9fff\u3040-\u30ff]', old_filename):
-            clean_name = old_filename[1:]
-            
-        # 2. Aggressively sanitize the rest (fix \xa0, etc)
-        name_only, ext = os.path.splitext(clean_name)
-        safe_name = sanitize_filename(name_only) + ext
-        
-        if safe_name != old_filename:
-            new_path = os.path.join(dir_name, safe_name)
-            if not os.path.exists(new_path):
-                try:
-                    # Use shutil.move to handle cross-drive operations
-                    import shutil
-                    shutil.move(f, new_path)
-                    count += 1
-                except: pass
-            else:
-                # If safe version exists, delete the artifact one
-                try:
-                    os.remove(f)
-                    count += 1
-                except: pass
-    if count > 0:
-        log_func(_('organized_files', count))
-    return count
-
 def move_unsorted_songs(config, log_func):
     """ Creates playlist for songs not in any playlist (without moving files) """
     from utils.i18n import _
@@ -1923,10 +1871,8 @@ def update_library_logic_legacy(config, stats, log_func, progress_func=None, pos
     log_func(_('scanning_lib'))
     # 1.1 Unblock files to resolve 0x80070005 (Access Denied)
     unblock_files(library_path, log_func)
-    # 1.2 Clean up 'E' prefixes and fix sanitization mismatch
-    rename_explicit_files(library_path, log_func)
-    
-    # 1.3 Load failed FLAC cache
+
+    # 1.2 Load failed FLAC cache
     failed_flac_cache = {}
     try:
         failed_flac_cache_file = get_data_file('failed_flac.json')
@@ -2641,7 +2587,6 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         return
     log_func(_('scanning_lib'))
     unblock_files(library_path, log_func)
-    rename_explicit_files(library_path, log_func)
 
     if progress_func:
         progress_func(5, 100, None)
@@ -2656,7 +2601,7 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         if not progress_func or not total:
             return
         pct = 5 + (float(done) / float(total)) * 35.0
-        progress_func(int(pct), 100, None)
+        progress_func(pct, 100, None)
 
     status_cb = None
     if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
@@ -2670,30 +2615,8 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
         progress_cb=_conv_progress,
         status_cb=status_cb
     )
-    
-    # Track converted songs in stats for reporting
     if converted > 0:
-        log_func(f" -> M4A 轉 MP3: {converted} 首轉換完成")
-        # Add converted songs to stats (they are in the mp3 folder now)
-        m4a_path, mp3_path = _resolve_spotube_paths(config)
-        if mp3_path and os.path.exists(mp3_path):
-            import glob
-            mp3_files = glob.glob(os.path.join(mp3_path, "*.mp3"))
-            # Add recently modified files (converted in this run)
-            for mp3_file in mp3_files:
-                try:
-                    mtime = os.path.getmtime(mp3_file)
-                    # If modified in last 5 minutes, consider it newly converted
-                    if time.time() - mtime < 300:
-                        song_name = os.path.splitext(os.path.basename(mp3_file))[0]
-                        if song_name not in stats.songs_downloaded:
-                            stats.songs_downloaded.append(song_name)
-                            # Also track in playlist_updates for Spotube
-                            if 'Spotube 轉換' not in stats.playlist_updates:
-                                stats.playlist_updates['Spotube 轉換'] = []
-                            stats.playlist_updates['Spotube 轉換'].append(song_name)
-                except:
-                    pass
+        log_func(f" -> M4A to MP3: {converted} converted")
 
     if progress_func:
         progress_func(40, 100, None)
@@ -3028,7 +2951,7 @@ def get_detailed_stats(config, audio_files=None):
     all_pl_songs = []
     unique_pl_songs = set()
     unique_pl_tokens = set()
-    skip_markers = ["_unsorted", "single tracks", "_unsorted_songs", "_removed songs", "已移除"]
+    skip_markers = ["_unsorted", "single tracks", "_unsorted_songs"]
     for pl_file in pl_files:
         base = os.path.basename(pl_file).lower()
         if any(x in base for x in skip_markers):

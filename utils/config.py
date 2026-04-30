@@ -98,15 +98,8 @@ def load_config():
         'dab_password': "",
         'auto_metadata': False,
         'spotube_folder_name': 'spotube',
-        'spotube_m4a_subfolder': 'm4a',
-        'spotube_mp3_subfolder': 'mp3',
-        'prefer_mp3_playlists': True,
-        'spotube_convert_workers': 4,
         'spotube_exact_match': True,  # Use simple filename matching for Spotube downloads
-        # Spotify Web API 設定（免費帳號可用）
-        'spotify_client_id': "",  # 從 https://developer.spotify.com/dashboard 取得
-        'spotify_client_secret': "",
-        'spotify_fetch_method': "embed",  # "embed"（最快，預設）或 "api"（官方 API，需金鑰）
+        'spotube_convert_matched_only': False,  # Only convert M4A files that match playlist entries
     }
     for key, value in defaults.items():
         config.setdefault(key, value)

@@ -1,398 +1,365 @@
-import streamlit as st
-import pandas as pd
-import time
-import shutil
 import os
-from utils.config import load_config, save_config, derive_paths
-from core.library import load_playlists_data, update_library_logic, UpdateStats
-from core.sync_manager import sync_folders # Added import for sync_folders
+import time
 
-# ==========================================
-# 1. 基礎設定與函式
-# ==========================================
+import pandas as pd
+import streamlit as st
+
+from core.library import UpdateStats, load_playlists_data, update_library_logic
+from core.sync_manager import sync_folders
+from utils.config import derive_paths, ensure_dirs, load_config, save_config
+from utils.version import get_version
+
+
 st.set_page_config(
-    page_title="Playlist Admin Pro",
-    page_icon="🎵",
+    page_title="Playlist Administrator",
+    page_icon="PA",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# 優化樣式
-st.markdown("""
+st.markdown(
+    """
 <style>
-    .stMetric {background-color: #262730; padding: 10px; border-radius: 8px; border: 1px solid #333;}
-    .stCode {font-family: 'Consolas', monospace;}
-    div[data-testid="stToast"] {background-color: #4CAF50; color: white;}
+:root {
+  --pa-ink: #20231f;
+  --pa-muted: #667064;
+  --pa-line: #d9ded5;
+  --pa-paper: #f8faf3;
+  --pa-panel: #ffffff;
+  --pa-sage: #6f8f72;
+  --pa-coral: #c8654b;
+  --pa-gold: #c69a3d;
+}
+.stApp {
+  color: var(--pa-ink);
+  background:
+    linear-gradient(135deg, rgba(111,143,114,.16), transparent 34%),
+    linear-gradient(315deg, rgba(198,154,61,.14), transparent 36%),
+    var(--pa-paper);
+}
+[data-testid="stSidebar"] {
+  background: #edf2e8;
+  border-right: 1px solid var(--pa-line);
+}
+[data-testid="stMetric"] {
+  background: var(--pa-panel);
+  border: 1px solid var(--pa-line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  box-shadow: 0 10px 26px rgba(32,35,31,.06);
+}
+.pa-band {
+  border: 1px solid var(--pa-line);
+  background: rgba(255,255,255,.76);
+  border-radius: 8px;
+  padding: 18px 20px;
+  margin: 8px 0 18px;
+}
+.pa-title {
+  font-size: 30px;
+  line-height: 1.15;
+  font-weight: 800;
+  margin: 0 0 6px;
+}
+.pa-subtle {
+  color: var(--pa-muted);
+}
+.stButton > button {
+  border-radius: 8px;
+  border: 1px solid var(--pa-line);
+  font-weight: 700;
+}
+.stButton > button[kind="primary"] {
+  background: var(--pa-sage);
+  border-color: var(--pa-sage);
+}
+div[data-testid="stStatusWidget"] {
+  border-radius: 8px;
+}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# 工具函式：計算目錄大小
-def get_dir_size(path):
+
+AUDIO_EXTENSIONS = (".mp3", ".flac", ".wav", ".m4a", ".webm")
+LOSSLESS_EXTENSIONS = (".flac", ".wav")
+PLAYLIST_COLUMNS = ["啟用", "類型", "名稱", "連結", "狀態"]
+
+
+def scan_library(path):
     total_size = 0
-    file_count = 0
-    flac_count = 0
-    try:
-        if not os.path.exists(path):
-            return 0, 0, 0
-        for dirpath, dirnames, filenames in os.walk(path):
-            for f in filenames:
-                ext = f.lower()
-                if ext.endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')):
-                    fp = os.path.join(dirpath, f)
-                    total_size += os.path.getsize(fp)
-                    file_count += 1
-                    if ext.endswith(('.flac', '.wav')):
-                        flac_count += 1
-        return total_size, file_count, flac_count
-    except Exception:
-        return 0, 0, 0
+    total_files = 0
+    lossless_count = 0
+    if not path or not os.path.exists(path):
+        return total_size, total_files, lossless_count
 
-# 介面橋接器：用於串接後端邏輯與 Streamlit UI
-class StatusBridge:
-    def __init__(self, table_placeholder, log_placeholder=None):
-        self.table_placeholder = table_placeholder
-        self.log_placeholder = log_placeholder
-        self.data = []
-        self.df = pd.DataFrame(columns=['序號', '狀態', '歌曲名稱'])
+    for dirpath, _, filenames in os.walk(path):
+        for filename in filenames:
+            if not filename.lower().endswith(AUDIO_EXTENSIONS):
+                continue
+            file_path = os.path.join(dirpath, filename)
+            try:
+                total_size += os.path.getsize(file_path)
+            except OSError:
+                pass
+            total_files += 1
+            if filename.lower().endswith(LOSSLESS_EXTENSIONS):
+                lossless_count += 1
+    return total_size, total_files, lossless_count
 
-    def update_song_status(self, index, status, name):
-        # Update or add row
-        found = False
-        for i, row in enumerate(self.data):
-            if row['歌曲名稱'] == name:
-                self.data[i]['狀態'] = status
-                found = True
-                break
-        
-        if not found:
-            self.data.append({'序號': index + 1, '狀態': status, '歌曲名稱': name})
-        
-        # Update UI Table - Catch NoSessionContext when called from threads
-        try:
-            self.df = pd.DataFrame(self.data)
-            self.table_placeholder.dataframe(self.df, width='stretch', hide_index=True)
-        except Exception:
-            # Silently fail widget update if not in script context (e.g. lyrics thread)
-            # The status will be updated next time a main-thread call happens
-            pass
 
-# 設定的讀取與儲存
-def initialize_session_state():
-    if 'initialized' in st.session_state:
+def normalize_playlist_frame(rows):
+    frame = pd.DataFrame(rows or [], columns=PLAYLIST_COLUMNS)
+    for column in PLAYLIST_COLUMNS:
+        if column not in frame.columns:
+            frame[column] = "" if column != "啟用" else False
+    frame = frame[PLAYLIST_COLUMNS]
+    frame["啟用"] = frame["啟用"].fillna(False).astype(bool)
+    return frame.fillna("")
+
+
+def refresh_playlist_data():
+    st.session_state.playlist_data = normalize_playlist_frame(
+        load_playlists_data(st.session_state.settings)
+    )
+
+
+def initialize_state():
+    if st.session_state.get("initialized"):
         return
 
     config = load_config()
+    defaults = {
+        "base_path": os.getcwd(),
+        "export_path": os.path.join(os.getcwd(), "USB_Output"),
+        "ffmpeg_path": "bin/ffmpeg.exe",
+        "spotube_folder_name": "spotube",
+        "spotube_exact_match": True,
+        "language": "zh-TW",
+        "spotify_urls": [],
+        "url_names": {},
+    }
+    settings = {**defaults, **config}
+    derive_paths(settings)
+    ensure_dirs(settings)
 
-    # Define default settings structure based on config keys
-    default_settings = {
-        'base_path': os.getcwd(),
-        'export_path': os.path.join(os.getcwd(), 'USB_Output'),
-        'ffmpeg_path': 'bin/ffmpeg.exe',
-        'spotube_folder_name': 'spotube',
-        'spotube_mp3_subfolder': 'mp3',
-        'spotube_convert_workers': 4,
-        'prefer_mp3_playlists': True,
-        'language': 'zh-TW',
-        'spotify_urls': [],
-        'url_names': {}
+    st.session_state.settings = settings
+    st.session_state.initialized = True
+    refresh_playlist_data()
+
+
+def persist_settings():
+    settings = st.session_state.settings.copy()
+    derive_paths(settings)
+    save_config(settings)
+    st.session_state.settings = settings
+
+
+def update_playlist_settings(frame):
+    active = frame[(frame["啟用"]) & (frame["連結"].astype(str).str.strip() != "")]
+    st.session_state.settings["spotify_urls"] = active["連結"].astype(str).tolist()
+    st.session_state.settings["url_names"] = {
+        str(row["連結"]): str(row["名稱"]).strip() or str(row["連結"])
+        for _, row in active.iterrows()
     }
 
-    # Merge: values from file override defaults
-    st.session_state['settings'] = {**default_settings, **config}
-    
-    # Ensure derived paths (library_path, playlists_path) are present
-    derive_paths(st.session_state['settings'])
-    
-    # Ensure folders exist
-    from utils.config import ensure_dirs
-    ensure_dirs(st.session_state['settings'])
-    
-    # Map backend keys to UI keys if they differ
-    if 'base_folder' not in st.session_state['settings']:
-        st.session_state['settings']['base_folder'] = os.path.normpath(st.session_state['settings']['base_path'])
-    
-    # Normalize other paths
-    st.session_state['settings']['export_path'] = os.path.normpath(st.session_state['settings']['export_path'])
 
-    # Initialize playlist data
-    if 'playlist_data' not in st.session_state:
-        raw_data = load_playlists_data(st.session_state['settings'])
-        if not raw_data:
-            # Provide a dummy row or empty DF with columns to avoid crash/empty view
-            st.session_state.playlist_data = pd.DataFrame(columns=['啟用', '類型', '名稱', '連結', '狀態'])
+class StreamlitStatusBridge:
+    def __init__(self, placeholder):
+        self.placeholder = placeholder
+        self.rows = []
+
+    def update_song_status(self, index, status, name):
+        item = {"序號": index + 1, "狀態": status, "歌曲": name}
+        for row in self.rows:
+            if row["序號"] == item["序號"]:
+                row.update(item)
+                break
         else:
-            st.session_state.playlist_data = pd.DataFrame(raw_data)
+            self.rows.append(item)
+        self.placeholder.dataframe(pd.DataFrame(self.rows), hide_index=True, width="stretch")
 
-    st.session_state['initialized'] = True
 
-def save_settings():
-    """Saves Streamlit UI state back to config.json"""
-    s = st.session_state['settings']
-    
-    # Prepare config for saving (mapping UI keys back to backend keys if needed)
-    config_to_save = {
-        'base_path': os.path.normpath(s.get('base_folder')),
-        'export_path': os.path.normpath(s.get('export_path')),
-        'ffmpeg_path': s.get('ffmpeg_path', 'bin/ffmpeg.exe'),
-        'spotube_folder_name': s.get('spotube_folder_name', 'spotube'),
-        'spotube_mp3_subfolder': s.get('spotube_mp3_subfolder', 'mp3'),
-        'spotube_convert_workers': s.get('spotube_convert_workers', 4),
-        'prefer_mp3_playlists': s.get('prefer_mp3_playlists', True),
-        'language': s.get('language', 'zh-TW'),
-        'spotify_urls': s.get('spotify_urls', []),
-        'url_names': s.get('url_names', {})
-    }
+def render_header():
+    st.markdown(
+        f"""
+<div class="pa-band">
+  <div class="pa-title">Playlist Administrator</div>
+  <div class="pa-subtle">v{get_version()} · Spotify embed · MP3 playlist workflow</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
-    # Derive dependent paths and save
-    derive_paths(config_to_save)
-    save_config(config_to_save)
-    
-    # Update local state to reflect potentially derived paths
-    st.session_state['settings'].update(config_to_save)
-    
-    st.toast("✅ 設定已成功儲存！")
 
-# ==========================================
-# 2. 程式主體
-# ==========================================
-initialize_session_state()
+initialize_state()
+render_header()
 
-# ==========================================
-# 3. 側邊欄 (導航 & 狀態)
-# ==========================================
+settings = st.session_state.settings
+library_path = settings.get("library_path")
+playlists_path = settings.get("playlists_path")
+export_path = settings.get("export_path")
+
 with st.sidebar:
-    st.title("🎵 Playlist Admin")
-    st.caption("v3.0 Sync Edition")
-    
-    page = st.radio("功能導航", ["🏠 儀表板 (Dashboard)", "📝 連結管理", "📤 匯出同步", "⚙️ 系統設定"])
-    
+    st.subheader("工作區")
+    st.caption(settings.get("base_path", ""))
+    page = st.radio(
+        "導覽",
+        ["總覽", "更新", "連結", "匯出", "設定"],
+        label_visibility="collapsed",
+    )
     st.divider()
-    
-    # st.subheader(f"💾 硬碟狀態 ({drive_letter})")
-    # st.progress(disk['percent'], text=f"已使用 {disk['used_gb']} GB")
-    
-    # c1, c2 = st.columns(2)
-    # c1.metric("剩餘 (Free)", f"{disk['free_gb']} GB")
-    # c2.metric("總量 (Total)", f"{disk['total_gb']} GB")
+    st.caption(f"Music: {library_path}")
+    st.caption(f"Playlists: {playlists_path}")
 
-# ==========================================
-# 🏠 頁面 1: 儀表板 (Dashboard)
-# ==========================================
-if page == "🏠 儀表板 (Dashboard)":
-    st.header("系統概況")
 
-    lib_path = os.path.join(st.session_state['settings']['base_folder'], "Music")
-    total_size, total_files, flac_count = get_dir_size(lib_path)
-    lossy_count = total_files - flac_count
-    size_gb = total_size / (1024**3)
+if page == "總覽":
+    total_size, total_files, lossless_count = scan_library(library_path)
+    lossy_count = max(total_files - lossless_count, 0)
+    active_count = int(st.session_state.playlist_data["啟用"].sum()) if not st.session_state.playlist_data.empty else 0
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("📚 歌曲總數", f"{total_files:,}")
-    col2.metric("💎 無損 (FLAC/WAV)", f"{flac_count:,}")
-    col3.metric("🎧 壓縮 (MP3/M4A)", f"{lossy_count:,}")
-    col4.metric("💾 資料庫大小", f"{size_gb:.2f} GB")
-    
-    # Safely handle empty dataframe or missing columns
-    if not st.session_state.playlist_data.empty and '啟用' in st.session_state.playlist_data.columns:
-        active_count = len(st.session_state.playlist_data[st.session_state.playlist_data['啟用']])
-    else:
-        active_count = 0
-    col5.metric("⚡ 啟用任務", f"{active_count} 個排程")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("歌曲總數", f"{total_files:,}")
+    col2.metric("無損檔案", f"{lossless_count:,}")
+    col3.metric("MP3/壓縮", f"{lossy_count:,}")
+    col4.metric("啟用歌單", f"{active_count:,}")
 
-    st.write("") 
+    st.markdown('<div class="pa-band">', unsafe_allow_html=True)
+    st.subheader("最近的歌單狀態")
+    preview = st.session_state.playlist_data[["啟用", "類型", "名稱", "狀態"]].head(12)
+    st.dataframe(preview, hide_index=True, width="stretch")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.subheader("📂 目前路徑")
-    st.code(st.session_state['settings']['base_folder'], language="text")
-    st.caption("如需修改路徑，請前往 [系統設定] 頁面。")
 
-    st.divider()
+elif page == "更新":
+    st.subheader("更新音樂庫與 Spotify 歌單")
+    st.caption("會先抓取 Spotify embed 曲目、重建 m3u8，接著清掉指向不存在檔案的歌單項目。")
 
-    # --- 執行區 ---
-    st.subheader("🚀 執行操作")
-    
-    status_table_placeholder = st.empty()
-    status_table_placeholder.info("等待任務開始...")
-    
-    col_btn, col_log = st.columns([1, 1])
-    with col_btn:
-        if st.button("開始處理 (Start)", type="primary", width='stretch'):
-            progress_bar = st.progress(0, text="準備開始處理...")
-            with st.status("正在執行處理...", expanded=True) as status_indicator:
-                stats = UpdateStats()
-                bridge = StatusBridge(status_table_placeholder)
-                stats.app = bridge # Provide bridge to backend
-                
-                log_history = []
-                def log_func(msg, immediate=False):
-                    log_history.append(f"{time.strftime('%H:%M:%S')} {msg}")
-                    # Update status indicator text
-                    status_indicator.write(msg)
-                    # We could also use another placeholder for log history if needed
-                
-                def progress_func(current, total, eta=None):
-                    if not total or total <= 0:
-                        progress_bar.progress(0, text="正在分析...")
-                        return
-                    pct = int((float(current) / float(total)) * 100)
-                    pct = max(0, min(100, pct))
-                    if eta is None:
-                        eta_text = "ETA 計算中"
-                    else:
-                        eta_text = str(eta)
-                    progress_bar.progress(pct, text=f"進度 {current}/{total} | {eta_text}")
-                
-                update_library_logic(
-                    st.session_state['settings'], 
-                    stats, 
-                    log_func,
-                    progress_func=progress_func
-                )
-                progress_bar.progress(100, text="處理完成")
-                
-                st.success("✅ 處理完成！")
-                # Refresh data after update
-                st.session_state.playlist_data = pd.DataFrame(load_playlists_data(st.session_state['settings']))
-        
-        st.button("暫停任務 (Pause)", width='stretch')
+    status_table = st.empty()
+    progress = st.progress(0, text="等待開始")
+    logs = st.empty()
 
-    with col_log:
-        st.caption("📋 系統日誌 (System Logs)")
-        # This will be updated by log_func if we add a placeholder, 
-        # but for now let's use a simpler approach or just show completion stats.
-        st.info("任務執行時，詳細日誌會顯示在同步狀態欄位中。")
+    if st.button("開始更新", type="primary", width="stretch"):
+        stats = UpdateStats()
+        stats.app = StreamlitStatusBridge(status_table)
+        log_lines = []
 
-# ==========================================
-# 📝 頁面 2: 連結管理
-# ==========================================
-elif page == "📝 連結管理":
-    col_h, col_r = st.columns([4, 1])
-    with col_h:
-        st.header("管理 Spotify 連結")
-        st.caption("勾選「啟用」以納入處理排程。")
-    with col_r:
-        st.write("") # Padding
-        if st.button("🔄 重新整理", width='stretch', help="重新掃描硬碟與設定檔中的歌單"):
-            st.session_state.playlist_data = pd.DataFrame(load_playlists_data(st.session_state['settings']))
-            st.rerun()
+        def log_func(message, immediate=False):
+            log_lines.append(f"{time.strftime('%H:%M:%S')} {message}")
+            logs.code("\n".join(log_lines[-80:]), language="text")
 
-    edited_df = st.data_editor(
+        def progress_func(current, total, eta=None):
+            total = total or 100
+            pct = int(max(0, min(100, (float(current) / float(total)) * 100)))
+            progress.progress(pct, text=f"進度 {current}/{total}")
+
+        with st.status("正在更新", expanded=True) as status:
+            update_library_logic(settings, stats, log_func, progress_func=progress_func)
+            progress.progress(100, text="完成")
+            status.update(label="更新完成", state="complete")
+
+        refresh_playlist_data()
+        st.success("更新完成，歌單資料已重新載入。")
+
+
+elif page == "連結":
+    st.subheader("Spotify 連結")
+    st.caption("新增或停用歌單後，請儲存設定。")
+
+    edited = st.data_editor(
         st.session_state.playlist_data,
         column_config={
             "啟用": st.column_config.CheckboxColumn("啟用", width="small"),
-            "類型": st.column_config.TextColumn("類型", disabled=True, width="medium"),
-            "名稱": st.column_config.TextColumn("歌單名稱", width="medium"),
-            "連結": st.column_config.LinkColumn("Spotify URL", width="large"),
-            "狀態": st.column_config.TextColumn("同步狀態", disabled=True, width="medium")
+            "類型": st.column_config.TextColumn("類型", disabled=True),
+            "名稱": st.column_config.TextColumn("名稱"),
+            "連結": st.column_config.LinkColumn("Spotify URL"),
+            "狀態": st.column_config.TextColumn("狀態", disabled=True),
         },
         num_rows="dynamic",
-        width='stretch',
-        height=500
-    )
-    
-    if not edited_df.equals(st.session_state.playlist_data):
-        st.session_state.playlist_data = edited_df
-        # Update spotify_urls and url_names based on edited_df
-        active_playlists = edited_df[edited_df['啟用'] & (edited_df['連結'] != "")]
-        st.session_state['settings']['spotify_urls'] = active_playlists['連結'].tolist()
-        st.session_state['settings']['url_names'] = {row['連結']: row['名稱'] for _, row in active_playlists.iterrows()}
-        # Suggest saving
-        st.info("💡 連結清單已變動，請記得點擊「儲存設定」。")
-
-# ==========================================
-# 📤 頁面 3: 匯出同步
-# ==========================================
-elif page == "📤 匯出同步":
-    st.header("匯出至外部裝置 (USB/SD)")
-    
-    col_src, col_dst = st.columns(2)
-    with col_src:
-        st.info("📂 來源 (電腦):")
-        st.code(st.session_state['settings']['base_folder'], language="text")
-    with col_dst:
-        st.warning("💾 目標 (USB):")
-        new_export = st.text_input("輸入目標路徑", value=st.session_state['settings']['export_path'])
-        st.session_state['settings']['export_path'] = new_export
-
-    st.divider()
-
-    st.subheader("1. 選擇同步模式")
-    
-    sync_mode = st.radio(
-        "模式選擇",
-        ["標準複製 (Copy Only)", "鏡像同步 (Mirror Sync)"],
-        captions=[
-            "安全模式：僅複製新檔案，USB 上既有的檔案**不會**被刪除。",
-            "進階模式：讓 USB 與電腦完全一致。**注意：會刪除 USB 上多餘的舊歌！**"
-        ]
+        hide_index=True,
+        width="stretch",
+        height=520,
     )
 
-    st.subheader("2. 選擇要匯出的歌單")
-    if not st.session_state.playlist_data.empty and '名稱' in st.session_state.playlist_data.columns:
-        all_playlists = st.session_state.playlist_data["名稱"].tolist()
-    else:
-        all_playlists = []
-    
-    selected_playlists = st.multiselect(
-        "勾選項目:", 
-        options=all_playlists, 
-        default=all_playlists
+    col1, col2 = st.columns([1, 1])
+    if col1.button("儲存連結", type="primary", width="stretch"):
+        st.session_state.playlist_data = normalize_playlist_frame(edited)
+        update_playlist_settings(st.session_state.playlist_data)
+        persist_settings()
+        st.success("連結設定已儲存。")
+    if col2.button("重新載入", width="stretch"):
+        refresh_playlist_data()
+        st.rerun()
+
+
+elif page == "匯出":
+    st.subheader("匯出到 USB/SD")
+    source_col, target_col = st.columns(2)
+    source_col.text_input("來源", value=settings.get("base_path", ""), disabled=True)
+    target = target_col.text_input("目標路徑", value=export_path or "")
+    settings["export_path"] = target
+
+    mode_label = st.radio(
+        "同步模式",
+        ["Copy", "Mirror"],
+        default="Copy",
+        help="Mirror 會讓目標資料夾和選取歌單一致。",
+        horizontal=True,
     )
 
-    st.divider()
+    playlist_names = st.session_state.playlist_data["名稱"].dropna().astype(str).tolist()
+    selected = st.multiselect("歌單", playlist_names, default=playlist_names)
 
-    btn_type = "primary" if sync_mode == "標準複製 (Copy Only)" else "secondary"
-    btn_label = f"🚀 開始執行: {sync_mode.split(' ')[0]}"
-    
-    if st.button(btn_label, type=btn_type, width='stretch'):
-        if not os.path.exists(new_export):
-            st.error(f"❌ 目標路徑不存在: {new_export}")
-        elif len(selected_playlists) == 0:
-            st.error("❌ 未選擇任何歌單")
+    if st.button("開始匯出", type="primary", width="stretch"):
+        if not target or not os.path.exists(target):
+            st.error(f"目標路徑不存在: {target}")
+        elif not selected:
+            st.error("請至少選擇一個歌單。")
         else:
-            st.toast(f"正在分析 {len(selected_playlists)} 個歌單...")
-            with st.status(f"正在進行 [{sync_mode}]...", expanded=True) as status_container:
-                # Custom log function for Streamlit
-                def log_to_streamlit(message):
-                    status_container.write(message)
-                
-                actual_sync_mode = "Copy" if sync_mode == "標準複製 (Copy Only)" else "Mirror"
-                
+            persist_settings()
+            with st.status("正在匯出", expanded=True) as status:
+                def log_export(message):
+                    status.write(message)
+
                 sync_folders(
-                    source_base_dir=st.session_state['settings']['base_folder'],
-                    target_base_dir=new_export,
-                    playlist_names=[name for name in selected_playlists if name in st.session_state.playlist_data['名稱'].tolist()], # Ensure only selected and valid playlists are passed
-                    mode=actual_sync_mode,
-                    log_func=log_to_streamlit
+                    source_base_dir=settings.get("base_path"),
+                    target_base_dir=target,
+                    playlist_names=selected,
+                    mode=mode_label,
+                    log_func=log_export,
                 )
-                
-                st.success("匯出完成！")
+                status.update(label="匯出完成", state="complete")
 
-# ==========================================
-# ⚙️ 頁面 4: 系統設定
-# ==========================================
-elif page == "⚙️ 系統設定":
-    st.header("系統設定")
 
-    tab1 = st.tabs(["一般 & 路徑"])[0]
+elif page == "設定":
+    st.subheader("系統設定")
+    col1, col2 = st.columns(2)
 
-    # 更新 session_state 當 UI 變動
-    settings = st.session_state['settings']
+    with col1:
+        settings["base_path"] = st.text_input("Base Folder", value=settings.get("base_path", ""))
+        settings["language"] = st.selectbox(
+            "語言",
+            ["zh-TW", "en"],
+            index=0 if settings.get("language", "zh-TW") == "zh-TW" else 1,
+        )
+        settings["ffmpeg_path"] = st.text_input("ffmpeg 路徑", value=settings.get("ffmpeg_path", "bin/ffmpeg.exe"))
 
-    with tab1:
-        st.subheader("儲存位置")
-        settings['base_folder'] = st.text_input("音樂資料夾 (Base Folder)", value=settings.get('base_folder'))
-        
-        st.subheader("介面")
-        settings['language'] = st.selectbox("語言 (Language)", ["繁體中文 (zh-TW)", "English (en-US)"], index=0 if settings.get('language') == 'zh-TW' else 1)
-        
-        st.subheader("轉檔設定")
-        settings['ffmpeg_path'] = st.text_input("ffmpeg 路徑", value=settings.get('ffmpeg_path', 'bin/ffmpeg.exe'))
+    with col2:
+        settings["spotube_folder_name"] = st.text_input("Spotube 資料夾", value=settings.get("spotube_folder_name", "spotube"))
+        settings["spotube_exact_match"] = st.checkbox(
+            "Spotube 檔名精準匹配",
+            value=bool(settings.get("spotube_exact_match", True)),
+        )
+        settings["spotube_convert_matched_only"] = st.checkbox(
+            "只轉換有匹配歌單的歌曲",
+            value=bool(settings.get("spotube_convert_matched_only", False)),
+        )
+        st.text_input("Playlists", value=playlists_path or "", disabled=True)
 
-        st.subheader("Spotube 路徑")
-        settings['spotube_folder_name'] = st.text_input("Spotube 資料夾", value=settings.get('spotube_folder_name', 'spotube'))
-        settings['spotube_mp3_subfolder'] = st.text_input("MP3 子資料夾", value=settings.get('spotube_mp3_subfolder', 'mp3'))
-        settings['prefer_mp3_playlists'] = st.checkbox("播放清單優先 MP3", value=settings.get('prefer_mp3_playlists', True))
-
-    st.divider()
-    if st.button("💾 儲存設定 (Save Settings)", type="primary", width='stretch'):
-        save_settings()
+    if st.button("儲存設定", type="primary", width="stretch"):
+        derive_paths(settings)
+        ensure_dirs(settings)
+        persist_settings()
+        refresh_playlist_data()
+        st.success("設定已儲存。")
