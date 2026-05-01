@@ -608,6 +608,8 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
 
     def _convert_one(i, src, dest, name):
         log_func(f" -> [DEBUG] Worker {i} 開始處理: {name}")
+        log_func(f" -> [DEBUG] Worker {i} 來源路徑: {src}")
+        log_func(f" -> [DEBUG] Worker {i} 檔案存在: {os.path.exists(src)}")
         if stop_event and stop_event.is_set() or not _wait_if_paused():
             log_func(f" -> [DEBUG] Worker {i} 被取消或暫停")
             return "cancel"
