@@ -432,16 +432,17 @@ class PlaylistApp:
         bottom_container = tk.Frame(self.library_bottom_frame)
         bottom_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
-        # Left side: Error Log (smaller)
+        # Left side: Error Log (40% width)
         self.log_frame = tk.LabelFrame(bottom_container, text=_('log_title'), font=("Microsoft JhengHei", 10, "bold"))
-        self.log_frame.pack(side="left", fill="both", expand=True, padx=(0, 5), pady=0)
-        
+        self.log_frame.pack(side="left", fill="both", expand=False, padx=(0, 5), pady=0)
+        self.log_frame.config(width=400)
+
         self.log_text = scrolledtext.ScrolledText(self.log_frame, state='disabled', bg="black", fg="white", font=("Consolas", 10), height=10)
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
-        
-        # Right side: Song Status List
+
+        # Right side: Song Status List (60% width)
         self.song_status_frame = tk.LabelFrame(bottom_container, text=_('song_status_title'), font=("Microsoft JhengHei", 10, "bold"))
-        self.song_status_frame.pack(side="right", fill="both", expand=True, padx=(5, 0), pady=0)
+        self.song_status_frame.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=0)
         
         # Create treeview for song status
         columns = ('Status', 'Song')
@@ -486,17 +487,15 @@ class PlaylistApp:
         """Update song status in the treeview"""
         def update_ui():
             try:
-                print(f"[DEBUG UI] 更新歌曲狀態: index={song_index}, status={status}, name={song_name[:20]}")
-                print(f"[DEBUG UI] 現有項目數: {len(self.song_status_data)}")
                 # Update or add song in treeview
                 if song_index in self.song_status_data:
                     item = self.song_status_data[song_index]
                     self.song_status_tree.item(item, values=(status, song_name))
-                    print(f"[DEBUG UI] 更新現有項目: {item}")
                 else:
                     item = self.song_status_tree.insert('', 'end', text=str(song_index + 1), values=(status, song_name))
                     self.song_status_data[song_index] = item
-                    print(f"[DEBUG UI] 新增項目: {item}")
+                # Force refresh to ensure visibility
+                self.song_status_tree.update_idletasks()
             except Exception as e:
                 print(f"[DEBUG UI] Error updating song status: {e}")
 
