@@ -258,7 +258,16 @@ def _resolve_spotube_paths(config):
     library_path = config.get('library_path')
     m4a_subfolder = config.get('spotube_m4a_subfolder', 'm4a')
     mp3_subfolder = config.get('spotube_mp3_subfolder', 'mp3')
+
+    # Check if there's a dedicated m4a subfolder
     m4a_path = os.path.join(library_path, m4a_subfolder)
+    if not os.path.exists(m4a_path):
+        # If no m4a subfolder, M4A files might be directly in library_path
+        # Check if there are any M4A files in library_path
+        m4a_in_root = glob.glob(os.path.join(library_path, "*.m4a"))
+        if m4a_in_root:
+            m4a_path = library_path  # Use library root if M4A files are there
+
     mp3_path = os.path.join(library_path, mp3_subfolder)
     return m4a_path, mp3_path
 
@@ -481,6 +490,20 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
         current_cache_key = None
     else:
         current_cache_key, m4a_files = _get_m4a_cache_key(m4a_path, mp3_path)
+
+    # Diagnostic: log M4A path and sample files
+    log_func(f" -> M4A 掃描路徑: {m4a_path}")
+    if m4a_files:
+        log_func(f" -> 找到 {len(m4a_files)} 個 M4A 檔案")
+        for i, f in enumerate(m4a_files[:3]):
+            log_func(f"    範例 [{i+1}]: {f}")
+            log_func(f"      存在: {os.path.exists(f)}")
+    else:
+        log_func(f" -> 在 {m4a_path} 中未找到 M4A 檔案")
+        # Check if M4A files exist directly in library_path
+        alt_m4a = glob.glob(os.path.join(config.get('library_path'), "*.m4a"))
+        if alt_m4a:
+            log_func(f" -> 但在 {config.get('library_path')} 找到 {len(alt_m4a)} 個 M4A 檔案")
 
     if not m4a_files:
         log_func(" -> No M4A files found for conversion.")
