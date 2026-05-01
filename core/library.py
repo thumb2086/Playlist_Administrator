@@ -511,7 +511,7 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
         return 0, 0, 0
 
     if status_cb:
-        for i, (_, _, name) in enumerate(tasks):
+        for i, (_src, _dest, name) in enumerate(tasks):
             status_cb(i, _('conv_status_queued'), name)
 
     to_convert = []
