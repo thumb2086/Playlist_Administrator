@@ -2618,6 +2618,11 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     status_cb = None
     if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
         status_cb = stats.app.update_song_status
+        log_func(f" -> [DEBUG] 狀態回調已設定")
+    else:
+        has_app = hasattr(stats, 'app')
+        has_update = hasattr(getattr(stats, 'app', None), 'update_song_status') if has_app else False
+        log_func(f" -> [DEBUG] 狀態回調未設定: stats.app={has_app}, update_song_status={has_update}")
 
     converted, skipped, total = convert_spotube_m4a_to_mp3(
         config,

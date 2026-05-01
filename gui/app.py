@@ -1328,17 +1328,22 @@ class PlaylistApp:
 
     def show_stats_window(self, stats):
         total_downloaded = len(stats.songs_downloaded)
-        if total_downloaded == 0:
+        # Calculate total playlist changes (added + removed)
+        total_added = sum(len(changes.get('added', [])) for changes in stats.playlist_changes.values())
+        total_removed = sum(len(changes.get('removed', [])) for changes in stats.playlist_changes.values())
+
+        # Show "no new songs" only if both downloaded and playlist changes are empty
+        if total_downloaded == 0 and total_added == 0 and total_removed == 0:
             messagebox.showinfo(_('stats_win_title'), _('no_new_songs_downloaded'))
             return
 
         win = tk.Toplevel(self.root)
         win.title(_('stats_win_title'))
         win.geometry("550x450")
-        
+
         txt = scrolledtext.ScrolledText(win, font=("Microsoft JhengHei", 10), wrap=tk.WORD)
         txt.pack(fill="both", expand=True, padx=10, pady=10)
-        
+
         report = []
         report.append(f"=== {_('update_stats_title')} ===")
         report.append(_('stats_playlists_scanned', stats.playlists_scanned))
@@ -1376,6 +1381,10 @@ class PlaylistApp:
 
         report.append(f"--- {_('playlist_update_summary')} ---")
         report.append(_('playlist_update_counts', total_updated_playlists, len(total_playlists)))
+        # Show playlist changes (added/removed) for Spotube users
+        if total_added > 0 or total_removed > 0:
+            report.append(f"  + 播放清單新增: {total_added} 首")
+            report.append(f"  - 播放清單移除: {total_removed} 首")
         report.append(_('stats_songs_downloaded', total_downloaded))
         
         # Show detailed playlist updates
