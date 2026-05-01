@@ -197,23 +197,16 @@ class PlaylistApp:
         self.tab_player = tk.Frame(self.notebook)
         self.notebook.add(self.tab_player, text=_('tab_player'))
 
+        # Tab 3: Statistics
+        self.tab_stats = tk.Frame(self.notebook)
+        self.notebook.add(self.tab_stats, text=_('tab_statistics'))
+
         # 1. URL Section (In Tab 1 Top Pane)
         self.url_frame = tk.LabelFrame(self.library_top_frame, text=_('step_1_title'), font=("Microsoft JhengHei", 10, "bold"))
         self.url_frame.pack(fill="both", expand=True, padx=10, pady=5)
         
         self.url_entry = tk.Entry(self.url_frame, font=("Microsoft JhengHei", 10))
         self.url_entry.pack(side="top", fill="x", padx=10, pady=5)
-        
-        # Hint about dynamic playlists
-        hint_label = tk.Label(
-            self.url_frame,
-            text="提示：用 Web Playback SDK 可以取得較新的動態清單（如 Daily Mix），原本的方式取得是相對舊的清單",
-            font=("Microsoft JhengHei", 9),
-            fg="#666666",
-            wraplength=500,
-            justify="left"
-        )
-        hint_label.pack(side="top", fill="x", padx=10, pady=(0, 5))
         
         btn_frame = tk.Frame(self.url_frame)
         btn_frame.pack(fill="x", padx=5, pady=5)
@@ -391,8 +384,11 @@ class PlaylistApp:
         self.current_song_idx = -1
         self.current_lyrics = []  # List of (time_ms, text)
         self.lyrics_update_job = None
-        
-        # 3. Statistics Section (In Tab 1 Top Pane)
+
+        # 3. Statistics Tab Content
+        self._create_stats_tab()
+
+        # 4. Statistics Section (In Tab 1 Top Pane)
         self.stats_frame = tk.LabelFrame(self.library_top_frame, text=_('stats_title'), font=("Microsoft JhengHei", 10, "bold"))
         self.stats_frame.pack(fill="x", padx=10, pady=5)
         
@@ -932,6 +928,93 @@ class PlaylistApp:
         # Close button
         tk.Button(win, text="關閉", command=win.destroy, width=10).pack(pady=10)
 
+    def _create_stats_tab(self):
+        """Create the Statistics tab content"""
+        stats_container = tk.Frame(self.tab_stats, padx=20, pady=20)
+        stats_container.pack(fill="both", expand=True)
+
+        # Title
+        tk.Label(stats_container, text="📊 統計資料", font=("Microsoft JhengHei", 16, "bold")).pack(anchor="w", pady=(0, 20))
+
+        # Library Statistics Section
+        lib_frame = tk.LabelFrame(stats_container, text="音樂庫統計", font=("Microsoft JhengHei", 11, "bold"), padx=15, pady=10)
+        lib_frame.pack(fill="x", pady=(0, 15))
+
+        self.stats_tab_total_lbl = tk.Label(lib_frame, text="歌曲總數: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_total_lbl.pack(anchor="w", pady=2)
+
+        self.stats_tab_formats_lbl = tk.Label(lib_frame, text="格式分布: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_formats_lbl.pack(anchor="w", pady=2)
+
+        self.stats_tab_size_lbl = tk.Label(lib_frame, text="總容量: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_size_lbl.pack(anchor="w", pady=2)
+
+        # Playlist Statistics Section
+        pl_frame = tk.LabelFrame(stats_container, text="播放清單統計", font=("Microsoft JhengHei", 11, "bold"), padx=15, pady=10)
+        pl_frame.pack(fill="x", pady=(0, 15))
+
+        self.stats_tab_pl_count_lbl = tk.Label(pl_frame, text="清單數量: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_pl_count_lbl.pack(anchor="w", pady=2)
+
+        self.stats_tab_pl_songs_lbl = tk.Label(pl_frame, text="清單歌曲總數: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_pl_songs_lbl.pack(anchor="w", pady=2)
+
+        self.stats_tab_unique_pl_lbl = tk.Label(pl_frame, text="清單唯一歌曲: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_unique_pl_lbl.pack(anchor="w", pady=2)
+
+        self.stats_tab_dupes_lbl = tk.Label(pl_frame, text="重複歌曲數: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_dupes_lbl.pack(anchor="w", pady=2)
+
+        # Savings Section
+        savings_frame = tk.LabelFrame(stats_container, text="空間統計", font=("Microsoft JhengHei", 11, "bold"), padx=15, pady=10)
+        savings_frame.pack(fill="x", pady=(0, 15))
+
+        self.stats_tab_savings_lbl = tk.Label(savings_frame, text="重複歌曲節省空間: 載入中...", font=("Microsoft JhengHei", 11), fg="#4CAF50")
+        self.stats_tab_savings_lbl.pack(anchor="w", pady=2)
+
+        self.stats_tab_not_in_pl_lbl = tk.Label(savings_frame, text="未收錄在清單的歌曲: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_not_in_pl_lbl.pack(anchor="w", pady=2)
+
+        # Refresh Button
+        tk.Button(stats_container, text="🔄 重新整理", command=lambda: self._refresh_stats_tab(),
+                  font=("Microsoft JhengHei", 10), bg="#2196F3", fg="white", padx=20, pady=5).pack(anchor="w", pady=(10, 0))
+
+        # Auto-refresh after a short delay to allow config to be ready
+        self.root.after(1000, self._refresh_stats_tab)
+
+    def _refresh_stats_tab(self):
+        """Refresh statistics displayed in the stats tab"""
+        from core.library import get_detailed_stats
+
+        def update_ui():
+            try:
+                stats = get_detailed_stats(self.config)
+
+                # Library stats
+                total_size_gb = stats['total_size_mb'] / 1024
+                size_str = f"{total_size_gb:.2f} GB" if total_size_gb >= 1 else f"{stats['total_size_mb']:.1f} MB"
+                self.stats_tab_total_lbl.config(text=f"歌曲總數: {stats['total_songs']} 首")
+                self.stats_tab_formats_lbl.config(text=f"格式分布: FLAC {stats['flac_count']} | MP3 {stats['mp3_count']} | M4A {stats['m4a_count']}")
+                self.stats_tab_size_lbl.config(text=f"總容量: {size_str}")
+
+                # Playlist stats
+                pl_files = len([f for f in os.listdir(self.config.get('playlists_path', '')) if f.endswith(('.m3u8', '.m3u'))])
+                self.stats_tab_pl_count_lbl.config(text=f"清單數量: {pl_files} 個")
+                self.stats_tab_pl_songs_lbl.config(text=f"清單歌曲總數: {stats['total_playlist_entries']} 首")
+                self.stats_tab_unique_pl_lbl.config(text=f"清單唯一歌曲: {stats['unique_playlist_entries']} 首")
+                self.stats_tab_dupes_lbl.config(text=f"重複歌曲數: {stats['duplicates_count']} 首")
+
+                # Savings stats
+                savings_gb = stats['savings_mb'] / 1024
+                savings_str = f"{savings_gb:.2f} GB" if savings_gb >= 1 else f"{stats['savings_mb']:.1f} MB"
+                self.stats_tab_savings_lbl.config(text=f"重複歌曲節省空間: {savings_str}")
+                self.stats_tab_not_in_pl_lbl.config(text=f"未收錄在清單的歌曲: {stats['not_in_playlists_count']} 首")
+
+            except Exception as e:
+                print(f"Error refreshing stats tab: {e}")
+
+        threading.Thread(target=lambda: self.root.after(0, update_ui), daemon=True).start()
+
     def update_stats_ui(self, audio_cache=None):
         def _bg_update():
             try:
@@ -1013,8 +1096,8 @@ class PlaylistApp:
                     url_names = self.config.get('url_names', {})
                     # Check if name is already tracked by another URL
                     existing_url = next((u for u, n in url_names.items() if n == name), None)
-                    
-                    if existing_url:
+
+                    if existing_url and existing_url != url:
                         self.log(_('duplicate_name_warning', name, existing_url))
                         if not messagebox.askyesno(_('duplicate_confirm_title'), _('duplicate_confirm_msg', name)):
                             if url in url_names:
