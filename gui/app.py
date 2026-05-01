@@ -486,16 +486,20 @@ class PlaylistApp:
         """Update song status in the treeview"""
         def update_ui():
             try:
+                print(f"[DEBUG UI] 更新歌曲狀態: index={song_index}, status={status}, name={song_name[:20]}")
+                print(f"[DEBUG UI] 現有項目數: {len(self.song_status_data)}")
                 # Update or add song in treeview
                 if song_index in self.song_status_data:
                     item = self.song_status_data[song_index]
                     self.song_status_tree.item(item, values=(status, song_name))
+                    print(f"[DEBUG UI] 更新現有項目: {item}")
                 else:
                     item = self.song_status_tree.insert('', 'end', text=str(song_index + 1), values=(status, song_name))
                     self.song_status_data[song_index] = item
+                    print(f"[DEBUG UI] 新增項目: {item}")
             except Exception as e:
-                print(f"Error updating song status: {e}")
-        
+                print(f"[DEBUG UI] Error updating song status: {e}")
+
         # Schedule UI update from main thread
         self.root.after(0, update_ui)
     
