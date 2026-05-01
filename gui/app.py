@@ -1086,7 +1086,11 @@ class PlaylistApp:
         
         def _check_and_add():
             from core.spotify import scrape_via_spotify_embed
-            scrape_via_spotify_embed(self.config, None, self.log, target_urls=[url])
+            # Check if auto_sync_on_add is enabled (default: False for faster add)
+            auto_sync = self.config.get('auto_sync_on_add', False)
+            skip_sync = not auto_sync  # If auto_sync is False, skip the library scan
+            # Use skip_sync to control whether to scan library immediately
+            scrape_via_spotify_embed(self.config, None, self.log, target_urls=[url], skip_sync=skip_sync)
             name = self.config.get('url_names', {}).get(url)
             
             def _ui_final():

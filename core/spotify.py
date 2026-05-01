@@ -108,7 +108,15 @@ def get_spotify_name(sp_url):
     except: pass
     return None
 
-def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
+def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_sync=False):
+    """
+    Scrape Spotify playlists via embed API.
+
+    Args:
+        skip_sync: If True, only fetch playlist name and track list without
+                  scanning library or writing M3U files. Useful for adding
+                  new playlists quickly.
+    """
     from utils.i18n import _
     target_urls = target_urls or config.get('spotify_urls', [])
     if not target_urls:
@@ -489,13 +497,18 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None):
                 # Save name to config mapping
                 if 'url_names' not in config: config['url_names'] = {}
                 config['url_names'][sp_url] = pl_name
-                
+
                 # Record today as last updated
                 if 'last_updated' not in config: config['last_updated'] = {}
                 config['last_updated'][sp_url] = today
-                
+
                 from utils.config import save_config
                 save_config(config)
+
+                # If skip_sync, only save name and log, don't scan library or write M3U
+                if skip_sync:
+                    log_func(f" -> 已儲存歌單 '{pl_name}' ({len(tracks)} 首) - 同步將在更新時執行")
+                    continue
 
                 # For single tracks, don't create playlist files - just mark as processed
                 if "track/" not in sp_url:

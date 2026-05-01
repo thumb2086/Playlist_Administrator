@@ -86,6 +86,19 @@ class SettingsWindow:
             font=("Microsoft JhengHei", 10)
         ).pack(anchor="w", pady=(8, 0))
 
+        # 3.5 Sync Section
+        lf_sync = tk.LabelFrame(left_column, text="同步 (Sync)", font=("Microsoft JhengHei", 10, "bold"), padx=10, pady=8)
+        lf_sync.pack(fill="x", pady=(0, 10))
+
+        self.auto_sync_on_add_var = tk.BooleanVar(value=bool(self.config.get('auto_sync_on_add', False)))
+        tk.Checkbutton(
+            lf_sync,
+            text="新增歌單時自動掃描音樂庫同步",
+            variable=self.auto_sync_on_add_var,
+            font=("Microsoft JhengHei", 10)
+        ).pack(anchor="w")
+        tk.Label(lf_sync, text="(關閉可加快新增歌單速度，同步將在「全部更新」時執行)", font=("Microsoft JhengHei", 9), fg="#666666").pack(anchor="w")
+
         # ===== RIGHT COLUMN =====
         
         # 4. Folder Structure Section
@@ -147,6 +160,7 @@ class SettingsWindow:
         self.config['base_path'] = new_path
         self.config['ffmpeg_path'] = new_ffmpeg
         self.config['spotube_convert_matched_only'] = bool(self.convert_matched_only_var.get())
+        self.config['auto_sync_on_add'] = bool(self.auto_sync_on_add_var.get())
         
         # Special handling for path change
         if path_changed:
