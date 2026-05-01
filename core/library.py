@@ -511,8 +511,12 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
         return 0, 0, 0
 
     if status_cb:
+        log_func(f" -> 初始化 {len(tasks)} 個歌曲狀態")
         for i, (_src, _dest, name) in enumerate(tasks):
-            status_cb(i, _('conv_status_queued'), name)
+            try:
+                status_cb(i, _('conv_status_queued'), name)
+            except Exception as e:
+                log_func(f" -> [DEBUG] 狀態更新失敗: {e}")
 
     to_convert = []
     for i, (src, dest, name) in enumerate(tasks):
@@ -564,11 +568,18 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
     converted = 0
 
     def _convert_one(i, src, dest, name):
+        log_func(f" -> [DEBUG] Worker {i} 開始處理: {name}")
         if stop_event and stop_event.is_set() or not _wait_if_paused():
+            log_func(f" -> [DEBUG] Worker {i} 被取消或暫停")
             return "cancel"
         if status_cb:
-            status_cb(i, _('conv_status_working'), name)
+            try:
+                status_cb(i, _('conv_status_working'), name)
+                log_func(f" -> [DEBUG] Worker {i} 狀態更新為 working")
+            except Exception as e:
+                log_func(f" -> [DEBUG] Worker {i} 狀態更新失敗: {e}")
         ok = convert_audio_file(src, dest, 'mp3', log_func, get_ffmpeg_path(config))
+        log_func(f" -> [DEBUG] Worker {i} 轉檔結果: {'ok' if ok else 'fail'}")
         return "ok" if ok else "fail"
 
     if to_convert:
