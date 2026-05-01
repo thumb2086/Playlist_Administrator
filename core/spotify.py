@@ -555,17 +555,17 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                     
                     # Build index to resolve actual filenames (handles "E" prefix and diff extensions)
                     log_func(_('scanning_lib'))
-                    import glob
-                    search_pattern = os.path.join(library_path, "**", "*")
-                    all_files = glob.glob(search_pattern, recursive=True)
-                    audio_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
-                    from core.library import build_library_index, build_metadata_index, find_song_in_library, find_song_exact_format, find_song_simple_match
-                    lib_index = build_library_index(audio_cache)
+                    from core.library import LibraryIndexCache, build_library_index, build_metadata_index, find_song_in_library, find_song_exact_format, find_song_simple_match
+                    # Use cached library index for faster sync
+                    lib_index = LibraryIndexCache.get_index(library_path, log_func)
+                    # Get audio files from index values for metadata indexing
+                    audio_cache = []
+                    for paths in lib_index.values():
+                        audio_cache.extend(paths)
                     mp3_files = [f for f in audio_cache if f.lower().endswith('.mp3')]
                     mp3_index = build_library_index(mp3_files)
                     metadata_index = build_metadata_index(mp3_files)
                     all_metadata_index = build_metadata_index(audio_cache)
-                    log_func(f" -> 音樂庫索引建立完成: {len(audio_cache)} 個音訊檔案, {len(lib_index)} 個索引項目")
                     # Debug: show first few audio files found
                     if audio_cache:
                         log_func(f"    範例檔案: {os.path.basename(audio_cache[0])}")

@@ -27,6 +27,8 @@ class PlaylistApp:
         self.log_update_job = None
         self.last_full_refresh = 0
         self.songs_since_last_refresh = 0
+        self.last_song_status_update = 0
+        self.pending_song_updates = {}  # Batch song status updates
 
         self.config = load_config()
         
@@ -484,23 +486,41 @@ class PlaylistApp:
     
         
     def update_song_status(self, song_index, status, song_name):
-        """Update song status in the treeview"""
-        def update_ui():
+        """Update song status in the treeview with throttling."""
+        import time
+
+        # Store pending update
+        self.pending_song_updates[song_index] = (status, song_name)
+
+        now = time.time()
+        # Throttle: only update UI every 0.1 seconds
+        if now - self.last_song_status_update < 0.1:
+            return
+
+        self.last_song_status_update = now
+
+        def batch_update_ui():
             try:
-                # Update or add song in treeview
-                if song_index in self.song_status_data:
-                    item = self.song_status_data[song_index]
-                    self.song_status_tree.item(item, values=(status, song_name))
-                else:
-                    item = self.song_status_tree.insert('', 'end', text=str(song_index + 1), values=(status, song_name))
-                    self.song_status_data[song_index] = item
-                # Force refresh to ensure visibility
-                self.song_status_tree.update_idletasks()
+                # Batch update all pending song statuses
+                updates = self.pending_song_updates.copy()
+                self.pending_song_updates.clear()
+
+                for idx, (status, name) in updates.items():
+                    if idx in self.song_status_data:
+                        item = self.song_status_data[idx]
+                        self.song_status_tree.item(item, values=(status, name))
+                    else:
+                        item = self.song_status_tree.insert('', 'end', text=str(idx + 1), values=(status, name))
+                        self.song_status_data[idx] = item
+
+                # Force refresh every 50 updates to avoid UI freeze
+                if len(updates) > 0:
+                    self.song_status_tree.update_idletasks()
             except Exception as e:
                 print(f"[DEBUG UI] Error updating song status: {e}")
 
         # Schedule UI update from main thread
-        self.root.after(0, update_ui)
+        self.root.after(0, batch_update_ui)
     
     def clear_song_status(self):
         """Clear all song status data"""

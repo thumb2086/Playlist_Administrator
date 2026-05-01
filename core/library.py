@@ -495,8 +495,14 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
 
     tasks = []
     skipped = 0
+    missing_files = []
     for src in m4a_files:
         if os.path.normpath(src).lower().startswith(os.path.normpath(mp3_path).lower()):
+            continue
+
+        # Check if source file actually exists
+        if not os.path.exists(src):
+            missing_files.append(os.path.basename(src))
             continue
 
         base = os.path.splitext(os.path.basename(src))[0]
@@ -505,9 +511,19 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
         _move_matching_legacy_mp3(src, legacy_dest, dest, log_func)
         tasks.append((src, dest, name))
 
+    # Report statistics before conversion
+    total_m4a = len(m4a_files)
+    valid_tasks = len(tasks)
+    log_func(f" -> M4A 檔案統計: 總計 {total_m4a} 個, 有效 {valid_tasks} 個, 不存在 {len(missing_files)} 個")
+    if missing_files and len(missing_files) <= 10:
+        for mf in missing_files:
+            log_func(f"    ⚠️ 檔案不存在: {mf}")
+    elif missing_files:
+        log_func(f"    ⚠️ 另有 {len(missing_files) - 10} 個檔案不存在（略過顯示）")
+
     total_tasks = len(tasks)
     if total_tasks == 0:
-        log_func(" -> No M4A files found for conversion.")
+        log_func(" -> No valid M4A files found for conversion.")
         return 0, 0, 0
 
     if status_cb:
@@ -838,6 +854,84 @@ def get_normalized_tokens(text):
 
     # 7. Split into tokens, remove empty strings, deduplicate and sort
     return sorted(list(set([t for t in text.split() if t])))
+
+class LibraryIndexCache:
+    """Fast cache for library index with mtime-based invalidation."""
+    _cache = None
+    _cache_mtime = {}
+    _cache_path = None
+
+    @classmethod
+    def get_index(cls, library_path, log_func=None):
+        """Get cached library index or rebuild if needed."""
+        if not library_path or not os.path.exists(library_path):
+            return {}
+
+        # Check if cache is still valid
+        if cls._cache is not None and cls._cache_path == library_path:
+            if cls._is_cache_valid(library_path):
+                if log_func:
+                    log_func(f" -> 使用快取的音樂庫索引 ({len(cls._cache)} 項目)")
+                return cls._cache
+
+        # Rebuild index
+        if log_func:
+            log_func(" -> 建立音樂庫索引...")
+
+        start_time = time.time()
+        index = cls._build_index(library_path, log_func)
+        elapsed = time.time() - start_time
+
+        # Update cache
+        cls._cache = index
+        cls._cache_path = library_path
+        cls._cache_mtime = cls._get_all_files_mtime(library_path)
+
+        if log_func:
+            log_func(f" -> 音樂庫索引建立完成: {len(index)} 個項目, 耗時 {elapsed:.2f}s")
+
+        return index
+
+    @classmethod
+    def _is_cache_valid(cls, library_path):
+        """Check if cached index is still valid based on file mtimes."""
+        current_mtime = cls._get_all_files_mtime(library_path)
+        return current_mtime == cls._cache_mtime
+
+    @classmethod
+    def _get_all_files_mtime(cls, library_path):
+        """Get modification times of all audio files for cache validation."""
+        mtime_dict = {}
+        try:
+            for root, _, files in os.walk(library_path):
+                for f in files:
+                    if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')):
+                        full_path = os.path.join(root, f)
+                        try:
+                            mtime_dict[full_path] = os.path.getmtime(full_path)
+                        except OSError:
+                            pass
+        except Exception:
+            pass
+        return mtime_dict
+
+    @classmethod
+    def _build_index(cls, library_path, log_func=None):
+        """Build library index from scratch using fast os.walk."""
+        audio_files = []
+        for root, _, files in os.walk(library_path):
+            for f in files:
+                if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')):
+                    audio_files.append(os.path.join(root, f))
+
+        return build_library_index(audio_files)
+
+    @classmethod
+    def invalidate(cls):
+        """Force cache invalidation on next call."""
+        cls._cache = None
+        cls._cache_mtime = {}
+        cls._cache_path = None
 
 def build_library_index(audio_files):
     index = {}
