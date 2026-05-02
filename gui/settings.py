@@ -86,6 +86,15 @@ class SettingsWindow:
             font=("Microsoft JhengHei", 10)
         ).pack(anchor="w", pady=(8, 0))
 
+        self.strict_matching_var = tk.BooleanVar(value=bool(self.config.get('spotube_strict_matching', True)))
+        tk.Checkbutton(
+            lf_conv,
+            text="嚴格檔名匹配 (只轉換沒有同檔名 MP3 的 M4A)",
+            variable=self.strict_matching_var,
+            font=("Microsoft JhengHei", 10)
+        ).pack(anchor="w", pady=(4, 0))
+        tk.Label(lf_conv, text="(關閉允許智能匹配，可能跳過部分轉換)", font=("Microsoft JhengHei", 9), fg="#666666").pack(anchor="w")
+
         # 3.5 Sync Section
         lf_sync = tk.LabelFrame(left_column, text="同步 (Sync)", font=("Microsoft JhengHei", 10, "bold"), padx=10, pady=8)
         lf_sync.pack(fill="x", pady=(0, 10))
@@ -98,6 +107,18 @@ class SettingsWindow:
             font=("Microsoft JhengHei", 10)
         ).pack(anchor="w")
         tk.Label(lf_sync, text="(關閉可加快新增歌單速度，同步將在「全部更新」時執行)", font=("Microsoft JhengHei", 9), fg="#666666").pack(anchor="w")
+
+        # 3.6 Debug Section
+        lf_debug = tk.LabelFrame(left_column, text="除錯 (Debug)", font=("Microsoft JhengHei", 10, "bold"), padx=10, pady=8)
+        lf_debug.pack(fill="x", pady=(0, 10))
+
+        self.debug_mode_var = tk.BooleanVar(value=bool(self.config.get('debug_mode', False)))
+        tk.Checkbutton(
+            lf_debug,
+            text="啟用除錯輸出 (顯示詳細除錯資訊)",
+            variable=self.debug_mode_var,
+            font=("Microsoft JhengHei", 10)
+        ).pack(anchor="w")
 
         # ===== RIGHT COLUMN =====
         
@@ -160,7 +181,13 @@ class SettingsWindow:
         self.config['base_path'] = new_path
         self.config['ffmpeg_path'] = new_ffmpeg
         self.config['spotube_convert_matched_only'] = bool(self.convert_matched_only_var.get())
+        self.config['spotube_strict_matching'] = bool(self.strict_matching_var.get())
         self.config['auto_sync_on_add'] = bool(self.auto_sync_on_add_var.get())
+        self.config['debug_mode'] = bool(self.debug_mode_var.get())
+
+        # Apply debug mode immediately
+        from utils.config import set_debug_mode
+        set_debug_mode(self.config['debug_mode'])
         
         # Special handling for path change
         if path_changed:

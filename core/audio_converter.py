@@ -255,8 +255,8 @@ def convert_audio_file(input_path, output_path, target_format, log_func=None, ff
             return True
         
         # Prepare ffmpeg command
-        # Use provided ffmpeg_path or default to 'ffmpeg'
-        ffmpeg_cmd = ffmpeg_path if ffmpeg_path else 'ffmpeg'
+        # Use provided ffmpeg_path if it exists, otherwise fall back to 'ffmpeg' from PATH
+        ffmpeg_cmd = ffmpeg_path if (ffmpeg_path and os.path.isfile(ffmpeg_path)) else 'ffmpeg'
         
         if target_format == 'mp3':
             # High quality MP3 conversion with metadata preservation

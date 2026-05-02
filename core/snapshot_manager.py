@@ -146,7 +146,6 @@ def append_to_removed_songs_m3u8(removed_tracks, config, lib_index):
     
     # Import needed functions
     from core.library import find_song_in_library
-    from utils.helpers import encode_uri_path
     
     # Prepare entries
     entries = []
@@ -167,12 +166,12 @@ def append_to_removed_songs_m3u8(removed_tracks, config, lib_index):
                 if ':' in rel_path:
                     rel_path = rel_path.split(':', 1)[1].lstrip('/\\')
             
-            # Format: forward slashes + URI encode
-            m3u_entry_path = encode_uri_path(rel_path.replace('\\', '/'))
+            # Format: forward slashes (URI encoding removed for Windows/Echo compatibility)
+            m3u_entry_path = rel_path.replace('\\', '/')
         else:
             # If file not found, use a placeholder path (will be resolved later)
             safe_filename = sanitize_filename(track)
-            m3u_entry_path = f"../Music/{encode_uri_path(safe_filename)}.mp3"
+            m3u_entry_path = f"../Music/{safe_filename}.mp3"
         
         entries.append((track, m3u_entry_path))
     

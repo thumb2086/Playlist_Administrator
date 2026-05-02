@@ -454,15 +454,42 @@ def _matches_playlist_index(src, playlist_index):
                     return True
     return False
 
-def _find_existing_mp3_for_source(src, mp3_index, metadata_index=None):
-    for name in _source_match_names(src):
-        found = find_song_exact_format(name, 'mp3', mp3_index)
-        if not found and metadata_index:
-            found = find_song_in_library(name, mp3_index, metadata_index=metadata_index)
-            if found and not found.lower().endswith('.mp3'):
-                found = None
+def _find_existing_mp3_for_source(src, mp3_index, metadata_index=None, strict_mode=True):
+    """
+    Find existing MP3 for an M4A source.
+    
+    Args:
+        strict_mode: If True, only match exact filenames. If False, allow metadata-based fuzzy matching.
+    """
+    # STRICT MODE: Only use the original filename (first item from _source_match_names)
+    # This prevents matching files with different names (e.g., "2317" vs "23_17")
+    if strict_mode:
+        # Get only the original filename stem
+        original_name = os.path.splitext(os.path.basename(src))[0]
+        found = find_song_exact_format(original_name, 'mp3', mp3_index)
         if found and os.path.exists(found) and _converted_mp3_matches_source(src, found):
             return found
+        # In strict mode, we don't check any other variants
+        return None
+    
+    # NON-STRICT MODE: Use all variants from _source_match_names (legacy behavior)
+    for name in _source_match_names(src):
+        found = find_song_exact_format(name, 'mp3', mp3_index)
+        if found and os.path.exists(found):
+            if _converted_mp3_matches_source(src, found):
+                return found
+        
+        if not found and metadata_index:
+            found = find_song_in_library(name, mp3_index, metadata_index=metadata_index)
+            if found and found.lower().endswith('.mp3') and os.path.exists(found):
+                src_id = _audio_metadata_identity(src)
+                dest_id = _audio_metadata_identity(found)
+                if src_id and dest_id:
+                    src_title, src_artist = src_id
+                    dest_title, dest_artist = dest_id
+                    if src_title and dest_title and src_title == dest_title:
+                        if (not src_artist and not dest_artist) or (src_artist and dest_artist and src_artist == dest_artist):
+                            return found
     return None
 
 def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None, status_cb=None, source_files=None):
@@ -550,12 +577,14 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
         return 0, 0, 0
 
     if status_cb:
-        log_func(f" -> 初始化 {len(tasks)} 個歌曲狀態")
+        if config.get('debug_mode', False):
+            log_func(f" -> 初始化 {len(tasks)} 個歌曲狀態")
         for i, (_src, _dest, name) in enumerate(tasks):
             try:
                 status_cb(i, _('conv_status_queued'), name)
             except Exception as e:
-                log_func(f" -> [DEBUG] 狀態更新失敗: {e}")
+                if config.get('debug_mode', False):
+                    log_func(f" -> [DEBUG] 狀態更新失敗: {e}")
 
     to_convert = []
     for i, (src, dest, name) in enumerate(tasks):
@@ -565,7 +594,10 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
                 status_cb(i, _('conv_status_skipped'), f"{name} (not in playlist)")
             continue
 
-        existing_mp3 = _find_existing_mp3_for_source(src, mp3_index, metadata_index)
+        # Check for existing MP3 - use strict mode (exact filename match only)
+        # This ensures all M4A files get converted unless there's an exact filename match
+        strict_matching = config.get('spotube_strict_matching', True)
+        existing_mp3 = _find_existing_mp3_for_source(src, mp3_index, metadata_index, strict_mode=strict_matching)
         if existing_mp3:
             skipped += 1
             if status_cb:
@@ -583,6 +615,10 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
                 pass
 
         to_convert.append((i, src, dest, name))
+
+    # Debug logging for conversion decision
+    if config.get('debug_mode', False):
+        log_func(f" -> 轉檔決策: 總任務 {len(tasks)}, 因播放清單跳過 {len([t for t in tasks if playlist_index and not _matches_playlist_index(t[0], playlist_index)])}, 因已有MP3跳過 {sum(1 for t in tasks if _find_existing_mp3_for_source(t[0], mp3_index, metadata_index))}, 實際待轉檔 {len(to_convert)}")
 
     processed = skipped
     if progress_cb:
@@ -607,20 +643,25 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
     converted = 0
 
     def _convert_one(i, src, dest, name):
-        log_func(f" -> [DEBUG] Worker {i} 開始處理: {name}")
-        log_func(f" -> [DEBUG] Worker {i} 來源路徑: {src}")
-        log_func(f" -> [DEBUG] Worker {i} 檔案存在: {os.path.exists(src)}")
+        if config.get('debug_mode', False):
+            log_func(f" -> [DEBUG] Worker {i} 開始處理: {name}")
+            log_func(f" -> [DEBUG] Worker {i} 來源路徑: {src}")
+            log_func(f" -> [DEBUG] Worker {i} 檔案存在: {os.path.exists(src)}")
         if stop_event and stop_event.is_set() or not _wait_if_paused():
-            log_func(f" -> [DEBUG] Worker {i} 被取消或暫停")
+            if config.get('debug_mode', False):
+                log_func(f" -> [DEBUG] Worker {i} 被取消或暫停")
             return "cancel"
         if status_cb:
             try:
                 status_cb(i, _('conv_status_working'), name)
-                log_func(f" -> [DEBUG] Worker {i} 狀態更新為 working")
+                if config.get('debug_mode', False):
+                    log_func(f" -> [DEBUG] Worker {i} 狀態更新為 working")
             except Exception as e:
-                log_func(f" -> [DEBUG] Worker {i} 狀態更新失敗: {e}")
+                if config.get('debug_mode', False):
+                    log_func(f" -> [DEBUG] Worker {i} 狀態更新失敗: {e}")
         ok = convert_audio_file(src, dest, 'mp3', log_func, get_ffmpeg_path(config))
-        log_func(f" -> [DEBUG] Worker {i} 轉檔結果: {'ok' if ok else 'fail'}")
+        if config.get('debug_mode', False):
+            log_func(f" -> [DEBUG] Worker {i} 轉檔結果: {'ok' if ok else 'fail'}")
         return "ok" if ok else "fail"
 
     if to_convert:
@@ -2737,11 +2778,13 @@ def update_library_logic(config, stats, log_func, progress_func=None, post_scrap
     status_cb = None
     if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
         status_cb = stats.app.update_song_status
-        log_func(f" -> [DEBUG] 狀態回調已設定")
+        if config.get('debug_mode', False):
+            log_func(f" -> [DEBUG] 狀態回調已設定")
     else:
         has_app = hasattr(stats, 'app')
         has_update = hasattr(getattr(stats, 'app', None), 'update_song_status') if has_app else False
-        log_func(f" -> [DEBUG] 狀態回調未設定: stats.app={has_app}, update_song_status={has_update}")
+        if config.get('debug_mode', False):
+            log_func(f" -> [DEBUG] 狀態回調未設定: stats.app={has_app}, update_song_status={has_update}")
 
     converted, skipped, total = convert_spotube_m4a_to_mp3(
         config,
@@ -2870,6 +2913,10 @@ def get_playlist_completeness_report(files, library_path):
             for fmt in song_formats:
                 # Check strict existence of each format
                 if not find_song_exact_format(song_name, fmt, library_index):
+                    # Fallback: if MP3 is missing, check if M4A exists (can be played/converted)
+                    if fmt == 'mp3' and find_song_exact_format(song_name, 'm4a', library_index):
+                        # M4A exists, treat as complete (can convert later)
+                        continue
                     is_song_complete = False
                     break
             
@@ -3070,10 +3117,19 @@ def get_detailed_stats(config, audio_files=None):
 
     unique_library_tracks = len(library_tokens)
     total_songs = unique_library_tracks
-    flac_count = len([t for t, exts in token_to_exts.items() if exts.intersection({'.flac', '.wav'})])
-    lossy_count = len([t for t, exts in token_to_exts.items() if exts.intersection({'.mp3', '.m4a', '.webm'})])
-    mp3_count = len([t for t, exts in token_to_exts.items() if '.mp3' in exts])
-    m4a_count = len([t for t, exts in token_to_exts.items() if '.m4a' in exts])
+
+    # Count actual files (not unique tracks) for format distribution
+    flac_files = [f for f in audio_files if os.path.splitext(f)[1].lower() in {'.flac', '.wav'}]
+    mp3_files = [f for f in audio_files if f.lower().endswith('.mp3')]
+    m4a_files = [f for f in audio_files if f.lower().endswith('.m4a')]
+
+    flac_count = len(flac_files)
+    mp3_count = len(mp3_files)
+    m4a_count = len(m4a_files)
+    lossy_count = len(mp3_files) + len(m4a_files) + len([f for f in audio_files if f.lower().endswith('.webm')])
+
+    # Count songs with multiple formats (library duplicates)
+    library_duplicates = sum(1 for exts in token_to_exts.values() if len(exts) > 1)
     unconverted_count = 0
     for tokens_tuple, exts in token_to_exts.items():
         if '.m4a' in exts and '.mp3' not in exts:
@@ -3150,7 +3206,7 @@ def get_detailed_stats(config, audio_files=None):
                 actual_savings_bytes += (occurrences - 1) * song_total_size
     
     savings_mb = actual_savings_bytes / (1024 * 1024)
-    
+
     return {
           'total_songs': unique_library_tracks,
           'flac_count': flac_count,
@@ -3163,6 +3219,7 @@ def get_detailed_stats(config, audio_files=None):
           'unique_playlist_entries': unique_playlist_entries,
           'unique_playlist_tokens': unique_playlist_tokens,
           'duplicates_count': duplicates_count,
+          'library_duplicates': library_duplicates,  # Songs with multiple formats
           'savings_mb': savings_mb,
           'unconverted_count': unconverted_count,
           'not_in_playlists_count': not_in_playlists_count

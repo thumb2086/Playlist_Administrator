@@ -487,21 +487,22 @@ class PlaylistApp:
         
     def update_song_status(self, song_index, status, song_name):
         """Update song status in the treeview"""
+        from utils.config import debug_print
         def update_ui():
             try:
-                print(f"[DEBUG UI] 更新歌曲狀態: index={song_index}, status={status}, name={song_name[:20]}")
-                print(f"[DEBUG UI] 現有項目數: {len(self.song_status_data)}")
+                debug_print(f"[DEBUG UI] 更新歌曲狀態: index={song_index}, status={status}, name={song_name[:20]}")
+                debug_print(f"[DEBUG UI] 現有項目數: {len(self.song_status_data)}")
                 # Update or add song in treeview
                 if song_index in self.song_status_data:
                     item = self.song_status_data[song_index]
                     self.song_status_tree.item(item, values=(status, song_name))
-                    print(f"[DEBUG UI] 更新現有項目: {item}")
+                    debug_print(f"[DEBUG UI] 更新現有項目: {item}")
                 else:
                     item = self.song_status_tree.insert('', 'end', text=str(song_index + 1), values=(status, song_name))
                     self.song_status_data[song_index] = item
-                    print(f"[DEBUG UI] 新增項目: {item}")
+                    debug_print(f"[DEBUG UI] 新增項目: {item}")
             except Exception as e:
-                print(f"[DEBUG UI] Error updating song status: {e}")
+                debug_print(f"[DEBUG UI] Error updating song status: {e}")
 
         # Schedule UI update from main thread
         self.root.after(0, update_ui)
@@ -800,10 +801,79 @@ class PlaylistApp:
     def load_selected_playlist(self):
         selected = self.player_playlist_combo.get()
         if selected:
-            # self.load_playlist_into_player(selected)  # TODO: Implement or remove
-            self.log(f"-> 已選擇歌單: {selected}")
+            self.load_playlist_into_player(selected)
         else:
             messagebox.showwarning("提示", "請先選擇一個播放清單")
+
+    def load_playlist_into_player(self, playlist_name):
+        """Load a playlist into the player with proper URL decoding"""
+        import urllib.parse
+        
+        playlists_path = self.config.get('playlists_path', '')
+        playlist_file = None
+        
+        # Find playlist file
+        for ext in ['.m3u8', '.m3u']:
+            candidate = os.path.join(playlists_path, f"{playlist_name}{ext}")
+            if os.path.exists(candidate):
+                playlist_file = candidate
+                break
+        
+        if not playlist_file:
+            self.log(f"-> 找不到播放清單檔案: {playlist_name}")
+            return
+        
+        # Load songs from playlist
+        songs = []
+        try:
+            with open(playlist_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    # This is a file path - decode URL encoding
+                    if line.endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm')):
+                        # Decode URL-encoded path (e.g., %20 -> space, %E6%98%9F -> 星)
+                        decoded_path = urllib.parse.unquote(line)
+                        
+                        # Convert relative path to absolute path
+                        if decoded_path.startswith('../'):
+                            # Relative to playlists folder
+                            abs_path = os.path.normpath(os.path.join(playlists_path, decoded_path))
+                        elif decoded_path.startswith('./'):
+                            abs_path = os.path.normpath(os.path.join(playlists_path, decoded_path))
+                        else:
+                            abs_path = os.path.normpath(decoded_path)
+                        
+                        # Check if file exists
+                        if os.path.exists(abs_path):
+                            songs.append(abs_path)
+                        else:
+                            # Try the original encoded path as fallback
+                            if os.path.exists(line):
+                                songs.append(line)
+                            else:
+                                # Try with just filename
+                                base_name = os.path.basename(decoded_path)
+                                library_path = self.config.get('library_path', '')
+                                alt_path = os.path.join(library_path, base_name)
+                                if os.path.exists(alt_path):
+                                    songs.append(alt_path)
+        except Exception as e:
+            self.log(f"-> 載入播放清單失敗: {e}")
+            return
+        
+        if songs:
+            self.current_playlist_songs = songs
+            self.original_playlist_order = list(songs)
+            self.current_song_idx = 0
+            self.log(f"-> 已載入 {len(songs)} 首歌曲到播放器")
+            
+            # Auto-start playing first song
+            self.play_song(songs[0])
+        else:
+            self.log(f"-> 播放清單中沒有可播放的歌曲")
 
     def reset_update_status(self):
         self.config['last_updated'] = {}
@@ -1001,7 +1071,7 @@ class PlaylistApp:
                 total_size_gb = stats['total_size_mb'] / 1024
                 size_str = f"{total_size_gb:.2f} GB" if total_size_gb >= 1 else f"{stats['total_size_mb']:.1f} MB"
                 self.stats_tab_total_lbl.config(text=f"歌曲總數: {stats['total_songs']} 首")
-                self.stats_tab_formats_lbl.config(text=f"格式分布: FLAC {stats['flac_count']} | MP3 {stats['mp3_count']} | M4A {stats['m4a_count']}")
+                self.stats_tab_formats_lbl.config(text=f"格式分布: MP3 {stats['mp3_count']} | M4A {stats['m4a_count']}")
                 self.stats_tab_size_lbl.config(text=f"總容量: {size_str}")
 
                 # Playlist stats
@@ -1009,7 +1079,7 @@ class PlaylistApp:
                 self.stats_tab_pl_count_lbl.config(text=f"清單數量: {pl_files} 個")
                 self.stats_tab_pl_songs_lbl.config(text=f"清單歌曲總數: {stats['total_playlist_entries']} 首")
                 self.stats_tab_unique_pl_lbl.config(text=f"清單唯一歌曲: {stats['unique_playlist_entries']} 首")
-                self.stats_tab_dupes_lbl.config(text=f"重複歌曲數: {stats['duplicates_count']} 首")
+                self.stats_tab_dupes_lbl.config(text=f"多格式歌曲數: {stats['library_duplicates']} 首")
 
                 # Savings stats
                 savings_gb = stats['savings_mb'] / 1024
@@ -1037,7 +1107,7 @@ class PlaylistApp:
                 saving_str = f"{savings/1024:.2f} GB" if savings > 1024 else f"{savings:.1f} MB"
                 
                 try:
-                    self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', total_songs, size_str, stats['flac_count'], stats['lossy_count'])))
+                    self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', total_songs, size_str, stats['mp3_count'], stats['m4a_count'])))
                     self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', dupes)))
                     self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', saving_str)))
                     extra_text = " | ".join([
@@ -1354,12 +1424,15 @@ class PlaylistApp:
         report = []
         report.append(f"=== {_('update_stats_title')} ===")
         report.append(_('stats_playlists_scanned', stats.playlists_scanned))
-        report.append(_('stats_songs_downloaded', total_downloaded) + "\n")
+        # For Spotube users, show playlist-added count; for downloaders, show downloaded count
+        total_new_songs = max(total_downloaded, total_added)
+        report.append(_('stats_songs_downloaded', total_new_songs) + "\n")
         
-        # --- Download Summary by Category ---
+        # --- Category Summary (from playlist changes, not just downloads) ---
         summary = {'華語': set(), '日語': set(), '韓語': set(), '西洋': set(), '其他': set()}
-        
-        for pl_name, songs in stats.playlist_updates.items():
+
+        # Use playlist_changes which tracks all added songs, not just downloaded ones
+        for pl_name, changes in stats.playlist_changes.items():
             lower_pl = pl_name.lower()
             cat = '其他'
             if any(k in lower_pl for k in ['華語', '中文', 'chinese', 'mandarin']):
@@ -1370,8 +1443,9 @@ class PlaylistApp:
                 cat = '韓語'
             elif any(k in lower_pl for k in ['西洋', 'english', 'edm', 'western']):
                 cat = '西洋'
-            
-            for song in songs:
+
+            # Add songs from the 'added' list in playlist_changes
+            for song in changes.get('added', []):
                 summary[cat].add(song)
 
         report.append(f"--- {_('dl_summary_title')} ---")
@@ -1382,8 +1456,20 @@ class PlaylistApp:
         report.append(_('dl_summary_other', len(summary['其他'])) + "\n")
 
         # --- Playlist Update Statistics ---
+        # Combine playlist_updates (downloaded) with playlist_changes (added to playlist)
         updated_playlists = {name: songs for name, songs in stats.playlist_updates.items() if songs}
-        total_updated_playlists = len(updated_playlists)
+        # Also include playlists with changes (for Spotube users with existing library files)
+        changed_playlists = {name: changes.get('added', []) for name, changes in stats.playlist_changes.items() if changes.get('added')}
+        # Merge both sources
+        all_updated = dict(updated_playlists)
+        for pl_name, songs in changed_playlists.items():
+            if pl_name in all_updated:
+                # Combine and deduplicate
+                all_updated[pl_name] = list(set(all_updated[pl_name]) | set(songs))
+            else:
+                all_updated[pl_name] = songs
+
+        total_updated_playlists = len(all_updated)
         total_playlists = self.config.get('spotify_urls', [])
 
         report.append(f"--- {_('playlist_update_summary')} ---")
@@ -1392,16 +1478,16 @@ class PlaylistApp:
         if total_added > 0 or total_removed > 0:
             report.append(f"  + 播放清單新增: {total_added} 首")
             report.append(f"  - 播放清單移除: {total_removed} 首")
-        report.append(_('stats_songs_downloaded', total_downloaded))
-        
-        # Show detailed playlist updates
-        for pl_name, songs in sorted(updated_playlists.items(), key=lambda item: len(item[1]), reverse=True):
+        report.append(_('stats_songs_downloaded', total_new_songs))
+
+        # Show detailed playlist updates (from both downloads and playlist changes)
+        for pl_name, songs in sorted(all_updated.items(), key=lambda item: len(item[1]), reverse=True):
             report.append(f"  - {pl_name}: {_('stats_added_songs', len(songs))}")
-        
+
         # Add detailed song list
-        if updated_playlists:
+        if all_updated:
             report.append(f"\n{_('song_list_title')}")
-            for pl_name, songs in sorted(updated_playlists.items(), key=lambda item: len(item[1]), reverse=True):
+            for pl_name, songs in sorted(all_updated.items(), key=lambda item: len(item[1]), reverse=True):
                 if songs:  # Only show playlists that have songs
                     report.append(f"{pl_name}:")
                     for song in sorted(songs):
@@ -1524,7 +1610,10 @@ class PlaylistApp:
             self.is_playing = True
             self.play_btn.config(text="⏸")
             self.current_playing = song_path # Track current song for lyrics offset
-            self.now_playing_lbl.config(text=_('player_now_playing', os.path.basename(song_path)))
+            # Decode URL-encoded filename for display
+            import urllib.parse
+            display_name = urllib.parse.unquote(os.path.basename(song_path))
+            self.now_playing_lbl.config(text=_('player_now_playing', display_name))
         
             # Update offset label
             current_offset = self.lyrics_offsets.get(song_path, 0.0)

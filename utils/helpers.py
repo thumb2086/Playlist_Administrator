@@ -79,16 +79,15 @@ def download_image(url, timeout=10):
 
 def encode_uri_path(path):
     """
-    URI encode a file path for M3U8 compatibility with Echo Nightly.
-    Encodes special characters like 「」, ..., spaces, Chinese characters,
-    while preserving forward slashes as path separators.
+    DEPRECATED: URI encoding is no longer used for M3U8 files.
     
-    Args:
-        path: File path string (should already use forward slashes)
+    Windows players and Echo Nightly on mobile require raw file paths
+    with forward slashes, not URL-encoded paths.
     
-    Returns:
-        URI encoded path string safe for M3U8
+    Kept for potential future use but currently unused in playlist generation.
     """
+    import warnings
+    warnings.warn("encode_uri_path is deprecated, use raw paths with forward slashes", DeprecationWarning)
     import urllib.parse
     
     # Split by forward slash to preserve path structure

@@ -628,9 +628,8 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                             
 
                             # Standardization: Forward slashes (/) are best for M3U8 and avoid separator issues
-                            from utils.helpers import encode_uri_path
-                            m3u_entry_path = encode_uri_path(rel_path.replace('\\', '/'))
-                            
+                            m3u_entry_path = rel_path.replace('\\', '/')
+
                             # Write EXTINF and the relative path with LF (Echo Nightly compatible)
                             f.write(f"#EXTINF:-1,{clean_track}\n")
                             f.write(f"{m3u_entry_path}\n")

@@ -3,8 +3,8 @@ Version information for Playlist Administrator
 """
 
 # Current version - update this when releasing a new version
-# v1.5.1 - Fix i18n import bug and add version info to settings
-__version__ = "1.5.1"
+# v1.5.2 - Fix M3U8 path encoding: remove URL encoding for Windows/Echo Nightly compatibility
+__version__ = "1.5.2"
 
 # GitHub repository info for update checking
 GITHUB_OWNER = "thumb2086"

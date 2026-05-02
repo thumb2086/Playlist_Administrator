@@ -100,6 +100,8 @@ def load_config():
         'spotube_folder_name': 'spotube',
         'spotube_exact_match': True,  # Use simple filename matching for Spotube downloads
         'spotube_convert_matched_only': False,  # Only convert M4A files that match playlist entries
+        'spotube_strict_matching': True,  # Strict filename matching for M4A->MP3 conversion (True=exact only, False=allow fuzzy)
+        'debug_mode': False,  # Enable debug output for troubleshooting
     }
     for key, value in defaults.items():
         config.setdefault(key, value)
@@ -110,6 +112,9 @@ def load_config():
 
     from utils.i18n import I18N
     I18N.set_language(config['language'])
+    
+    # Set global debug mode flag
+    set_debug_mode(config.get('debug_mode', False))
     
     return config
 
@@ -209,3 +214,18 @@ def ensure_dirs(config):
     # 同時確保主資料夾目錄存在
     if not os.path.exists(config['base_path']):
         os.makedirs(config['base_path'], exist_ok=True)
+
+
+# Global flag for debug mode (set during load_config)
+_DEBUG_MODE = False
+
+def set_debug_mode(enabled):
+    """Set global debug mode flag"""
+    global _DEBUG_MODE
+    _DEBUG_MODE = bool(enabled)
+
+def debug_print(*args, **kwargs):
+    """Print debug message only if debug mode is enabled"""
+    global _DEBUG_MODE
+    if _DEBUG_MODE:
+        print(*args, **kwargs)
