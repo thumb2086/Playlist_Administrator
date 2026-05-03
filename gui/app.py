@@ -1327,17 +1327,17 @@ class PlaylistApp:
 
         # Validate current and total parameters first
         try:
-            current_val = int(current) if current is not None else 0
-            total_val = int(total) if total is not None else 0
+            current_val = float(current) if current is not None else 0.0
+            total_val = float(total) if total is not None else 0.0
         except (ValueError, TypeError):
-            current_val = 0
-            total_val = 0
+            current_val = 0.0
+            total_val = 0.0
         
         # Ensure reasonable values
         if current_val < 0:
-            current_val = 0
+            current_val = 0.0
         if total_val <= 0:
-            total_val = 0
+            total_val = 0.0
         if current_val > total_val and total_val > 0:
             current_val = total_val
 
@@ -1358,7 +1358,7 @@ class PlaylistApp:
             self.task_progress_var.set(pct)
             
             # Format progress text with ETA
-            progress_text = f"{current_val}/{total_val}"
+            progress_text = f"{int(round(current_val))}/{int(round(total_val))}"
             
             # Ensure eta is numeric before comparison
             try:
@@ -2146,6 +2146,7 @@ class PlaylistApp:
         self.log(_('update_end'))
         self.root.after(0, lambda: self.speed_label.config(text=_('speed_ready')))
         self.root.after(0, lambda: self.progress_label.config(text=""))
+        self.root.after(0, lambda: self.task_progress_var.set(0))
         
         # Final refresh with updated audio cache
         def final_refresh():

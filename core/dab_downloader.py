@@ -72,7 +72,7 @@ class DABDownloader:
             # Progress callback wrapper
             def progress_wrapper(progress):
                 if progress_callback:
-                    progress_callback(current_dl, progress)
+                    progress_callback(progress, 100)
             
             # Download the track
             log_func(f"  ⬇️ [DAB Downloading] {safe_title}.flac (Lossless)")
