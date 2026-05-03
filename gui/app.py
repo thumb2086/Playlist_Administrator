@@ -11,12 +11,107 @@ from utils.version_checker import should_check_for_updates, perform_update_check
 from utils.version import get_version
 from core.library import UpdateStats, update_library_logic, export_usb_logic, get_detailed_stats
 
+# ===== Dark Theme Color System (Spotify-inspired) =====
+COLORS_DARK = {
+    'bg': '#121212',             # Main background
+    'surface': '#1e1e1e',       # Card/panel background
+    'elevated': '#2a2a2a',      # Elevated elements
+    'text': '#ffffff',          # Primary text
+    'text_secondary': '#b3b3b3', # Secondary text
+    'text_muted': '#6a6a6a',    # Muted/disabled text
+    'border': '#2a2a2a',        # Borders
+    'accent': '#1DB954',        # Spotify green (primary accent)
+    'accent_hover': '#1ed760',   # Accent hover state
+    'accent_pressed': '#169c46', # Accent pressed state
+    'error': '#e22134',         # Error red
+    'warning': '#f59b23',       # Warning orange
+    'success': '#1DB954',       # Success (same as accent)
+    'lyrics_bg': '#0a0a0a',     # Lyrics display background
+    'lyrics_text': '#1DB954',    # Lyrics text (green on black)
+}
+
+# ===== Light Theme Color System =====
+COLORS_LIGHT = {
+    'bg': '#f5f5f5',             # Main background
+    'surface': '#ffffff',       # Card/panel background
+    'elevated': '#eeeeee',      # Elevated elements
+    'text': '#212121',          # Primary text
+    'text_secondary': '#616161', # Secondary text
+    'text_muted': '#9e9e9e',    # Muted/disabled text
+    'border': '#e0e0e0',        # Borders
+    'accent': '#1DB954',        # Keep Spotify green
+    'accent_hover': '#1ed760',   # Accent hover state
+    'accent_pressed': '#169c46', # Accent pressed state
+    'error': '#e22134',         # Error red
+    'warning': '#f59b23',       # Warning orange
+    'success': '#1DB954',       # Success
+    'lyrics_bg': '#fafafa',     # Lyrics display background
+    'lyrics_text': '#1DB954',    # Lyrics text
+}
+
+# Default to dark theme
+COLORS = COLORS_DARK
+
+# Font Configuration
+FONT_PRIMARY = "Noto Sans TC"
+FONT_FALLBACK = "Microsoft JhengHei"
+FONT_MONO = "JetBrains Mono"
+
+
+def get_font(size=10, bold=False, mono=False):
+    """Get font with proper fallback"""
+    weight = "bold" if bold else "normal"
+    if mono:
+        return (FONT_MONO, size, weight)
+    return (FONT_PRIMARY, size, weight)
+
+
+def style_button(btn, primary=False, danger=False):
+    """Apply consistent button styling"""
+    if danger:
+        btn.config(
+            bg=COLORS['error'],
+            fg=COLORS['text'],
+            activebackground='#ff4557',
+            activeforeground=COLORS['text'],
+            relief="flat",
+            cursor="hand2"
+        )
+    elif primary:
+        btn.config(
+            bg=COLORS['accent'],
+            fg=COLORS['bg'],
+            activebackground=COLORS['accent_hover'],
+            activeforeground=COLORS['bg'],
+            relief="flat",
+            cursor="hand2"
+        )
+    else:
+        btn.config(
+            bg=COLORS['elevated'],
+            fg=COLORS['text'],
+            activebackground=COLORS['surface'],
+            activeforeground=COLORS['text'],
+            relief="flat",
+            cursor="hand2"
+        )
+
+
+def style_frame(frame, is_card=False):
+    """Apply consistent frame styling"""
+    frame.config(bg=COLORS['surface'] if is_card else COLORS['bg'])
+    return frame
+
 class PlaylistApp:
     def __init__(self, root):
         self.root = root
         self.app_version = get_version()
         self.root.title(f"{_('app_title')} v{self.app_version}")
-        self.root.geometry("1100x800")
+        self.root.geometry("1400x850")
+        self.root.configure(bg=COLORS['bg'])
+
+        # --- Configure ttk styles for dark theme ---
+        self._configure_ttk_styles()
 
         # --- UI Throttling & Batching ---
         self.last_progress_update = 0
@@ -31,7 +126,11 @@ class PlaylistApp:
         self.pending_song_updates = {}  # Batch song status updates
 
         self.config = load_config()
-        
+
+        # Load theme from config (default to dark)
+        self.current_theme = self.config.get('theme', 'dark')
+        self._apply_theme_colors()
+
         # Load language from config (fix: ensure language is restored after restart/cancel)
         lang = self.config.get('language', 'zh-TW')
         I18N.set_language(lang)
@@ -54,23 +153,37 @@ class PlaylistApp:
         self.stop_event = threading.Event()
         
         self.create_widgets()
-        self.refresh_url_list()
-        self.update_stats_ui()
-        
+        # 异步执行列表刷新（可选：如果不需要启动时显示状态图标，可设为 False）
+        auto_refresh_on_startup = False  # 设为 True 则在启动时自动扫描音乐库
+        if auto_refresh_on_startup:
+            self.root.after(100, lambda: threading.Thread(target=self._async_refresh_url_list, daemon=True).start())
+        else:
+            # 只更新基础列表，不扫描音乐库（更快启动）
+            self._update_basic_list()
+        # 注意：不再於啟動時呼叫 update_stats_ui()，改為延遲到使用者切換到統計頁面時才載入
+
         # First Run Check
         if not self.config.get('setup_completed', False):
             self.first_run_wizard()
-        
-        # Proactively fetch names on startup for URLs without names
-        threading.Thread(target=self.proactive_name_fetch, daemon=True).start()
 
-        # Check for updates on startup (after a short delay to let UI load)
-        if should_check_for_updates(self.config):
-            self.root.after(3000, self._check_version_update)
+        # Delay background tasks until UI is fully loaded and responsive
+        # Proactively fetch names on startup for URLs without names (delayed for faster startup)
+        self.root.after(500, lambda: threading.Thread(target=self.proactive_name_fetch, daemon=True).start())
 
-    def _check_version_update(self):
-        """Check for updates and show dialog if available"""
-        def check():
+        # Check for updates on startup (after UI is fully loaded and user can interact)
+        # Only check if user has enabled auto_update_check (default: True)
+        if self.config.get('auto_update_check', True) and should_check_for_updates(self.config):
+            # Use longer delay (5 seconds) to ensure UI is fully responsive
+            self.root.after(5000, lambda: threading.Thread(target=self._background_update_check, daemon=True).start())
+
+    def _background_update_check(self):
+        """Background thread: Check for updates without blocking UI"""
+        # Use a flag to prevent multiple update dialogs
+        if hasattr(self, '_update_check_in_progress') and self._update_check_in_progress:
+            return
+        self._update_check_in_progress = True
+
+        try:
             result = perform_update_check(self.config, log_func=self.log, silent=True)
 
             # Skip if user chose to skip this version
@@ -78,19 +191,205 @@ class PlaylistApp:
             if skipped_version and result.get('latest_version') == skipped_version:
                 return
 
-            # Show dialog if update available
+            # Show dialog if update available (using after to ensure UI thread)
             if result.get('has_update'):
+                # Schedule dialog show on main UI thread
                 self.root.after(0, lambda: self._show_update_dialog(result))
-
-        threading.Thread(target=check, daemon=True).start()
+        finally:
+            self._update_check_in_progress = False
 
     def _show_update_dialog(self, update_info):
-        """Show update notification dialog"""
+        """Show update notification dialog (non-modal so UI remains usable)"""
+        # Prevent multiple update dialogs
+        if hasattr(self, '_update_dialog_open') and self._update_dialog_open:
+            return
+        self._update_dialog_open = True
+
+        def on_dialog_close():
+            self._update_dialog_open = False
+
         from gui.update_dialog import UpdateDialog
-        UpdateDialog(self.root, update_info)
+        dialog = UpdateDialog(self.root, update_info, on_close_callback=on_dialog_close)
+
+    def _configure_ttk_styles(self):
+        """Configure ttk widget styles for dark theme"""
+        style = ttk.Style()
+
+        # Use 'clam' theme for better customization support on Windows
+        try:
+            style.theme_use('clam')
+        except tk.TclError:
+            pass  # Fallback to default if clam not available
+
+        # Configure Treeview (song status list) - Dark theme
+        style.configure("Treeview",
+                       background=COLORS['elevated'],
+                       foreground=COLORS['text'],
+                       fieldbackground=COLORS['elevated'],
+                       rowheight=24,
+                       borderwidth=0,
+                       relief='flat')
+        style.configure("Treeview.Heading",
+                       background=COLORS['surface'],
+                       foreground=COLORS['text'],
+                       font=get_font(10, bold=True),
+                       borderwidth=0,
+                       relief='flat')
+        style.map("Treeview",
+                 background=[('selected', COLORS['accent']),
+                            ('!selected', COLORS['elevated'])],
+                 foreground=[('selected', COLORS['bg']),
+                            ('!selected', COLORS['text'])],
+                 fieldbackground=[('selected', COLORS['accent']),
+                                 ('!selected', COLORS['elevated'])])
+
+        # Configure Combobox (player playlist selector)
+        style.configure("TCombobox",
+                       fieldbackground=COLORS['elevated'],
+                       background=COLORS['elevated'],
+                       foreground=COLORS['text'],
+                       arrowcolor=COLORS['text'])
+        style.map("TCombobox",
+                 fieldbackground=[('readonly', COLORS['elevated']),
+                                 ('disabled', COLORS['surface'])],
+                 selectbackground=[('readonly', COLORS['accent'])],
+                 selectforeground=[('readonly', COLORS['bg'])],
+                 foreground=[('readonly', COLORS['text'])])
+
+        # Configure Progressbar
+        style.configure("Horizontal.TProgressbar",
+                       background=COLORS['accent'],
+                       troughcolor=COLORS['elevated'],
+                       borderwidth=0,
+                       lightcolor=COLORS['accent'],
+                       darkcolor=COLORS['accent'],
+                       thickness=8)
+
+    def _apply_theme_colors(self):
+        """Apply the current theme to the global COLORS dictionary"""
+        global COLORS
+        if self.current_theme == 'light':
+            COLORS = COLORS_LIGHT
+        else:
+            COLORS = COLORS_DARK
+
+    def apply_theme_to_all_widgets(self):
+        """Apply current theme to all widgets dynamically (no restart needed)"""
+        global COLORS
+
+        # Reload theme from config
+        self.current_theme = self.config.get('theme', 'dark')
+        self._apply_theme_colors()
+
+        # Reconfigure ttk styles
+        self._configure_ttk_styles()
+
+        # Update root
+        self.root.configure(bg=COLORS['bg'])
+
+        # Helper to update widget colors
+        def update_widget_colors(widget):
+            try:
+                widget_type = widget.winfo_class()
+
+                if widget_type == 'Frame' or widget_type == 'Tk':
+                    widget.configure(bg=COLORS['bg'])
+                elif widget_type == 'Label':
+                    # Determine text color based on current config
+                    if hasattr(widget, '_is_secondary_text'):
+                        widget.configure(bg=COLORS['bg'], fg=COLORS['text_secondary'])
+                    elif hasattr(widget, '_is_muted_text'):
+                        widget.configure(bg=COLORS['bg'], fg=COLORS['text_muted'])
+                    else:
+                        widget.configure(bg=COLORS['bg'], fg=COLORS['text'])
+                elif widget_type == 'Button':
+                    # Check if primary/accent button by checking current bg
+                    current_bg = widget.cget('bg')
+                    if current_bg in [COLORS_DARK['accent'], COLORS_LIGHT['accent'], '#1DB954', '#1ed760']:
+                        widget.configure(bg=COLORS['accent'], fg=COLORS['bg'],
+                                       activebackground=COLORS['accent_hover'],
+                                       activeforeground=COLORS['bg'])
+                    elif current_bg in [COLORS_DARK['error'], COLORS_LIGHT['error'], '#e22134']:
+                        widget.configure(bg=COLORS['error'], fg=COLORS['text'])
+                    else:
+                        widget.configure(bg=COLORS['elevated'], fg=COLORS['text'],
+                                       activebackground=COLORS['surface'],
+                                       activeforeground=COLORS['text'])
+                elif widget_type == 'Entry':
+                    widget.configure(bg=COLORS['elevated'], fg=COLORS['text'],
+                                   insertbackground=COLORS['text'],
+                                   highlightbackground=COLORS['border'])
+                elif widget_type == 'Listbox':
+                    widget.configure(bg=COLORS['elevated'], fg=COLORS['text'],
+                                   selectbackground=COLORS['accent'],
+                                   selectforeground=COLORS['bg'])
+                elif widget_type == 'Text':
+                    widget.configure(bg=COLORS['elevated'], fg=COLORS['text_secondary'])
+                elif widget_type == 'Scale':
+                    widget.configure(bg=COLORS['surface'], fg=COLORS['accent'],
+                                   troughcolor=COLORS['elevated'])
+                elif widget_type == 'Checkbutton':
+                    widget.configure(bg=COLORS['surface'], fg=COLORS['text'],
+                                   selectcolor=COLORS['elevated'],
+                                   activebackground=COLORS['surface'])
+                elif widget_type == 'LabelFrame':
+                    widget.configure(bg=COLORS['surface'], fg=COLORS['text'],
+                                   highlightbackground=COLORS['border'])
+                elif widget_type == 'Scrollbar':
+                    widget.configure(bg=COLORS['surface'], troughcolor=COLORS['elevated'])
+                elif widget_type == 'TCombobox':
+                    # ttk widgets are handled by style reconfiguration
+                    pass
+                elif widget_type == 'Treeview':
+                    # ttk widgets are handled by style reconfiguration
+                    pass
+            except tk.TclError:
+                pass  # Widget might be destroyed
+
+            # Recursively update children
+            try:
+                for child in widget.winfo_children():
+                    update_widget_colors(child)
+            except tk.TclError:
+                pass
+
+        # Update all tabs
+        update_widget_colors(self.tab_library)
+        update_widget_colors(self.tab_player)
+        update_widget_colors(self.tab_stats)
+
+        # Update top bar and other direct children of root
+        for child in self.root.winfo_children():
+            update_widget_colors(child)
+
+        # Update header specifically
+        self.header_lbl.configure(bg=COLORS['bg'], fg=COLORS['text'])
+
+        # Update settings button
+        self.settings_btn.configure(bg=COLORS['elevated'], fg=COLORS['text'],
+                                    activebackground=COLORS['surface'])
+
+        # Update progress label
+        self.progress_label.configure(bg=COLORS['bg'], fg=COLORS['accent'])
+        self.speed_label.configure(bg=COLORS['bg'], fg=COLORS['text_secondary'])
+
+        # Update lyrics card
+        for widget in self.player_frame.winfo_children():
+            for w in widget.winfo_children():
+                try:
+                    w.configure(bg=COLORS['surface'])
+                except:
+                    pass
+
+        # Update lyrics display
+        try:
+            lyrics_card = self.lyrics_lbl.winfo_parent()
+            self.lyrics_lbl.configure(bg=COLORS['lyrics_bg'], fg=COLORS['lyrics_text'])
+        except:
+            pass
 
     def first_run_wizard(self):
-        """Prompt for language on first run"""
+        """Prompt for language on first run - Dark theme"""
         def set_lang(lang):
             self.config['language'] = lang
             self.config['setup_completed'] = True
@@ -99,48 +398,74 @@ class PlaylistApp:
             self.update_ui_text()
             top.destroy()
             # If base path not set, it will be handled by regular logic in init or next loop
-            
+
         top = tk.Toplevel(self.root)
         top.title("Welcome / 歡迎")
-        top.geometry("500x450")
+        top.geometry("500x420")
         top.resizable(False, False)
         top.transient(self.root)
         top.grab_set()
-        top.state('normal')  # 確保視窗正常顯示
-        top.lift()           # 提升到最前面
-        top.focus_force()    # 強制取得焦點
-        
-        # Center - 使用固定的尺寸值
-        screen_width = top.winfo_screenwidth()
-        screen_height = top.winfo_screenheight()
-        x = (screen_width // 2) - (500 // 2)  # 500 是視窗寬度
-        y = (screen_height // 2) - (450 // 2)  # 450 是視窗高度
-        top.geometry(f'500x450+{x}+{y}')
-        
-        # 確保視窗可見並取得焦點
-        top.deiconify()  # 確保視窗不是最小化狀態
+        top.state('normal')
         top.lift()
         top.focus_force()
-        
-        main_frame = tk.Frame(top, padx=20, pady=20)
+        top.configure(bg=COLORS['bg'])
+
+        # Center dialog
+        screen_width = top.winfo_screenwidth()
+        screen_height = top.winfo_screenheight()
+        x = (screen_width // 2) - (500 // 2)
+        y = (screen_height // 2) - (420 // 2)
+        top.geometry(f'500x420+{x}+{y}')
+
+        top.deiconify()
+        top.lift()
+        top.focus_force()
+
+        # Main frame with dark background
+        main_frame = tk.Frame(top, bg=COLORS['bg'], padx=30, pady=30)
         main_frame.pack(fill="both", expand=True)
-        
-        tk.Label(main_frame, text="Welcome! / 歡迎使用!", font=("Microsoft JhengHei", 20, "bold"), fg="#2196F3").pack(pady=(20, 10))
-        tk.Label(main_frame, text="Please select your language\n請選擇您的語言", font=("Microsoft JhengHei", 12), fg="#666").pack(pady=10)
-        
-        btn_frame = tk.Frame(main_frame)
-        btn_frame.pack(fill="x", pady=30)
-        
-        tk.Button(btn_frame, text="English", command=lambda: set_lang('en'), font=("Microsoft JhengHei", 12), height=3, width=15, bg="#E0E0E0").pack(side="left", padx=20, expand=True)
-        tk.Button(btn_frame, text="繁體中文", command=lambda: set_lang('zh-TW'), font=("Microsoft JhengHei", 12, "bold"), height=3, width=15, bg="#d0f0c0").pack(side="right", padx=20, expand=True)
-        
+
+        # Title with accent color
+        tk.Label(main_frame, text="🎵", font=get_font(48), fg=COLORS['accent'], bg=COLORS['bg']).pack(pady=(10, 0))
+        tk.Label(main_frame, text="Playlist Administrator", font=get_font(22, bold=True), fg=COLORS['text'], bg=COLORS['bg']).pack(pady=(5, 5))
+        tk.Label(main_frame, text="播放清單管理工具", font=get_font(14), fg=COLORS['text_secondary'], bg=COLORS['bg']).pack(pady=(0, 20))
+
+        # Language selection prompt
+        tk.Label(main_frame, text="請選擇語言 / Select Language", font=get_font(12), fg=COLORS['text_secondary'], bg=COLORS['bg']).pack(pady=(10, 20))
+
+        # Button frame
+        btn_frame = tk.Frame(main_frame, bg=COLORS['bg'])
+        btn_frame.pack(fill="x", pady=20)
+
+        # Chinese button (primary)
+        zh_btn = tk.Button(btn_frame, text="繁體中文", command=lambda: set_lang('zh-TW'),
+                          font=get_font(12, bold=True), height=2, width=12,
+                          bg=COLORS['accent'], fg=COLORS['bg'],
+                          activebackground=COLORS['accent_hover'],
+                          activeforeground=COLORS['bg'],
+                          relief="flat", cursor="hand2")
+        zh_btn.pack(side="left", padx=10, expand=True)
+
+        # English button (secondary)
+        en_btn = tk.Button(btn_frame, text="English", command=lambda: set_lang('en'),
+                          font=get_font(12), height=2, width=12,
+                          bg=COLORS['elevated'], fg=COLORS['text'],
+                          activebackground=COLORS['surface'],
+                          activeforeground=COLORS['text'],
+                          relief="flat", cursor="hand2")
+        en_btn.pack(side="right", padx=10, expand=True)
+
+        # Footer text
+        tk.Label(main_frame, text="版本 / Version " + self.app_version,
+                font=get_font(10), fg=COLORS['text_muted'], bg=COLORS['bg']).pack(side="bottom", pady=(20, 0))
+
         # Block until closed
         self.root.wait_window(top)
 
     def open_settings_window(self):
         from gui.settings import SettingsWindow
-        
-        def on_settings_close(lang_changed=False, path_changed=False):
+
+        def on_settings_close(lang_changed=False, path_changed=False, theme_changed=False):
             if lang_changed:
                 self.update_ui_text()
                 self.refresh_url_list()
@@ -149,7 +474,9 @@ class PlaylistApp:
                 self.log(_('base_folder_changed'))
                 self.refresh_url_list()
                 self.update_stats_ui()
-                
+            if theme_changed:
+                self.apply_theme_to_all_widgets()
+
         SettingsWindow(self.root, self.config, on_settings_close)
 
     def proactive_name_fetch(self):
@@ -166,306 +493,759 @@ class PlaylistApp:
         scrape_via_spotify_embed(self.config, None, self.log, target_urls=missing)
         self.root.after(0, self.refresh_url_list)
 
+    def _init_pygame_async(self):
+        """在后台线程异步初始化 Pygame，避免阻塞主线程"""
+        def _init():
+            try:
+                import os
+                # 必须在 pygame 导入前设置
+                os.environ['SDL_VIDEODRIVER'] = 'dummy'
+                import pygame
+                pygame.init()
+                pygame.mixer.init()
+                pygame.mixer.music.set_volume(0.7)
+                if pygame.display.get_init():
+                    pygame.display.set_mode((1, 1))
+                self._pygame_initialized = True
+                print("[Pygame] 初始化完成")
+            except Exception as e:
+                print(f"[Pygame] 初始化失败: {e}")
+        threading.Thread(target=_init, daemon=True).start()
+
+    def _ensure_pygame_init(self):
+        """确保 Pygame 已初始化（同步等待，用于播放前）"""
+        if not self._pygame_initialized:
+            import os
+            os.environ['SDL_VIDEODRIVER'] = 'dummy'
+            import pygame
+            pygame.init()
+            pygame.mixer.init()
+            pygame.mixer.music.set_volume(self.vol_var.get() / 100.0)
+            if pygame.display.get_init():
+                pygame.display.set_mode((1, 1))
+            self._pygame_initialized = True
+
+    def _create_action_buttons(self):
+        """创建操作按钮（放在 action_frame 中）"""
+        # Action buttons with dark theme styling
+        self.update_btn = tk.Button(self.action_frame, text=_('update_all_btn'),
+                                    command=self.run_update,
+                                    bg=COLORS['accent'], fg=COLORS['bg'],
+                                    activebackground=COLORS['accent_hover'],
+                                    activeforeground=COLORS['bg'],
+                                    width=12, font=get_font(11, bold=True),
+                                    relief="flat", cursor="hand2")
+        self.update_btn.pack(side="left", padx=6, pady=6)
+
+        self.pause_btn = tk.Button(self.action_frame, text=_('pause_btn'),
+                                   command=self.toggle_pause,
+                                   bg=COLORS['elevated'], fg=COLORS['text'],
+                                   activebackground=COLORS['surface'],
+                                   activeforeground=COLORS['text'],
+                                   height=2, state="disabled",
+                                   font=get_font(11, bold=True),
+                                   relief="flat", cursor="hand2")
+        self.pause_btn.pack(side="left", fill="x", expand=True, padx=6, pady=6)
+
+        self.cancel_btn = tk.Button(self.action_frame, text=_('cancel_btn'),
+                                    command=self.run_cancel,
+                                    bg=COLORS['error'], fg=COLORS['text'],
+                                    activebackground='#ff4557',
+                                    activeforeground=COLORS['text'],
+                                    height=2, state="disabled",
+                                    font=get_font(11, bold=True),
+                                    relief="flat", cursor="hand2")
+        self.cancel_btn.pack(side="left", fill="x", expand=True, padx=6, pady=6)
+
+        self.export_btn = tk.Button(self.action_frame, text=_('export_usb_btn'),
+                                    command=self.open_export_window,
+                                    bg=COLORS['elevated'], fg=COLORS['text'],
+                                    activebackground=COLORS['surface'],
+                                    activeforeground=COLORS['text'],
+                                    height=2, font=get_font(11, bold=True),
+                                    relief="flat", cursor="hand2")
+        self.export_btn.pack(side="left", fill="x", expand=True, padx=6, pady=6)
+
+    def _update_basic_list(self):
+        """只更新基础列表显示，不扫描音乐库（快速启动模式）"""
+        url_names = self.config.get('url_names', {})
+        last_updated = self.config.get('last_updated', {})
+        import datetime
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
+
+        urls = self.config.get('spotify_urls', [])
+        self.pl_urls = [u for u in urls if "artist/" not in u and "album/" not in u and "track/" not in u]
+        self.al_urls = [u for u in urls if "album/" in u]
+        self.ar_urls = [u for u in urls if "artist/" in u]
+        self.st_urls = [u for u in urls if "track/" in u]
+
+        # 清空列表
+        self.pl_listbox.delete(0, tk.END)
+
+        # 只显示名称，不检查文件状态
+        all_names = []
+        for url in urls:
+            name = url_names.get(url, url)
+            is_synced_today = last_updated.get(url) == today
+            # 简化显示，不扫描文件
+            if is_synced_today:
+                status_text = f"🔄 {name} ({_('synced_today')})"
+            else:
+                status_text = f"📋 {name}"
+            self.pl_listbox.insert(tk.END, status_text)
+            all_names.append(name)
+
+        # 更新播放器下拉列表
+        all_names.sort()
+        self.player_playlist_combo['values'] = all_names
+        if all_names and not self.player_playlist_combo.get():
+            self.player_playlist_combo.set(all_names[0])
+
+    def _async_refresh_url_list(self):
+        """在后台线程异步刷新 URL 列表，避免阻塞主线程造成白屏"""
+        try:
+            # 在后台线程执行耗时的文件扫描
+            data = self._collect_url_list_data()
+            # 在主线程更新UI
+            self.root.after(0, lambda: self._update_url_list_ui(data))
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"Error in async refresh: {e}")
+
+    def _collect_url_list_data(self):
+        """收集 URL 列表数据（在后台线程执行，可能耗时几秒）"""
+        url_names = self.config.get('url_names', {})
+        last_updated = self.config.get('last_updated', {})
+
+        import datetime
+        import os
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
+
+        if 'playlists_path' not in self.config or 'library_path' not in self.config:
+            from utils.config import derive_paths
+            derive_paths(self.config)
+
+        from core.library import get_playlist_completeness_report
+        playlists_path = self.config.get('playlists_path')
+        library_path = self.config.get('library_path')
+
+        if not playlists_path or not os.path.exists(playlists_path):
+            return None
+
+        urls = self.config.get('spotify_urls', [])
+
+        pl_urls = [u for u in urls if "artist/" not in u and "album/" not in u and "track/" not in u]
+        al_urls = [u for u in urls if "album/" in u]
+        ar_urls = [u for u in urls if "artist/" in u]
+        st_urls = [u for u in urls if "track/" in u]
+
+        pl_files = []
+        for ext in ['.m3u', '.m3u8', '.txt']:
+            pl_files.extend(glob.glob(os.path.join(playlists_path, f"*{ext}")))
+
+        # 耗时的操作：扫描整个音乐库
+        report = get_playlist_completeness_report(pl_files, library_path)
+
+        # 构建所有项目数据
+        items = []
+        for url in urls:
+            name = url_names.get(url, url)
+            is_synced_today = last_updated.get(url) == today
+
+            if "track/" in url:
+                mp3_file = os.path.join(library_path, f"{name}.mp3")
+                if os.path.exists(mp3_file):
+                    status_text = f"✅ {name}" if is_synced_today else f"📦 {name} ({_('local_complete')})"
+                else:
+                    status_text = f"🔄 {name}" if is_synced_today else f"⏳ {name} ({_('wait_download')})"
+            else:
+                pl_file = None
+                for ext in ['.m3u', '.m3u8']:
+                    test_file = os.path.join(playlists_path, f"{name}{ext}")
+                    if os.path.exists(test_file):
+                        pl_file = test_file
+                        break
+
+                if pl_file and os.path.exists(pl_file):
+                    is_complete, missing, total = report.get(pl_file, (True, 0, 0))
+                    if is_complete:
+                        status_text = f"✅ {name}" if is_synced_today else f"📦 {name} ({_('local_complete')})"
+                    else:
+                        if is_synced_today:
+                            status_text = f"🔄 {name} ({_('incomplete_warning_title')}, {_('missing_songs', missing)})"
+                        else:
+                            status_text = f"⚠️ {name} ({_('wait_download')}, {_('missing_songs', missing)})"
+                else:
+                    if is_synced_today:
+                        status_text = f"🔄 {name} ({_('synced_today')})"
+                    else:
+                        status_text = f"⏳ {name} ({_('wait_sync')})"
+            items.append({'url': url, 'text': status_text, 'category': 'playlist'})
+
+        # 本地播放列表
+        processed_names = [url_names.get(u, u) for u in urls]
+        local_items = []
+        for pl_file in pl_files:
+            name = os.path.splitext(os.path.basename(pl_file))[0]
+            if name in processed_names or name.startswith('_'):
+                continue
+            is_complete, missing, total = report.get(pl_file, (True, 0, 0))
+            if is_complete:
+                status_text = f"📦 {name} ({_('local_complete')})"
+            else:
+                status_text = f"⚠️ {name} ({_('wait_download')}, 缺 {missing} 首)"
+            local_items.append({'name': name, 'text': status_text})
+
+        # 播放器下拉列表数据
+        all_playlist_names = []
+        for url in urls:
+            all_playlist_names.append(url_names.get(url, url))
+        for pl_file in pl_files:
+            name = os.path.splitext(os.path.basename(pl_file))[0]
+            if name not in all_playlist_names and not name.startswith('_'):
+                all_playlist_names.append(name)
+        all_playlist_names.sort()
+
+        return {
+            'items': items,
+            'local_items': local_items,
+            'pl_urls': pl_urls,
+            'al_urls': al_urls,
+            'ar_urls': ar_urls,
+            'st_urls': st_urls,
+            'all_playlist_names': all_playlist_names
+        }
+
+    def _update_url_list_ui(self, data):
+        """在主线程更新 UI（线程安全）"""
+        if data is None:
+            self.log(_('playlist_path_missing', self.config.get('playlists_path')))
+            return
+
+        # 保存当前选择和滚动位置
+        saves = [{'selection': self.pl_listbox.curselection(), 'yview': self.pl_listbox.yview()}]
+
+        self.pl_listbox.delete(0, tk.END)
+
+        # 更新 URL 列表
+        for item in data['items']:
+            self.pl_listbox.insert(tk.END, item['text'])
+
+        # 更新本地播放列表
+        for item in data['local_items']:
+            self.pl_listbox.insert(tk.END, item['text'])
+
+        self.pl_urls = data['pl_urls'] + ["local:" + item['name'] for item in data['local_items']]
+        self.al_urls = data['al_urls']
+        self.ar_urls = data['ar_urls']
+        self.st_urls = data['st_urls']
+
+        # 恢复选择和滚动位置
+        for idx in saves[0]['selection']:
+            if idx < self.pl_listbox.size():
+                self.pl_listbox.selection_set(idx)
+        self.pl_listbox.yview_moveto(saves[0]['yview'][0])
+
+        # 更新播放器下拉列表
+        self.player_playlist_combo['values'] = data['all_playlist_names']
+        current_val = self.player_playlist_combo.get()
+        if current_val and current_val not in data['all_playlist_names']:
+            self.player_playlist_combo.set('')
+        elif not current_val and data['all_playlist_names']:
+            self.player_playlist_combo.set(data['all_playlist_names'][0])
+
     def create_widgets(self):
-        # Top Bar (Settings Button only)
-        top_bar = tk.Frame(self.root)
-        top_bar.pack(fill="x", padx=10, pady=(5, 0))
-        
-        # Settings Button (Right aligned)
-        self.settings_btn = tk.Button(top_bar, text=_('settings_btn'), command=self.open_settings_window, font=("Microsoft JhengHei", 9))
+        # Top Bar (Settings Button only) - Dark theme
+        top_bar = tk.Frame(self.root, bg=COLORS['bg'])
+        top_bar.pack(fill="x", padx=16, pady=(8, 0))
+
+        # Title label on the left
+        self.header_lbl = tk.Label(top_bar, text=f"🎵 {_('app_title')}",
+                                   font=get_font(14, bold=True),
+                                   fg=COLORS['text'], bg=COLORS['bg'])
+        self.header_lbl.pack(side="left")
+
+        # Settings Button (Right aligned) - Styled
+        self.settings_btn = tk.Button(top_bar, text=_('settings_btn'),
+                                      command=self.open_settings_window,
+                                      font=get_font(10),
+                                      bg=COLORS['elevated'], fg=COLORS['text'],
+                                      activebackground=COLORS['surface'],
+                                      activeforeground=COLORS['text'],
+                                      relief="flat", cursor="hand2",
+                                      padx=12, pady=4)
         self.settings_btn.pack(side="right", padx=5)
 
-        # Tabs container (Root)
+        # Tabs container (Root) - Dark theme background
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=5)
+        self.notebook.pack(fill="both", expand=True, padx=16, pady=(8, 16))
 
-        # Tab 1: Library
-        self.tab_library = tk.Frame(self.notebook)
+        # Tab 1: Library - Dark theme (全面固定布局，不可拖动)
+        self.tab_library = tk.Frame(self.notebook, bg=COLORS['bg'])
         self.notebook.add(self.tab_library, text=_('tab_library'))
-        
-        # Library Layout - Split View
-        self.library_paned = tk.PanedWindow(self.tab_library, orient=tk.VERTICAL, sashwidth=0, bg="#d9d9d9", sashrelief=tk.FLAT)
-        self.library_paned.pack(fill="both", expand=True)
-        
-        # Top Pane (Lists & Actions)
-        self.library_top_frame = tk.Frame(self.library_paned)
-        self.library_paned.add(self.library_top_frame, height=500)
-        
-        # Bottom Pane (Logs & Progress)
-        self.library_bottom_frame = tk.Frame(self.library_paned)
-        self.library_paned.add(self.library_bottom_frame)
 
-        # Tab 2: Player
-        self.tab_player = tk.Frame(self.notebook)
+        # 主容器：固定高度列表区域（不可滚动，整体固定）
+        self.library_top_frame = tk.Frame(self.tab_library, bg=COLORS['surface'], height=520)
+        self.library_top_frame.pack(fill="x", padx=12, pady=(8, 8))
+        self.library_top_frame.pack_propagate(False)  # 固定高度
+
+        # Tab 2: Player - Dark theme
+        self.tab_player = tk.Frame(self.notebook, bg=COLORS['bg'])
         self.notebook.add(self.tab_player, text=_('tab_player'))
 
-        # Tab 3: Statistics
-        self.tab_stats = tk.Frame(self.notebook)
+        # Tab 3: Statistics - Dark theme
+        self.tab_stats = tk.Frame(self.notebook, bg=COLORS['bg'])
         self.notebook.add(self.tab_stats, text=_('tab_statistics'))
 
-        # 1. URL Section (In Tab 1 Top Pane)
-        self.url_frame = tk.LabelFrame(self.library_top_frame, text=_('step_1_title'), font=("Microsoft JhengHei", 10, "bold"))
-        self.url_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        # 綁定頁面切換事件，首次切換到統計頁面時才載入數據
+        self._stats_tab_loaded = False
+        self.notebook.bind('<<NotebookTabChanged>>', self._on_tab_changed)
+
+        # 1. URL Section (In Tab 1 Top Pane) - Dark theme card
+        self.url_frame = tk.LabelFrame(self.library_top_frame, text=_('step_1_title'),
+                                       font=get_font(11, bold=True),
+                                       fg=COLORS['text'], bg=COLORS['surface'],
+                                       highlightbackground=COLORS['border'],
+                                       highlightthickness=1, bd=0)
+        # Don't expand vertically - only take needed space for URL input
+        self.url_frame.pack(fill="x", expand=False, padx=12, pady=8)
         
-        self.url_entry = tk.Entry(self.url_frame, font=("Microsoft JhengHei", 10))
-        self.url_entry.pack(side="top", fill="x", padx=10, pady=5)
-        
-        btn_frame = tk.Frame(self.url_frame)
-        btn_frame.pack(fill="x", padx=5, pady=5)
-        
-        self.add_btn = tk.Button(btn_frame, text=_('add_url_btn'), command=self.add_url, font=("Microsoft JhengHei", 9))
-        self.add_btn.pack(side="left", padx=5)
-        self.remove_btn = tk.Button(btn_frame, text=_('remove_url_btn'), command=self.remove_url, font=("Microsoft JhengHei", 9))
-        self.remove_btn.pack(side="left", padx=5)
-        self.reset_btn = tk.Button(btn_frame, text=_('reset_status_btn'), command=self.reset_update_status, font=("Microsoft JhengHei", 9))
-        self.reset_btn.pack(side="right", padx=5)
-        
-        list_container = tk.Frame(self.url_frame)
-        list_container.pack(fill="both", expand=True, padx=5, pady=5)
-        
-        # Left side: Playlists
-        pl_side = tk.Frame(list_container)
-        pl_side.pack(side="left", fill="both", expand=True, padx=(0, 5))
-        tk.Label(pl_side, text="歌單 (Playlists)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
-        
-        self.pl_listbox = tk.Listbox(pl_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
-        # pl_scroll = tk.Scrollbar(pl_side, orient="vertical", command=self.pl_listbox.yview)
-        # pl_scroll.pack(side="right", fill="y")
+        # URL Entry - Dark theme styled
+        self.url_entry = tk.Entry(self.url_frame, font=get_font(11),
+                                  bg=COLORS['elevated'], fg=COLORS['text'],
+                                  insertbackground=COLORS['text'],
+                                  relief="flat", highlightthickness=1,
+                                  highlightbackground=COLORS['border'],
+                                  highlightcolor=COLORS['accent'])
+        self.url_entry.pack(side="top", fill="x", padx=12, pady=8)
+
+        btn_frame = tk.Frame(self.url_frame, bg=COLORS['surface'])
+        btn_frame.pack(fill="x", padx=12, pady=8)
+
+        self.add_btn = tk.Button(btn_frame, text=_('add_url_btn'),
+                                 command=self.add_url, font=get_font(10),
+                                 bg=COLORS['accent'], fg=COLORS['bg'],
+                                 activebackground=COLORS['accent_hover'],
+                                 activeforeground=COLORS['bg'],
+                                 relief="flat", cursor="hand2",
+                                 padx=12, pady=4)
+        self.add_btn.pack(side="left", padx=(0, 8))
+
+        self.remove_btn = tk.Button(btn_frame, text=_('remove_url_btn'),
+                                    command=self.remove_url, font=get_font(10),
+                                    bg=COLORS['elevated'], fg=COLORS['text'],
+                                    activebackground=COLORS['surface'],
+                                    activeforeground=COLORS['text'],
+                                    relief="flat", cursor="hand2",
+                                    padx=12, pady=4)
+        self.remove_btn.pack(side="left", padx=(0, 8))
+
+        self.reset_btn = tk.Button(btn_frame, text=_('reset_status_btn'),
+                                   command=self.reset_update_status, font=get_font(10),
+                                   bg=COLORS['elevated'], fg=COLORS['text_secondary'],
+                                   activebackground=COLORS['surface'],
+                                   activeforeground=COLORS['text'],
+                                   relief="flat", cursor="hand2",
+                                   padx=12, pady=4)
+        self.reset_btn.pack(side="right")
+
+        # Playlist listbox container - Now directly in library_top_frame
+        # This ensures proper vertical space allocation
+        list_container = tk.Frame(self.library_top_frame, bg=COLORS['surface'])
+        list_container.pack(fill="both", expand=True, padx=12, pady=8)
+
+        # Left side: Playlists (60% width)
+        pl_side = tk.Frame(list_container, bg=COLORS['surface'])
+        pl_side.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        tk.Label(pl_side, text="🎵 播放清單",
+                 font=get_font(11, bold=True),
+                 fg=COLORS['text'], bg=COLORS['surface']).pack(anchor="w", pady=(0, 4))
+
+        # Styled listbox with dark theme
+        self.pl_listbox = tk.Listbox(pl_side, height=14, font=get_font(11),
+                                     exportselection=False,
+                                     bg=COLORS['elevated'], fg=COLORS['text'],
+                                     selectbackground=COLORS['accent'],
+                                     selectforeground=COLORS['bg'],
+                                     relief="flat", highlightthickness=1,
+                                     highlightbackground=COLORS['border'])
         self.pl_listbox.pack(side="left", fill="both", expand=True)
-        # self.pl_listbox.config(yscrollcommand=pl_scroll.set)
-        
-        # Button to view songs in selected playlist
-        self.view_songs_btn = tk.Button(pl_side, text="查看歌曲", command=self.view_playlist_songs, font=("Microsoft JhengHei", 9), bg="#e3f2fd")
-        self.view_songs_btn.pack(side="bottom", fill="x", pady=(5, 0))
 
-        # Middle: Albums
-        al_side = tk.Frame(list_container)
-        al_side.pack(side="left", fill="both", expand=True, padx=5)
-        tk.Label(al_side, text="專輯 (Albums)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
-        
-        self.al_listbox = tk.Listbox(al_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
-        # al_scroll = tk.Scrollbar(al_side, orient="vertical", command=self.al_listbox.yview)
-        # al_scroll.pack(side="right", fill="y")
-        self.al_listbox.pack(side="left", fill="both", expand=True)
-        # self.al_listbox.config(yscrollcommand=al_scroll.set)
+        # Add scrollbar to listbox
+        pl_scroll = tk.Scrollbar(pl_side, orient="vertical", command=self.pl_listbox.yview,
+                                  bg=COLORS['surface'], troughcolor=COLORS['elevated'])
+        pl_scroll.pack(side="right", fill="y")
+        self.pl_listbox.config(yscrollcommand=pl_scroll.set)
 
-        # Right side: Artists
-        ar_side = tk.Frame(list_container)
-        ar_side.pack(side="left", fill="both", expand=True, padx=5)
-        tk.Label(ar_side, text="藝人 (Artists)", font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
+        # Button to view songs in selected playlist - Dark theme
+        self.view_songs_btn = tk.Button(pl_side, text=_('view_songs_btn'),
+                                        command=self.view_playlist_songs,
+                                        font=get_font(10),
+                                        bg=COLORS['surface'], fg=COLORS['accent'],
+                                        activebackground=COLORS['elevated'],
+                                        activeforeground=COLORS['accent_hover'],
+                                        relief="flat", cursor="hand2",
+                                        padx=8, pady=4)
+        self.view_songs_btn.pack(side="bottom", fill="x", pady=(8, 0))
 
-        self.ar_listbox = tk.Listbox(ar_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
-        # ar_scroll = tk.Scrollbar(ar_side, orient="vertical", command=self.ar_listbox.yview)
-        # ar_scroll.pack(side="right", fill="y")
-        self.ar_listbox.pack(side="left", fill="both", expand=True)
-        # self.ar_listbox.config(yscrollcommand=ar_scroll.set)
-        
-        # New: Single Tracks side
-        st_side = tk.Frame(list_container)
-        st_side.pack(side="left", fill="both", expand=True, padx=(5, 0))
-        tk.Label(st_side, text=_('single_tracks_pl'), font=("Microsoft JhengHei", 9, "bold")).pack(anchor="w")
+        # Right side: Song Status List (40% width) - Moved here from bottom
+        self.song_status_frame = tk.LabelFrame(list_container, text=_('song_status_title'),
+                                               font=get_font(11, bold=True),
+                                               fg=COLORS['text'], bg=COLORS['surface'],
+                                               highlightbackground=COLORS['border'],
+                                               highlightthickness=1, bd=0)
+        self.song_status_frame.pack(side="left", fill="both", expand=True, padx=(8, 0))
 
-        self.st_listbox = tk.Listbox(st_side, height=8, font=("Microsoft JhengHei", 10), exportselection=False)
-        # st_scroll = tk.Scrollbar(st_side, orient="vertical", command=self.st_listbox.yview)
-        # st_scroll.pack(side="right", fill="y")
-        self.st_listbox.pack(side="left", fill="both", expand=True)
+        # Reduce listbox height to ensure action buttons have space
+        self.pl_listbox.config(height=12)
 
-        # Hide non-playlist lists
-        al_side.destroy()
-        ar_side.destroy()
-        st_side.destroy()
-        # self.st_listbox.config(yscrollcommand=st_scroll.set)
-        
+        # Create treeview for song status with dark theme
+        columns = ('Status', 'Song')
+        self.song_status_tree = ttk.Treeview(self.song_status_frame, columns=columns,
+                                             show='tree headings', height=12)
+        self.song_status_tree.heading('#0', text=_('song_status_no'))
+        self.song_status_tree.heading('Status', text=_('song_status_status'))
+        self.song_status_tree.heading('Song', text=_('song_status_song'))
+
+        # Configure column widths
+        self.song_status_tree.column('#0', width=40)
+        self.song_status_tree.column('Status', width=60)
+        self.song_status_tree.column('Song', width=180)
+
+        # Add scrollbar
+        song_scroll = tk.Scrollbar(self.song_status_frame, orient="vertical",
+                                   command=self.song_status_tree.yview,
+                                   bg=COLORS['surface'], troughcolor=COLORS['elevated'])
+        song_scroll.pack(side="right", fill="y")
+        self.song_status_tree.pack(side="left", fill="both", expand=True, padx=8, pady=8)
+        self.song_status_tree.config(yscrollcommand=song_scroll.set)
+
+        # Initialize song status data
+        self.song_status_data = {}
+
         # Bind Listbox selection for player (automatically switch to Player tab)
         self.pl_listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
 
-        # 2. Action Section (In Tab 1 Top Pane)
-        self.action_frame = tk.LabelFrame(self.library_top_frame, text=_('step_2_title'), font=("Microsoft JhengHei", 10, "bold"))
-        self.action_frame.pack(fill="x", padx=10, pady=5)
-        
-        self.update_btn = tk.Button(self.action_frame, text=_('update_all_btn'), command=self.run_update, bg="#d0f0c0", height=2, font=("Microsoft JhengHei", 11, "bold"))
-        self.update_btn.pack(side="left", fill="x", expand=True, padx=5, pady=5)
-        
-        self.pause_btn = tk.Button(self.action_frame, text=_('pause_btn'), command=self.toggle_pause, bg="#FFEB3B", height=2, state="disabled", font=("Microsoft JhengHei", 11, "bold"))
-        self.pause_btn.pack(side="left", fill="x", expand=True, padx=5, pady=5)
-        
-        self.cancel_btn = tk.Button(self.action_frame, text=_('cancel_btn'), command=self.run_cancel, bg="#f44336", fg="white", height=2, state="disabled", font=("Microsoft JhengHei", 11, "bold"))
-        self.cancel_btn.pack(side="left", fill="x", expand=True, padx=5, pady=5)
-        
-        self.export_btn = tk.Button(self.action_frame, text=_('export_usb_btn'), command=self.open_export_window, bg="#ffd0d0", height=2, font=("Microsoft JhengHei", 11, "bold"))
-        self.export_btn.pack(side="left", fill="x", expand=True, padx=5, pady=5)
+        # 2.5 Player Section (In Tab 2) - COMPLETE REDESIGN
+        # Structured player layout replacing the "black hole" design
+        player_main_container = tk.Frame(self.tab_player, bg=COLORS['bg'])
+        player_main_container.pack(fill="both", expand=True, padx=16, pady=16)
 
-        # 2.5 Player Section (In Tab 2)
-        # Use a big full-width frame for player
-        player_main_container = tk.Frame(self.tab_player, bg="#f0f0f0")
-        player_main_container.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # New Playlist Selector at the top of Player tab
-        player_top_bar = tk.Frame(player_main_container, bg="#f0f0f0")
-        player_top_bar.pack(fill="x", pady=(0, 10))
-        
-        tk.Label(player_top_bar, text=_('player_playlist_label'), font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0").pack(side="left", padx=(0, 5))
-        
-        self.player_playlist_combo = ttk.Combobox(player_top_bar, state="readonly", font=("Microsoft JhengHei", 10), width=40)
-        self.player_playlist_combo.pack(side="left", padx=5)
-        # We will populate this in refresh_url_list later
-        
-        self.player_load_btn = tk.Button(player_top_bar, text=_('player_load_btn'), command=self.load_selected_playlist, bg="#4CAF50", fg="white", font=("Microsoft JhengHei", 9, "bold"))
-        self.player_load_btn.pack(side="left", padx=5)
+        # Playlist Selector at the top
+        player_top_bar = tk.Frame(player_main_container, bg=COLORS['bg'])
+        player_top_bar.pack(fill="x", pady=(0, 12))
 
-        self.player_frame = tk.LabelFrame(player_main_container, text=_('player_title'), font=("Microsoft JhengHei", 10, "bold"), bg="#f0f0f0")
+        tk.Label(player_top_bar, text=_('player_playlist_label'),
+                 font=get_font(11), fg=COLORS['text_secondary'], bg=COLORS['bg']).pack(side="left", padx=(0, 8))
+
+        # Style the combobox
+        self.player_playlist_combo = ttk.Combobox(player_top_bar, state="readonly",
+                                                   font=get_font(11), width=35)
+        self.player_playlist_combo.pack(side="left", padx=8)
+
+        self.player_load_btn = tk.Button(player_top_bar, text=_('player_load_btn'),
+                                           command=self.load_selected_playlist,
+                                           bg=COLORS['accent'], fg=COLORS['bg'],
+                                           activebackground=COLORS['accent_hover'],
+                                           activeforeground=COLORS['bg'],
+                                           font=get_font(10, bold=True),
+                                           relief="flat", cursor="hand2",
+                                           padx=16, pady=4)
+        self.player_load_btn.pack(side="left", padx=8)
+
+        # ===== PLAYER CARD =====
+        self.player_frame = tk.Frame(player_main_container, bg=COLORS['surface'],
+                                      highlightbackground=COLORS['border'],
+                                      highlightthickness=1)
         self.player_frame.pack(fill="both", expand=True)
-        
-        # Huge Lyrics Display at the Top
-        self.lyrics_container = tk.Frame(self.player_frame, bg="#000000", height=400)
-        self.lyrics_container.pack(fill="both", expand=True, padx=20, pady=20)
-        self.lyrics_container.pack_propagate(False)
-        
-        self.lyrics_lbl = tk.Label(self.lyrics_container, text=_('player_no_lyrics'), font=("Microsoft JhengHei", 32, "bold"), fg="#00FF00", bg="#000000", wraplength=900)
-        self.lyrics_lbl.pack(expand=True, fill="both")
 
-        player_controls = tk.Frame(self.player_frame, bg="#f0f0f0")
-        player_controls.pack(fill="x", padx=10, pady=20)
-        
-        self.now_playing_lbl = tk.Label(self.player_frame, text=_('player_now_playing', _('no_data')), font=("Microsoft JhengHei", 12), fg="#2196F3", anchor="center")
-        self.now_playing_lbl.pack(fill="x", padx=10, pady=(0, 10))
+        # ----- Top: Album Art Placeholder + Song Info -----
+        song_info_frame = tk.Frame(self.player_frame, bg=COLORS['surface'])
+        song_info_frame.pack(fill="x", padx=20, pady=(20, 12))
 
-        control_buttons = tk.Frame(player_controls)
-        control_buttons.pack(side="top")
+        # Album art placeholder (left side)
+        self.album_art_lbl = tk.Label(song_info_frame, text="🎵",
+                                      font=get_font(64),
+                                      fg=COLORS['text_muted'],
+                                      bg=COLORS['elevated'],
+                                      width=4, height=2)
+        self.album_art_lbl.pack(side="left", padx=(0, 20))
 
-        self.prev_btn = tk.Button(control_buttons, text="⏮", command=self.play_prev, width=8, height=2, font=("", 12))
-        self.prev_btn.pack(side="left", padx=10)
-        
-        self.play_btn = tk.Button(control_buttons, text="▶", command=self.toggle_playback, width=12, height=2, font=("", 14, "bold"))
-        self.play_btn.pack(side="left", padx=10)
-        
-        self.next_btn = tk.Button(control_buttons, text="⏭", command=self.play_next, width=8, height=2, font=("", 12))
-        self.next_btn.pack(side="left", padx=10)
-        
+        # Song info (right side of album art)
+        info_text_frame = tk.Frame(song_info_frame, bg=COLORS['surface'])
+        info_text_frame.pack(side="left", fill="both", expand=True)
+
+        # Song title
+        self.song_title_lbl = tk.Label(info_text_frame,
+                                       text=_('player_select_playlist_hint'),
+                                       font=get_font(18, bold=True),
+                                       fg=COLORS['text'], bg=COLORS['surface'],
+                                       anchor="w")
+        self.song_title_lbl.pack(fill="x", pady=(4, 2))
+
+        # Artist
+        self.song_artist_lbl = tk.Label(info_text_frame,
+                                          text="",
+                                          font=get_font(14),
+                                          fg=COLORS['text_secondary'],
+                                          bg=COLORS['surface'],
+                                          anchor="w")
+        self.song_artist_lbl.pack(fill="x", pady=(2, 4))
+
+        # Now playing label (accent color)
+        self.now_playing_lbl = tk.Label(info_text_frame,
+                                        text=_('player_now_playing', _('no_data')),
+                                        font=get_font(11),
+                                        fg=COLORS['accent'],
+                                        bg=COLORS['surface'],
+                                        anchor="w")
+        self.now_playing_lbl.pack(fill="x", pady=(8, 0))
+
+        # ----- Middle: Lyrics Display (NOT a black hole) -----
+        lyrics_card = tk.Frame(self.player_frame, bg=COLORS['lyrics_bg'],
+                               highlightbackground=COLORS['border'],
+                               highlightthickness=1)
+        lyrics_card.pack(fill="both", expand=True, padx=20, pady=(0, 16))
+
+        # Lyrics label - smaller, elegant, not a giant black box
+        self.lyrics_lbl = tk.Label(lyrics_card,
+                                   text=_('player_no_lyrics'),
+                                   font=get_font(20, bold=True),
+                                   fg=COLORS['lyrics_text'],
+                                   bg=COLORS['lyrics_bg'],
+                                   wraplength=700,
+                                   justify="center")
+        self.lyrics_lbl.pack(expand=True, fill="both", pady=24)
+
+        # ----- Bottom: Controls -----
+        controls_container = tk.Frame(self.player_frame, bg=COLORS['surface'])
+        controls_container.pack(fill="x", padx=20, pady=(0, 20))
+
+        # Progress bar frame
+        progress_frame = tk.Frame(controls_container, bg=COLORS['surface'])
+        progress_frame.pack(fill="x", pady=(0, 12))
+
+        # Time labels
+        self.current_time_lbl = tk.Label(progress_frame, text="0:00",
+                                         font=get_font(10, mono=True),
+                                         fg=COLORS['text_secondary'],
+                                         bg=COLORS['surface'])
+        self.current_time_lbl.pack(side="left")
+
+        # Progress slider (custom styled)
+        self.progress_var = tk.DoubleVar(value=0)
+        self.progress_slider = tk.Scale(progress_frame, from_=0, to=100,
+                                        orient="horizontal",
+                                        variable=self.progress_var,
+                                        showvalue=False,
+                                        bg=COLORS['surface'],
+                                        fg=COLORS['accent'],
+                                        troughcolor=COLORS['elevated'],
+                                        highlightthickness=0,
+                                        relief="flat",
+                                        sliderrelief="flat",
+                                        sliderlength=12,
+                                        width=8)
+        self.progress_slider.pack(side="left", fill="x", expand=True, padx=12)
+
+        self.total_time_lbl = tk.Label(progress_frame, text="0:00",
+                                       font=get_font(10, mono=True),
+                                       fg=COLORS['text_secondary'],
+                                       bg=COLORS['surface'])
+        self.total_time_lbl.pack(side="left")
+
+        # Control buttons frame
+        control_buttons = tk.Frame(controls_container, bg=COLORS['surface'])
+        control_buttons.pack(pady=(8, 12))
+
+        # Previous button
+        self.prev_btn = tk.Button(control_buttons, text="⏮",
+                                  command=self.play_prev,
+                                  width=4, height=1,
+                                  font=get_font(16),
+                                  bg=COLORS['elevated'], fg=COLORS['text'],
+                                  activebackground=COLORS['surface'],
+                                  activeforeground=COLORS['text'],
+                                  relief="flat", cursor="hand2")
+        self.prev_btn.pack(side="left", padx=8)
+
+        # Play/Pause button (bigger, accent color)
+        self.play_btn = tk.Button(control_buttons, text="▶",
+                                  command=self.toggle_playback,
+                                  width=6, height=1,
+                                  font=get_font(20, bold=True),
+                                  bg=COLORS['accent'], fg=COLORS['bg'],
+                                  activebackground=COLORS['accent_hover'],
+                                  activeforeground=COLORS['bg'],
+                                  relief="flat", cursor="hand2")
+        self.play_btn.pack(side="left", padx=12)
+
+        # Next button
+        self.next_btn = tk.Button(control_buttons, text="⏭",
+                                  command=self.play_next,
+                                  width=4, height=1,
+                                  font=get_font(16),
+                                  bg=COLORS['elevated'], fg=COLORS['text'],
+                                  activebackground=COLORS['surface'],
+                                  activeforeground=COLORS['text'],
+                                  relief="flat", cursor="hand2")
+        self.next_btn.pack(side="left", padx=8)
+
+        # Shuffle checkbox with dark theme
         self.shuffle_var = tk.BooleanVar(value=False)
-        self.shuffle_btn = tk.Checkbutton(player_controls, text=_('player_shuffle'), variable=self.shuffle_var, font=("Microsoft JhengHei", 11))
-        self.shuffle_btn.pack(side="top", pady=10)
-        
-        vol_frame = tk.Frame(player_controls)
-        vol_frame.pack(side="top", fill="x", padx=100)
+        self.shuffle_btn = tk.Checkbutton(controls_container,
+                                          text=_('player_shuffle'),
+                                          variable=self.shuffle_var,
+                                          font=get_font(11),
+                                          fg=COLORS['text_secondary'],
+                                          bg=COLORS['surface'],
+                                          selectcolor=COLORS['elevated'],
+                                          activebackground=COLORS['surface'],
+                                          activeforeground=COLORS['accent'])
+        self.shuffle_btn.pack(pady=(4, 0))
+
+        # Volume and Lyrics Offset row
+        bottom_controls = tk.Frame(controls_container, bg=COLORS['surface'])
+        bottom_controls.pack(fill="x", pady=(12, 0))
+
+        # Volume (left side)
+        vol_frame = tk.Frame(bottom_controls, bg=COLORS['surface'])
+        vol_frame.pack(side="left", fill="x", expand=True)
+
+        tk.Label(vol_frame, text="🔊", font=get_font(12),
+                 fg=COLORS['text_secondary'], bg=COLORS['surface']).pack(side="left", padx=(0, 8))
 
         self.vol_var = tk.DoubleVar(value=70)
-        self.vol_scale = tk.Scale(vol_frame, from_=0, to=100, orient="horizontal", variable=self.vol_var, command=self.change_volume, showvalue=False)
-        self.vol_scale.pack(side="left", fill="x", expand=True, padx=10)
-        
-        self.vol_lbl = tk.Label(vol_frame, text=_('player_volume', 70), font=("Microsoft JhengHei", 10), width=10)
-        self.vol_lbl.pack(side="left")
-        
-        # Lyrics Offset Controls
-        offset_frame = tk.Frame(player_controls)
-        offset_frame.pack(side="top", pady=10)
-        
-        tk.Label(offset_frame, text="歌詞時間:", font=("Microsoft JhengHei", 10)).pack(side="left", padx=5)
-        tk.Button(offset_frame, text="← -0.5s", command=lambda: self.adjust_lyrics_offset(-0.5), width=8, font=("Microsoft JhengHei", 9)).pack(side="left", padx=5)
-        self.offset_lbl = tk.Label(offset_frame, text="偏移: 0.0s", font=("Microsoft JhengHei", 10, "bold"), fg="#FF9800", width=12)
-        self.offset_lbl.pack(side="left", padx=5)
-        tk.Button(offset_frame, text="+0.5s →", command=lambda: self.adjust_lyrics_offset(0.5), width=8, font=("Microsoft JhengHei", 9)).pack(side="left", padx=5)
-        
-        # --- Pygame Setup ---
-        import pygame
-        import os
-        # Need video system initialized for events (auto-next), use dummy for headless
-        os.environ['SDL_VIDEODRIVER'] = 'dummy'
-        pygame.init()
-        pygame.mixer.init()
-        pygame.mixer.music.set_volume(0.7) # Set initial volume
-        
-        # Load lyrics offsets from config
-        self.lyrics_offsets = self.config.get('lyrics_offsets', {})
-        
-        if pygame.display.get_init():
-            pygame.display.set_mode((1, 1))
+        self.vol_scale = tk.Scale(vol_frame, from_=0, to=100,
+                                  orient="horizontal",
+                                  variable=self.vol_var,
+                                  command=self.change_volume,
+                                  showvalue=False,
+                                  bg=COLORS['surface'],
+                                  fg=COLORS['accent'],
+                                  troughcolor=COLORS['elevated'],
+                                  highlightthickness=0,
+                                  relief="flat",
+                                  sliderrelief="flat",
+                                  sliderlength=10,
+                                  width=6,
+                                  length=120)
+        self.vol_scale.pack(side="left")
+
+        self.vol_lbl = tk.Label(vol_frame, text=_('player_volume', 70),
+                                font=get_font(10, mono=True),
+                                fg=COLORS['text_secondary'], bg=COLORS['surface'],
+                                width=10)
+        self.vol_lbl.pack(side="left", padx=(8, 0))
+
+        # Lyrics Offset (right side)
+        offset_frame = tk.Frame(bottom_controls, bg=COLORS['surface'])
+        offset_frame.pack(side="right")
+
+        tk.Label(offset_frame, text=_('player_lyrics_offset') + ":",
+                 font=get_font(10),
+                 fg=COLORS['text_secondary'], bg=COLORS['surface']).pack(side="left", padx=(0, 8))
+
+        offset_dec_btn = tk.Button(offset_frame, text="-0.5s",
+                                   command=lambda: self.adjust_lyrics_offset(-0.5),
+                                   width=5, font=get_font(9),
+                                   bg=COLORS['elevated'], fg=COLORS['text'],
+                                   activebackground=COLORS['surface'],
+                                   relief="flat", cursor="hand2")
+        offset_dec_btn.pack(side="left", padx=2)
+
+        self.offset_lbl = tk.Label(offset_frame, text="0.0s",
+                                   font=get_font(10, bold=True, mono=True),
+                                   fg=COLORS['accent'], bg=COLORS['surface'],
+                                   width=8)
+        self.offset_lbl.pack(side="left", padx=4)
+
+        offset_inc_btn = tk.Button(offset_frame, text="+0.5s",
+                                   command=lambda: self.adjust_lyrics_offset(0.5),
+                                   width=5, font=get_font(9),
+                                   bg=COLORS['elevated'], fg=COLORS['text'],
+                                   activebackground=COLORS['surface'],
+                                   relief="flat", cursor="hand2")
+        offset_inc_btn.pack(side="left", padx=2)
+
+        # --- Pygame Setup (延迟到后台线程初始化，避免阻塞UI) ---
+        self._pygame_initialized = False
         self.is_playing = False
         self.current_playlist_songs = []
         self.original_playlist_order = []
         self.current_song_idx = -1
         self.current_lyrics = []  # List of (time_ms, text)
         self.lyrics_update_job = None
+        self.lyrics_offsets = self.config.get('lyrics_offsets', {})
+
+        # 延遲初始化 Pygame，確保 UI 完全載入後才執行（避免啟動時阻塞）
+        self.root.after(1000, self._init_pygame_async)
 
         # 3. Statistics Tab Content
         self._create_stats_tab()
 
-        # 4. Statistics Section (In Tab 1 Top Pane)
-        self.stats_frame = tk.LabelFrame(self.library_top_frame, text=_('stats_title'), font=("Microsoft JhengHei", 10, "bold"))
-        self.stats_frame.pack(fill="x", padx=10, pady=5)
-        
-        stats_container = tk.Frame(self.stats_frame)
-        stats_container.pack(fill="x", padx=10, pady=5)
-        
-        self.total_songs_lbl = tk.Label(stats_container, text=_('total_songs', _('loading'), "", 0, 0), font=("Microsoft JhengHei", 10))
-        self.total_songs_lbl.grid(row=0, column=0, sticky="w", padx=5)
-        
-        self.dup_songs_lbl = tk.Label(stats_container, text=_('duplicate_songs', _('loading')), font=("Microsoft JhengHei", 10))
-        self.dup_songs_lbl.grid(row=0, column=1, sticky="w", padx=20)
-        
-        self.space_saved_lbl = tk.Label(stats_container, text=_('space_saved', _('loading')), font=("Microsoft JhengHei", 10), fg="#4CAF50")
-        self.space_saved_lbl.grid(row=0, column=2, sticky="w", padx=20)
-        
-        self.recent_lbl = tk.Label(self.stats_frame, text=_('recent_added', ""), font=("Microsoft JhengHei", 9), fg="#666")
-        self.recent_lbl.pack(side="top", anchor="w", padx=15, pady=(0, 5))
+        # 4. Statistics - 已移到统计资料分頁
+        # (原资料库统计区域已移除，统一在统计资料分頁显示)
 
-        self.extra_stats_lbl = tk.Label(self.stats_frame, text="", font=("Microsoft JhengHei", 9), fg="#666")
-        self.extra_stats_lbl.pack(side="top", anchor="w", padx=15, pady=(0, 5))
-        
-        # Progress Bar (Inside Library Bottom Pane)
-        progress_frame = tk.Frame(self.library_bottom_frame)
-        progress_frame.pack(fill="x", padx=20, pady=5)
+        # 底部固定区域（始终可见）
+        # 5. Log Section (Fixed at bottom) - Dark theme
+        self.log_frame = tk.LabelFrame(self.tab_library, text=_('log_title'),
+                                       font=get_font(11, bold=True),
+                                       fg=COLORS['text'], bg=COLORS['surface'],
+                                       highlightbackground=COLORS['border'],
+                                       highlightthickness=1, bd=0, height=120)
+        self.log_frame.pack(side="bottom", fill="x", padx=12, pady=(0, 8))
+        self.log_frame.pack_propagate(False)  # 固定高度
+
+        # Log with fixed height
+        self.log_text = scrolledtext.ScrolledText(self.log_frame, state='disabled',
+                                                  bg=COLORS['elevated'],
+                                                  fg=COLORS['text_secondary'],
+                                                  font=(FONT_MONO, 10),
+                                                  height=6,
+                                                  relief="flat",
+                                                  highlightthickness=1,
+                                                  highlightbackground=COLORS['border'])
+        self.log_text.pack(fill="both", expand=True, padx=8, pady=8)
+
+        # 6. Progress Bar (Fixed above buttons) - Dark theme
+        progress_container = tk.Frame(self.tab_library, bg=COLORS['bg'])
+        progress_container.pack(side="bottom", fill="x", padx=12, pady=(0, 4))
+
+        progress_frame = tk.Frame(progress_container, bg=COLORS['bg'])
+        progress_frame.pack(fill="x")
 
         self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100)
+        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100,
+                                           style='Dark.Horizontal.TProgressbar')
         self.progress_bar.pack(side="left", fill="x", expand=True)
-        
-        self.progress_label = tk.Label(progress_frame, text="", font=("Microsoft JhengHei", 9), anchor="e", width=15)
-        self.progress_label.pack(side="right", padx=5)
-        
-        # Speed Display (Inside Library Bottom Pane)
-        speed_frame = tk.Frame(self.library_bottom_frame)
-        speed_frame.pack(fill="x", padx=20, pady=(0, 5))
-        
-        self.speed_label = tk.Label(speed_frame, text=_('speed_ready'), font=("Microsoft JhengHei", 9), fg="#666", anchor="w")
+
+        self.progress_label = tk.Label(progress_frame, text="",
+                                       font=get_font(10, mono=True),
+                                       fg=COLORS['accent'], bg=COLORS['bg'],
+                                       anchor="e", width=12)
+        self.progress_label.pack(side="right", padx=8)
+
+        # Speed Display
+        speed_frame = tk.Frame(progress_container, bg=COLORS['bg'])
+        speed_frame.pack(fill="x")
+
+        self.speed_label = tk.Label(speed_frame, text=_('speed_ready'),
+                                    font=get_font(10),
+                                    fg=COLORS['text_secondary'], bg=COLORS['bg'],
+                                    anchor="w")
         self.speed_label.pack(fill="x")
-        
-        # 3. Log and Song Status Section (Inside Library Bottom Pane)
-        bottom_container = tk.Frame(self.library_bottom_frame)
-        bottom_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        
-        # Left side: Error Log (40% width)
-        self.log_frame = tk.LabelFrame(bottom_container, text=_('log_title'), font=("Microsoft JhengHei", 10, "bold"))
-        self.log_frame.pack(side="left", fill="both", expand=False, padx=(0, 5), pady=0)
-        self.log_frame.config(width=400)
 
-        self.log_text = scrolledtext.ScrolledText(self.log_frame, state='disabled', bg="black", fg="white", font=("Consolas", 10), height=10)
-        self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+        # 7. Action buttons (Fixed at very bottom)
+        self.action_frame = tk.LabelFrame(self.tab_library, text=_('step_2_title'),
+                                          font=get_font(11, bold=True),
+                                          fg=COLORS['text'], bg=COLORS['surface'],
+                                          highlightbackground=COLORS['border'],
+                                          highlightthickness=1, bd=0)
+        self.action_frame.pack(side="bottom", fill="x", padx=12, pady=(0, 8))
 
-        # Right side: Song Status List (60% width)
-        self.song_status_frame = tk.LabelFrame(bottom_container, text=_('song_status_title'), font=("Microsoft JhengHei", 10, "bold"))
-        self.song_status_frame.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=0)
-        
-        # Create treeview for song status
-        columns = ('Status', 'Song')
-        self.song_status_tree = ttk.Treeview(self.song_status_frame, columns=columns, show='tree headings', height=12)
-        self.song_status_tree.heading('#0', text=_('song_status_no'))
-        self.song_status_tree.heading('Status', text=_('song_status_status'))
-        self.song_status_tree.heading('Song', text=_('song_status_song'))
-        
-        # Configure column widths
-        self.song_status_tree.column('#0', width=60)
-        self.song_status_tree.column('Status', width=80)
-        self.song_status_tree.column('Song', width=300)
-        
-        # Add scrollbar
-        song_scroll = ttk.Scrollbar(self.song_status_frame, orient="vertical", command=self.song_status_tree.yview)
-        song_scroll.pack(side="right", fill="y")
-        self.song_status_tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-        self.song_status_tree.config(yscrollcommand=song_scroll.set)
-        
-        # Initialize song status data
-        self.song_status_data = {}
+        self._create_action_buttons()
 
     def log(self, message, immediate=False):
         # Filter log messages - only show errors and important messages
@@ -631,10 +1411,12 @@ class PlaylistApp:
 
     def update_ui_text(self):
         self.root.title(_('app_title'))
+        self.header_lbl.config(text=f"🎵 {_('app_title')}")
         self.url_frame.config(text=_('step_1_title'))
         self.add_btn.config(text=_('add_url_btn'))
         self.remove_btn.config(text=_('remove_url_btn'))
         self.reset_btn.config(text=_('reset_status_btn'))
+        self.view_songs_btn.config(text=_('view_songs_btn'))
         self.action_frame.config(text=_('step_2_title'))
         self.update_btn.config(text=_('update_all_btn'))
         self.pause_btn.config(text=_('pause_btn') if self.pause_event.is_set() else _('resume_btn'))
@@ -643,160 +1425,17 @@ class PlaylistApp:
         self.stats_frame.config(text=_('stats_title'))
         self.log_frame.config(text=_('log_title'))
         self.settings_btn.config(text=_('settings_btn'))
-        self.player_frame.config(text=_('player_title'))
+        self.song_status_frame.config(text=_('song_status_title'))
         self.vol_lbl.config(text=_('player_volume', int(self.vol_var.get())))
+        # Update song status treeview headers
+        self.song_status_tree.heading('#0', text=_('song_status_no'))
+        self.song_status_tree.heading('Status', text=_('song_status_status'))
+        self.song_status_tree.heading('Song', text=_('song_status_song'))
 
     def refresh_url_list(self, audio_cache=None):
-        # Save current selections and scroll positions
-        lists = [self.pl_listbox]
-        saves = []
-        for lb in lists:
-            saves.append({
-                'selection': lb.curselection(),
-                'yview': lb.yview()
-            })
-
-        self.pl_listbox.delete(0, tk.END)
-        url_names = self.config.get('url_names', {})
-        last_updated = self.config.get('last_updated', {})
-        
-        import datetime
-        import os
-        today = datetime.datetime.now().strftime('%Y-%m-%d')
-        
-        if 'playlists_path' not in self.config or 'library_path' not in self.config:
-            from utils.config import derive_paths
-            derive_paths(self.config)
-            
-        from core.library import get_playlist_completeness_report
-        playlists_path = self.config.get('playlists_path')
-        library_path = self.config.get('library_path')
-        
-        if not playlists_path or not os.path.exists(playlists_path):
-            self.log(_('playlist_path_missing', playlists_path))
-            return
-        
-        urls = self.config.get('spotify_urls', [])
-        
-        self.pl_urls = [u for u in urls if "artist/" not in u and "album/" not in u and "track/" not in u]  # 只有播放清單
-        self.al_urls = [u for u in urls if "album/" in u]  # 只有專輯
-        self.ar_urls = [u for u in urls if "artist/" in u]  # 只有藝人
-        self.st_urls = [u for u in urls if "track/" in u]  # 只有單曲
-        
-        pl_files = []
-        # 直接獲取所有存在的播放清單檔案，不依賴 URL 列表
-        for ext in ['.m3u', '.m3u8', '.txt']:
-            pl_files.extend(glob.glob(os.path.join(playlists_path, f"*{ext}")))
-        
-        # Batch check completeness
-        report = get_playlist_completeness_report(pl_files, library_path)
-
-        for url in urls:
-            name = url_names.get(url, url)
-            status_text = ""
-            is_synced_today = last_updated.get(url) == today
-            
-            # For single tracks, check if MP3 file exists instead of playlist file
-            if "track/" in url:
-                # Single track - check for MP3 file
-                mp3_file = os.path.join(library_path, f"{name}.mp3")
-                if os.path.exists(mp3_file):
-                    status_text = f"✅ {name}" if is_synced_today else f"📦 {name} ({_('local_complete')})"
-                else:
-                    status_text = f"🔄 {name}" if is_synced_today else f"⏳ {name} ({_('wait_download')})"
-            else:
-                # For playlists/albums/artists, check playlist file
-                # Try both .m3u and .m3u8 extensions
-                pl_file = None
-                for ext in ['.m3u', '.m3u8']:
-                    test_file = os.path.join(playlists_path, f"{name}{ext}")
-                    if os.path.exists(test_file):
-                        pl_file = test_file
-                        break
-                
-                if pl_file and os.path.exists(pl_file):
-                    # Playlist file exists - check completeness
-                    is_complete, missing, total = report.get(pl_file, (True, 0, 0))
-                    
-                    if is_complete:
-                        if is_synced_today:
-                            status_text = f"✅ {name}"
-                        else:
-                            status_text = f"📦 {name} ({_('local_complete')})"
-                    else:
-                        if is_synced_today:
-                            status_text = f"🔄 {name} ({_('incomplete_warning_title')}, {_('missing_songs', missing)})"
-                        else:
-                            status_text = f"⚠️ {name} ({_('wait_download')}, {_('missing_songs', missing)})"
-                else:
-                    # No playlist file exists yet - show waiting status
-                    if is_synced_today:
-                        status_text = f"🔄 {name} ({_('synced_today')})"
-                    else:
-                        status_text = f"⏳ {name} ({_('wait_sync')})"
-            
-            # Display in appropriate listbox
-            self.pl_listbox.insert(tk.END, status_text)
-
-        # Add local playlists that are not in the Spotify URLs
-        processed_names = [url_names.get(u, u) for u in urls]
-        for pl_file in pl_files:
-            name = os.path.splitext(os.path.basename(pl_file))[0]
-            if name in processed_names or name.startswith('_'): # Skip internal ones like _Unsorted
-                continue
-                
-            is_complete, missing, total = report.get(pl_file, (True, 0, 0))
-            if is_complete:
-                status_text = f"📦 {name} ({_('local_complete')})"
-            else:
-                status_text = f"⚠️ {name} ({_('wait_download')}, 缺 {missing} 首)"
-                
-            self.pl_listbox.insert(tk.END, status_text)
-            self.pl_urls.append("local:" + name) # Add dummy URL so double-click / delete works properly
-            continue
-            # Classify local files into appropriate categories
-            is_artist = name in ["BIDO 曾愷妤", "GENBLUE幻藍小熊", "Jocelyn 9.4.0", "QWER", "幽靈水晶 CRYXTAL", "艾薇 Ivy", "芒果醬 Mango Jump", "草東沒有派對", "7en"]
-            is_album = name in ["幸福在歌唱 (電影《陽光女子合唱團》幸福版主題曲)", "Ex-Otogibanashi", "未來少女 NEXT GIRLZ", "未來少女 幽靈水晶"]
-            
-            if is_artist:
-                self.ar_listbox.insert(tk.END, status_text)
-                self.ar_urls.append("local:" + name)
-            elif is_album:
-                self.al_listbox.insert(tk.END, status_text)
-                self.al_urls.append("local:" + name)
-            else:
-                self.pl_listbox.insert(tk.END, status_text)
-                self.pl_urls.append("local:" + name) # Add dummy URL so double-click / delete works properly
-
-        # Restore positions and selections
-        for i, lb in enumerate(lists):
-            s = saves[i]
-            # Restore selection
-            for idx in s['selection']:
-                if idx < lb.size():
-                    lb.selection_set(idx)
-            # Restore scroll position
-            lb.yview_moveto(s['yview'][0])
-            
-        # Update Player Combobox
-        # Gather all valid playlist names (from both API and local)
-        all_playlist_names = []
-        for url in urls:
-            all_playlist_names.append(url_names.get(url, url))
-        for pl_file in pl_files:
-            name = os.path.splitext(os.path.basename(pl_file))[0]
-            if name not in all_playlist_names and not name.startswith('_'):
-                all_playlist_names.append(name)
-        
-        all_playlist_names.sort()
-        self.player_playlist_combo['values'] = all_playlist_names
-        
-        # Keep selected value if it still exists
-        current_val = self.player_playlist_combo.get()
-        if current_val and current_val not in all_playlist_names:
-            self.player_playlist_combo.set('')
-        elif not current_val and all_playlist_names:
-            self.player_playlist_combo.set(all_playlist_names[0])
+        """刷新 URL 列表 - 同步版本（会阻塞UI，适合小数据量）"""
+        # 异步版本，立即返回，在后台执行
+        threading.Thread(target=self._async_refresh_url_list, daemon=True).start()
             
     def load_selected_playlist(self):
         selected = self.player_playlist_combo.get()
@@ -1006,72 +1645,142 @@ class PlaylistApp:
         tk.Button(win, text="關閉", command=win.destroy, width=10).pack(pady=10)
 
     def _create_stats_tab(self):
-        """Create the Statistics tab content"""
-        stats_container = tk.Frame(self.tab_stats, padx=20, pady=20)
+        """Create the Statistics tab content with dark theme"""
+        stats_container = tk.Frame(self.tab_stats, padx=20, pady=20, bg=COLORS['bg'])
         stats_container.pack(fill="both", expand=True)
 
         # Title
-        tk.Label(stats_container, text="📊 統計資料", font=("Microsoft JhengHei", 16, "bold")).pack(anchor="w", pady=(0, 20))
+        tk.Label(stats_container, text="📊 統計資料", font=get_font(16, bold=True),
+                 fg=COLORS['text'], bg=COLORS['bg']).pack(anchor="w", pady=(0, 20))
 
         # Library Statistics Section
-        lib_frame = tk.LabelFrame(stats_container, text="音樂庫統計", font=("Microsoft JhengHei", 11, "bold"), padx=15, pady=10)
+        lib_frame = tk.LabelFrame(stats_container, text="音樂庫統計", font=get_font(11, bold=True),
+                                  padx=15, pady=10, bg=COLORS['surface'], fg=COLORS['text'],
+                                  highlightbackground=COLORS['border'], highlightthickness=1, bd=0)
         lib_frame.pack(fill="x", pady=(0, 15))
 
-        self.stats_tab_total_lbl = tk.Label(lib_frame, text="歌曲總數: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_total_lbl = tk.Label(lib_frame, text="歌曲總數: 載入中...", font=get_font(11),
+                                            fg=COLORS['text'], bg=COLORS['surface'])
         self.stats_tab_total_lbl.pack(anchor="w", pady=2)
 
-        self.stats_tab_formats_lbl = tk.Label(lib_frame, text="格式分布: 載入中...", font=("Microsoft JhengHei", 11))
-        self.stats_tab_formats_lbl.pack(anchor="w", pady=2)
+        # 歌曲格式分布（依唯一歌曲計算，不是檔案數）
+        self.stats_tab_song_format_lbl = tk.Label(lib_frame, text="  ├ 純MP3: 載入中...", font=get_font(10),
+                                                  fg=COLORS['text_secondary'], bg=COLORS['surface'])
+        self.stats_tab_song_format_lbl.pack(anchor="w", pady=(2, 0), padx=(10, 0))
 
-        self.stats_tab_size_lbl = tk.Label(lib_frame, text="總容量: 載入中...", font=("Microsoft JhengHei", 11))
-        self.stats_tab_size_lbl.pack(anchor="w", pady=2)
+        self.stats_tab_unconverted_lbl = tk.Label(lib_frame, text="  ├ 純M4A: 載入中...", font=get_font(10),
+                                                    fg=COLORS['accent'], bg=COLORS['surface'])
+        self.stats_tab_unconverted_lbl.pack(anchor="w", pady=0, padx=(10, 0))
+
+        self.stats_tab_dual_format_lbl = tk.Label(lib_frame, text="  └ 雙格式: 載入中...", font=get_font(10),
+                                                    fg=COLORS['text_secondary'], bg=COLORS['surface'])
+        self.stats_tab_dual_format_lbl.pack(anchor="w", pady=(0, 2), padx=(10, 0))
+
+        # 檔案統計（實際檔案數量）
+        self.stats_tab_files_lbl = tk.Label(lib_frame, text="檔案統計: 載入中...", font=get_font(11),
+                                            fg=COLORS['text'], bg=COLORS['surface'])
+        self.stats_tab_files_lbl.pack(anchor="w", pady=(8, 2))
+
+        self.stats_tab_file_breakdown_lbl = tk.Label(lib_frame, text="  MP3: 載入中... | M4A: 載入中...", font=get_font(10),
+                                                       fg=COLORS['text_secondary'], bg=COLORS['surface'])
+        self.stats_tab_file_breakdown_lbl.pack(anchor="w", pady=0, padx=(10, 0))
+
+        self.stats_tab_size_lbl = tk.Label(lib_frame, text="總容量: 載入中...", font=get_font(11),
+                                           fg=COLORS['text'], bg=COLORS['surface'])
+        self.stats_tab_size_lbl.pack(anchor="w", pady=(8, 2))
 
         # Playlist Statistics Section
-        pl_frame = tk.LabelFrame(stats_container, text="播放清單統計", font=("Microsoft JhengHei", 11, "bold"), padx=15, pady=10)
+        pl_frame = tk.LabelFrame(stats_container, text="播放清單統計", font=get_font(11, bold=True),
+                                 padx=15, pady=10, bg=COLORS['surface'], fg=COLORS['text'],
+                                 highlightbackground=COLORS['border'], highlightthickness=1, bd=0)
         pl_frame.pack(fill="x", pady=(0, 15))
 
-        self.stats_tab_pl_count_lbl = tk.Label(pl_frame, text="清單數量: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_pl_count_lbl = tk.Label(pl_frame, text="清單數量: 載入中...", font=get_font(11),
+                                               fg=COLORS['text'], bg=COLORS['surface'])
         self.stats_tab_pl_count_lbl.pack(anchor="w", pady=2)
 
-        self.stats_tab_pl_songs_lbl = tk.Label(pl_frame, text="清單歌曲總數: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_pl_songs_lbl = tk.Label(pl_frame, text="清單歌曲總數: 載入中...", font=get_font(11),
+                                               fg=COLORS['text_secondary'], bg=COLORS['surface'])
         self.stats_tab_pl_songs_lbl.pack(anchor="w", pady=2)
 
-        self.stats_tab_unique_pl_lbl = tk.Label(pl_frame, text="清單唯一歌曲: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_unique_pl_lbl = tk.Label(pl_frame, text="清單唯一歌曲: 載入中...", font=get_font(11),
+                                                fg=COLORS['text_secondary'], bg=COLORS['surface'])
         self.stats_tab_unique_pl_lbl.pack(anchor="w", pady=2)
 
-        self.stats_tab_dupes_lbl = tk.Label(pl_frame, text="重複歌曲數: 載入中...", font=("Microsoft JhengHei", 11))
-        self.stats_tab_dupes_lbl.pack(anchor="w", pady=2)
-
         # Savings Section
-        savings_frame = tk.LabelFrame(stats_container, text="空間統計", font=("Microsoft JhengHei", 11, "bold"), padx=15, pady=10)
+        savings_frame = tk.LabelFrame(stats_container, text="空間統計", font=get_font(11, bold=True),
+                                      padx=15, pady=10, bg=COLORS['surface'], fg=COLORS['text'],
+                                      highlightbackground=COLORS['border'], highlightthickness=1, bd=0)
         savings_frame.pack(fill="x", pady=(0, 15))
 
-        self.stats_tab_savings_lbl = tk.Label(savings_frame, text="重複歌曲節省空間: 載入中...", font=("Microsoft JhengHei", 11), fg="#4CAF50")
+        self.stats_tab_savings_lbl = tk.Label(savings_frame, text="重複歌曲節省空間: 載入中...", font=get_font(11),
+                                              fg=COLORS['accent'], bg=COLORS['surface'])
         self.stats_tab_savings_lbl.pack(anchor="w", pady=2)
 
-        self.stats_tab_not_in_pl_lbl = tk.Label(savings_frame, text="未收錄在清單的歌曲: 載入中...", font=("Microsoft JhengHei", 11))
+        self.stats_tab_not_in_pl_lbl = tk.Label(savings_frame, text="未收錄在清單的歌曲: 載入中...", font=get_font(11),
+                                                fg=COLORS['text_secondary'], bg=COLORS['surface'])
         self.stats_tab_not_in_pl_lbl.pack(anchor="w", pady=2)
 
         # Refresh Button
-        tk.Button(stats_container, text="🔄 重新整理", command=lambda: self._refresh_stats_tab(),
-                  font=("Microsoft JhengHei", 10), bg="#2196F3", fg="white", padx=20, pady=5).pack(anchor="w", pady=(10, 0))
+        tk.Button(stats_container, text="🔄 重新整理", command=lambda: self._refresh_stats_tab(force=True),
+                  font=get_font(10), bg=COLORS['accent'], fg=COLORS['bg'],
+                  activebackground=COLORS['accent_hover'], padx=20, pady=5,
+                  relief="flat", cursor="hand2").pack(anchor="w", pady=(10, 0))
 
-        # Auto-refresh after a short delay to allow config to be ready
-        self.root.after(1000, self._refresh_stats_tab)
+        # 標記 stats 尚未初始化，避免啟動時自動載入造成阻塞
+        self._stats_initialized = False
 
-    def _refresh_stats_tab(self):
-        """Refresh statistics displayed in the stats tab"""
+    def _refresh_stats_tab(self, force=False):
+        """Refresh statistics displayed in the stats tab (改為背景執行緒計算)"""
         from core.library import get_detailed_stats
 
-        def update_ui():
+        # 如果不是強制刷新，且已經初始化過，則跳過
+        if not force and getattr(self, '_stats_initialized', False):
+            return
+
+        def update_ui(stats):
             try:
-                stats = get_detailed_stats(self.config)
+                self._stats_initialized = True
 
                 # Library stats
                 total_size_gb = stats['total_size_mb'] / 1024
                 size_str = f"{total_size_gb:.2f} GB" if total_size_gb >= 1 else f"{stats['total_size_mb']:.1f} MB"
-                self.stats_tab_total_lbl.config(text=f"歌曲總數: {stats['total_songs']} 首")
-                self.stats_tab_formats_lbl.config(text=f"格式分布: MP3 {stats['mp3_count']} | M4A {stats['m4a_count']}")
+
+                # 歌曲統計（唯一歌曲數，不是檔案數）
+                self.stats_tab_total_lbl.config(text=f"歌曲總數: {stats['total_songs']} 首（唯一）")
+
+                # 歌曲格式分布 - 純MP3、純M4A（未轉換）、雙格式
+                mp3_only = stats.get('mp3_only_count', 0)
+                m4a_only = stats.get('m4a_only_count', 0)
+                dual_format = stats.get('dual_format_count', 0)
+
+                self.stats_tab_song_format_lbl.config(text=f"  ├ 純 MP3: {mp3_only} 首")
+
+                # 純 M4A 用警示色標示（未轉換的歌曲）
+                if m4a_only > 0:
+                    self.stats_tab_unconverted_lbl.config(
+                        text=f"  ├ 純 M4A: {m4a_only} 首（⚠️ 未轉換）",
+                        fg=COLORS['warning'] if 'warning' in COLORS else COLORS['accent']
+                    )
+                else:
+                    self.stats_tab_unconverted_lbl.config(
+                        text=f"  ├ 純 M4A: {m4a_only} 首（✓ 全部轉換）",
+                        fg=COLORS['success'] if 'success' in COLORS else '#4caf50'
+                    )
+
+                self.stats_tab_dual_format_lbl.config(text=f"  └ 雙格式: {dual_format} 首（同時有MP3和M4A）")
+
+                # 檔案統計（與歌曲統計保持一致）
+                expected_mp3_files = mp3_only + dual_format
+                expected_m4a_files = m4a_only + dual_format
+                total_files = expected_mp3_files + expected_m4a_files
+                
+                self.stats_tab_files_lbl.config(text=f"檔案統計: {total_files} 個檔案")
+                self.stats_tab_file_breakdown_lbl.config(
+                    text=f"  MP3: {expected_mp3_files} 個 | M4A: {expected_m4a_files} 個"
+                )
+
+                # 容量統計
                 self.stats_tab_size_lbl.config(text=f"總容量: {size_str}")
 
                 # Playlist stats
@@ -1079,7 +1788,6 @@ class PlaylistApp:
                 self.stats_tab_pl_count_lbl.config(text=f"清單數量: {pl_files} 個")
                 self.stats_tab_pl_songs_lbl.config(text=f"清單歌曲總數: {stats['total_playlist_entries']} 首")
                 self.stats_tab_unique_pl_lbl.config(text=f"清單唯一歌曲: {stats['unique_playlist_entries']} 首")
-                self.stats_tab_dupes_lbl.config(text=f"多格式歌曲數: {stats['library_duplicates']} 首")
 
                 # Savings stats
                 savings_gb = stats['savings_mb'] / 1024
@@ -1089,58 +1797,49 @@ class PlaylistApp:
 
             except Exception as e:
                 print(f"Error refreshing stats tab: {e}")
+                self._stats_initialized = True  # 標記為已初始化，避免卡住
 
-        threading.Thread(target=lambda: self.root.after(0, update_ui), daemon=True).start()
+        def thread_update():
+            try:
+                # 在背景執行緒執行昂貴的檔案掃描
+                stats = get_detailed_stats(self.config, None)
+                # 完成後再更新 UI（在主執行緒）
+                self.root.after(0, lambda: update_ui(stats))
+            except Exception as e:
+                print(f"Error computing stats: {e}")
+                self._stats_initialized = True
 
-    def update_stats_ui(self, audio_cache=None):
+        threading.Thread(target=thread_update, daemon=True).start()
+
+    def update_stats_ui(self, audio_cache=None, force=False):
+        """更新统计资料分頁（改為延遲載入，只在需要時刷新）"""
+        # 啟動時不自動刷新，避免阻塞 UI
+        if not force and getattr(self, '_stats_initialized', False):
+            return
+
         def _bg_update():
             try:
-                stats = get_detailed_stats(self.config, audio_files=audio_cache)
-                
-                total_songs = stats['total_songs']
-                total_size_mb = stats['total_size_mb']
-                dupes = stats['duplicates_count']
-                savings = stats['savings_mb']
-                recent = stats['recent_5']
-                
-                size_str = f"{total_size_mb/1024:.2f} GB" if total_size_mb > 1024 else f"{total_size_mb:.1f} MB"
-                saving_str = f"{savings/1024:.2f} GB" if savings > 1024 else f"{savings:.1f} MB"
-                
-                try:
-                    self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', total_songs, size_str, stats['mp3_count'], stats['m4a_count'])))
-                    self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', dupes)))
-                    self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', saving_str)))
-                    extra_text = " | ".join([
-                        _('stats_playlist_unique', stats.get('unique_playlist_tokens', 0)),
-                        _('stats_unconverted', stats.get('unconverted_count', 0)),
-                        _('stats_not_in_playlists', stats.get('not_in_playlists_count', 0))
-                    ])
-                    self.root.after(0, lambda: self.extra_stats_lbl.config(text=extra_text))
-                    
-                    if recent:
-                        recent_text = _('recent_added', " | ".join([f"{name[:15]}... ({date})" for name, date in recent]))
-                        self.root.after(0, lambda: self.recent_lbl.config(text=recent_text))
-                    else:
-                        self.root.after(0, lambda: self.recent_lbl.config(text=_('recent_added', _('no_data'))))
-                except RuntimeError:
-                    # Ignore cleanup errors if main loop is gone
-                    pass
+                # 使用更長的延遲確保 UI 已完全載入
+                self.root.after(1000, lambda f=force: self._refresh_stats_tab(f))
             except Exception as e:
-                import traceback
-                traceback.print_exc()
-                print(f"Error updating stats: {e}")
-                # Ensure UI doesn't get stuck on "Loading..."
-                try:
-                    self.root.after(0, lambda: self.total_songs_lbl.config(text=_('total_songs', 0, "Error", 0, 0)))
-                    self.root.after(0, lambda: self.dup_songs_lbl.config(text=_('duplicate_songs', 0)))
-                    self.root.after(0, lambda: self.space_saved_lbl.config(text=_('space_saved', 0)))
-                    self.root.after(0, lambda: self.extra_stats_lbl.config(text=""))
-                    self.root.after(0, lambda: self.recent_lbl.config(text=_('recent_added', _('no_data'))))
-                except RuntimeError:
-                    # Ignore "main thread is not in main loop" during shutdown
-                    pass
+                print(f"Error triggering stats refresh: {e}")
 
         threading.Thread(target=_bg_update, daemon=True).start()
+
+    def _on_tab_changed(self, event=None):
+        """處理頁面切換事件，首次切換到統計頁面時載入數據"""
+        try:
+            # 取得當前選中的頁面索引
+            current_tab = self.notebook.index(self.notebook.select())
+            # 取得統計頁面的索引（第3個頁面，索引為2）
+            stats_tab_idx = 2  # Library=0, Player=1, Statistics=2
+
+            if current_tab == stats_tab_idx and not self._stats_tab_loaded:
+                self._stats_tab_loaded = True
+                # 延遲載入統計數據，確保頁面切換流暢
+                self.root.after(100, lambda: self._refresh_stats_tab(force=True))
+        except Exception as e:
+            print(f"Tab change error: {e}")
 
     def add_url(self):
         url = self.url_entry.get().strip()
@@ -1594,11 +2293,13 @@ class PlaylistApp:
 
     def play_song(self, song_path):
         try:
+            # 确保 Pygame 已初始化
+            self._ensure_pygame_init()
             import pygame
             if self.lyrics_update_job:
                 self.root.after_cancel(self.lyrics_update_job)
                 self.lyrics_update_job = None
-                
+
             pygame.mixer.music.load(song_path)
             pygame.mixer.music.set_endevent(pygame.USEREVENT + 1)
             
@@ -1677,14 +2378,20 @@ class PlaylistApp:
         self.log(f"歌詞偏移已調整: {new_offset:+.1f}s")
 
     def refresh_lyrics(self):
-        import pygame
+        # 如果 Pygame 未初始化，不执行任何操作
+        if not self._pygame_initialized:
+            return
+        try:
+            import pygame
+        except:
+            return
         # Check if song ended
         ended = False
         for event in pygame.event.get():
             if event.type == pygame.USEREVENT + 1:
                 ended = True
                 break
-        
+
         if ended:
             self.play_next()
             return
@@ -1729,9 +2436,12 @@ class PlaylistApp:
         self.lyrics_update_job = self.root.after(200, self.refresh_lyrics)
 
     def toggle_playback(self):
+        if not self.current_playlist_songs:
+            return
+        # 确保 Pygame 已初始化
+        self._ensure_pygame_init()
         import pygame
-        if not self.current_playlist_songs: return
-        
+
         if self.is_playing:
             pygame.mixer.music.pause()
             self.is_playing = False
@@ -1771,7 +2481,14 @@ class PlaylistApp:
         self.play_song(self.current_playlist_songs[self.current_song_idx])
 
     def change_volume(self, val):
-        import pygame
-        vol = float(val) / 100
-        pygame.mixer.music.set_volume(vol)
+        # 如果 Pygame 未初始化，只更新UI标签
+        if not self._pygame_initialized:
+            self.vol_lbl.config(text=_('player_volume', int(float(val))))
+            return
+        try:
+            import pygame
+            vol = float(val) / 100
+            pygame.mixer.music.set_volume(vol)
+        except:
+            pass
         self.vol_lbl.config(text=_('player_volume', int(float(val))))

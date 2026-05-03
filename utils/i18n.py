@@ -337,6 +337,29 @@ class I18N:
         'dl_summary_korean': "韓語歌曲: {0}",
         'dl_summary_western': "西洋歌曲: {0}",
         'dl_summary_other': "其他/動漫: {0}",
+        # Update dialog translations
+        'update_dialog_title': "🎉 新版本可用！",
+        'update_dialog_subtitle': "New Version Available!",
+        'update_current_version': "目前版本: {0}",
+        'update_latest_version': "最新版本: {0}",
+        'update_release_notes': "更新內容",
+        'update_download_btn': "下載更新",
+        'update_later_btn': "稍後提醒",
+        'update_skip_btn': "跳過此版本",
+        'update_no_notes': "無更新說明",
+        # Player tab new translations
+        'player_song_title': "歌名",
+        'player_artist': "演出者",
+        'player_album': "專輯",
+        'player_progress_time': "{0} / {1}",
+        'player_select_playlist_hint': "請選擇播放清單並點擊「載入」",
+        'player_lyrics_offset': "歌詞時間偏移",
+        'player_no_songs': "播放清單中沒有歌曲",
+        # View songs button
+        'view_songs_btn': "查看歌曲",
+        # Auto update check setting
+        'auto_update_check': "自動檢查更新",
+        'auto_update_check_desc': "啟動時自動檢查是否有新版本可用",
     })
 
     translations = {

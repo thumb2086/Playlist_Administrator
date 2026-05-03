@@ -115,48 +115,58 @@ def load_playlists_data(config):
     playlists_path = config.get('playlists_path')
     if not playlists_path:
         return []
-    
+
     playlists_path = os.path.normpath(playlists_path)
     if not os.path.exists(playlists_path):
         return []
 
     library_path = config.get('library_path')
-    
+
     # 1. Gather all m3u8 files
     m3u8_files = glob.glob(os.path.join(playlists_path, "*.m3u8"))
-    
+
     # 2. Get info from config
     spotify_urls = config.get('spotify_urls', [])
     url_names = config.get('url_names', {})
-    
+    last_updated = config.get('last_updated', {})
+
+    import datetime
+    today = datetime.datetime.now().strftime('%Y-%m-%d')
+
     # Map name back to URL
     name_to_url = {v: k for k, v in url_names.items()}
-    
+
     # 3. Build report for completeness
     report = get_playlist_completeness_report(m3u8_files, library_path)
-    
+
     playlist_data = []
-    
+
     # Process m3u8 files from config/scraped first
     processed_names = set()
-    
+
     # Early normalize library_path for completeness report
     library_path = os.path.normpath(library_path) if library_path else library_path
-    
+
     for sp_url in spotify_urls:
         name = url_names.get(sp_url)
         if not name:
             name = f"未命名歌單 ({sp_url.split('/')[-1][:8]}...)"
-            
+
         m3u_file = os.path.join(playlists_path, f"{sanitize_filename(name)}.m3u8")
         is_complete = "Unknown"
+        is_synced_today = last_updated.get(sp_url) == today
         status_text = "未同步"
-        
+
         if os.path.exists(m3u_file):
             comp, missing, total = report.get(m3u_file, (False, 0, 0))
             is_complete = comp
-            status_text = "已主動同步" if comp else f"缺 {missing} 首歌"
-        
+            if comp:
+                status_text = "本日已同步" if is_synced_today else "已主動同步"
+            else:
+                status_text = f"本日已同步 (缺 {missing} 首)" if is_synced_today else f"缺 {missing} 首歌"
+        elif is_synced_today:
+            status_text = "本日已同步 (等待建立歌單)"
+
         playlist_data.append({
             "啟用": True,
             "類型": get_playlist_type(sp_url),
@@ -3130,10 +3140,23 @@ def get_detailed_stats(config, audio_files=None):
 
     # Count songs with multiple formats (library duplicates)
     library_duplicates = sum(1 for exts in token_to_exts.values() if len(exts) > 1)
-    unconverted_count = 0
+
+    # Calculate format distribution by unique songs (not files)
+    mp3_only_count = 0
+    m4a_only_count = 0
+    dual_format_count = 0
     for tokens_tuple, exts in token_to_exts.items():
-        if '.m4a' in exts and '.mp3' not in exts:
-            unconverted_count += 1
+        has_mp3 = '.mp3' in exts
+        has_m4a = '.m4a' in exts
+        if has_mp3 and has_m4a:
+            dual_format_count += 1
+        elif has_mp3:
+            mp3_only_count += 1
+        elif has_m4a:
+            m4a_only_count += 1
+
+    # unconverted_count is songs that only have M4A format
+    unconverted_count = m4a_only_count
 
     # 2. Duplicate/Savings Stats
     pl_files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
@@ -3222,5 +3245,10 @@ def get_detailed_stats(config, audio_files=None):
           'library_duplicates': library_duplicates,  # Songs with multiple formats
           'savings_mb': savings_mb,
           'unconverted_count': unconverted_count,
-          'not_in_playlists_count': not_in_playlists_count
+          'not_in_playlists_count': not_in_playlists_count,
+          # New: song-level format distribution (not file-level)
+          'mp3_only_count': mp3_only_count,
+          'm4a_only_count': m4a_only_count,
+          'dual_format_count': dual_format_count,
+          'total_file_count': len(audio_files),
       }
