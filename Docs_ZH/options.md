@@ -3,7 +3,7 @@
 本文件以目前程式碼為準，整理出：
 
 - 有預設值的設定
-- UI 可直接調整的設定
+- Tk UI 可直接調整的設定
 - 仍被程式使用、但不一定出現在 UI 的隱藏設定
 - 明顯屬於殘留或待清理的設定
 
@@ -11,19 +11,19 @@
 
 | 鍵名 | 預設值 | 用途 | UI 狀態 | 備註 |
 | --- | --- | --- | --- | --- |
-| `base_path` | 無 | 專案根資料夾 | Tk/Streamlit 可調 | 最重要設定 |
+| `base_path` | 無 | 專案根資料夾 | Tk 可調 | 最重要設定 |
 | `library_path` | 由 `base_path` 推導 | 音樂庫路徑 | 不直接編輯 | 通常是 `base_path/Music` |
 | `playlists_path` | 由 `base_path` 推導 | 歌單輸出路徑 | 唯讀 | 通常是 `base_path/Playlists` |
-| `export_path` | 由 `base_path` 推導 | 匯出資料夾 | Streamlit 可改 | 通常是 `base_path/USB_Output` |
-| `ffmpeg_path` | `bin/ffmpeg.exe` | 音訊轉檔工具路徑 | Tk/Streamlit 可調 | Spotube 轉檔與匯出品質會用到 |
-| `language` | `zh-TW` | 語系 | Tk/Streamlit 可調 | `zh-TW` / `en` |
+| `export_path` | 由 `base_path` 推導 | 匯出資料夾 | 由流程使用 | 通常是 `base_path/USB_Output` |
+| `ffmpeg_path` | `bin/ffmpeg.exe` | 音訊轉檔工具路徑 | Tk 可調 | Spotube 轉檔與匯出品質會用到 |
+| `language` | `zh-TW` | 語系 | Tk 可調 | `zh-TW` / `en` |
 | `theme` | `dark` | Tk 主題 | Tk 可調 | 目前只有 Tk 用到 |
 
 ## 二、Spotify / 歌單設定
 
 | 鍵名 | 預設值 | 用途 | UI 狀態 | 備註 |
 | --- | --- | --- | --- | --- |
-| `spotify_urls` | `[]` | 已追蹤的 Spotify playlist URL 清單 | Tk/Streamlit 可改 | 主流程核心 |
+| `spotify_urls` | `[]` | 已追蹤的 Spotify playlist URL 清單 | Tk 可改 | 主流程核心 |
 | `url_names` | `{}` | URL 對應歌單名稱快取 | 間接維護 | `add_url()` 會寫入 |
 | `last_updated` | `{}` | 記錄各 URL 最後同步日期 | 不直接編輯 | 用來避免重複同步 |
 
@@ -31,13 +31,13 @@
 
 | 鍵名 | 預設值 | 用途 | UI 狀態 | 備註 |
 | --- | --- | --- | --- | --- |
-| `spotube_folder_name` | `spotube` | Spotube 資料夾名稱 | Streamlit 可調 | Tk 目前沒有此欄位 |
-| `spotube_exact_match` | `True` | Spotube 檔名比對偏嚴格 | Streamlit 可調 | `core/spotify.py` 仍使用 |
-| `spotube_convert_matched_only` | `False` | 只轉 playlist 裡有出現的 M4A | Tk/Streamlit 可調 | 可視為使用者最重要的 Spotube 開關 |
-| `spotube_strict_matching` | `True` | M4A 對 MP3 轉檔比對是否只接受精準名稱 | Tk 可調 | Streamlit 目前沒有此欄位 |
+| `spotube_folder_name` | `spotube` | Spotube 資料夾名稱 | 無 UI | 目前較適合內部或固定設定 |
+| `spotube_exact_match` | `True` | Spotube 檔名比對偏嚴格 | 無 UI | `core/spotify.py` 仍使用 |
+| `spotube_convert_matched_only` | `False` | 只轉 playlist 裡有出現的 M4A | Tk 可調 | 使用者最重要的 Spotube 開關 |
+| `spotube_strict_matching` | `True` | M4A 對 MP3 轉檔比對是否只接受精準名稱 | Tk 可調 | 仍是正式設定的一部分 |
 | `spotube_m4a_subfolder` | 無預設 | Spotube M4A 子資料夾 | 無 UI | `core/library.py` 仍支援 |
 | `spotube_mp3_subfolder` | 無預設 | Spotube MP3 子資料夾 | 無 UI | `core/library.py` 仍支援 |
-| `spotube_convert_workers` | 無預設，底層 fallback `4` | 轉檔執行緒數 | 無 UI | 屬於隱藏進階選項 |
+| `spotube_convert_workers` | 無預設，底層 fallback `4` | 轉檔執行緒數 | 無 UI | 隱藏進階設定 |
 
 ## 四、更新流程 / 背景行為
 
@@ -46,7 +46,7 @@
 | `setup_completed` | `False` | 是否完成首次設定 | 內部使用 | 首次啟動精靈判斷 |
 | `auto_sync_on_add` | `False` | 新增 URL 時是否立即做完整同步 | Tk 可調 | 關掉可加快新增 URL 速度 |
 | `auto_update_check` | `True` | 啟動後是否檢查新版 | Tk 可調 | 與歌單流程無直接關係 |
-| `max_threads` | `4` | 更新流程執行緒數上限 | 無 UI | 目前偏內部設定 |
+| `max_threads` | `4` | 更新流程執行緒數上限 | 無 UI | 偏內部設定 |
 | `debug_mode` | `False` | 開啟 debug 輸出 | Tk 可調 | 方便排查 |
 
 ## 五、歌詞 / Metadata / 其他功能
@@ -82,14 +82,12 @@
 
 | 鍵名 | 現況 | 建議 |
 | --- | --- | --- |
-| `spotube_folder_name` | Streamlit 還能改 | 若團隊幾乎不改，可改成固定值或自動偵測 |
+| `spotube_folder_name` | 無 UI，但底層可讀 | 若團隊幾乎不改，可固定值或自動偵測 |
 | `spotube_strict_matching` | Tk 可調、底層有用 | 若要降複雜度，可固定為 `True` |
 | `spotube_convert_workers` | 無 UI 但仍可生效 | 可先保留為進階隱藏設定 |
-| `spotube_m4a_subfolder` / `spotube_mp3_subfolder` | 無 UI 但底層保留 | 若專案已固定資料夾結構，可評估清理 |
+| `spotube_m4a_subfolder` / `spotube_mp3_subfolder` | 無 UI 但底層保留 | 若資料夾結構已固定，可評估清理 |
 
-## 八、兩套 UI 的差異
-
-### Tkinter 設定視窗目前有
+## 八、Tkinter 設定視窗目前有
 
 - `language`
 - `theme`
@@ -100,21 +98,6 @@
 - `spotube_strict_matching`
 - `auto_sync_on_add`
 - `debug_mode`
-
-### Streamlit 設定頁目前有
-
-- `base_path`
-- `language`
-- `ffmpeg_path`
-- `spotube_folder_name`
-- `spotube_exact_match`
-- `spotube_convert_matched_only`
-
-### 目前的不一致
-
-1. Tk 有 `spotube_strict_matching`，Streamlit 沒有
-2. Streamlit 有 `spotube_folder_name`、`spotube_exact_match`，Tk 沒有
-3. 這代表使用者在兩個介面看到的是兩套不同的設定心智模型
 
 ## 九、建議的整理方向
 
@@ -137,5 +120,5 @@
 先走保守版本，原因：
 
 1. 底層轉檔流程仍明確依賴 `spotube_strict_matching`
-2. Tk 與 Streamlit UI 已經不一致，先減少選項比改抽象模式更安全
+2. 過去 UI 不一致造成的設定複雜度，現在可以直接以 Tk 設定為準收斂
 3. 現階段最值得先清的是殘留 Spotify API 顯示，不是先重構 Spotube 模式

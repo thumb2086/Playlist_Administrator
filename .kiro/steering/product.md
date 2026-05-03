@@ -2,14 +2,14 @@
 
 ## Spotube Playlist Manager
 
-A desktop automation tool for organizing music libraries and exporting playlists to USB-ready folders. The application provides both GUI (Tkinter) and web-based (Streamlit) interfaces for managing Spotify playlists and downloading music from YouTube.
+A desktop automation tool for organizing music libraries and exporting playlists to USB-ready folders. The application uses a Tkinter desktop interface for managing Spotify playlists and downloading music from YouTube.
 
 ### Core Features
 - **Playlist Management**: Import Spotify playlists via Chosic analyzer URLs or manual text files
 - **Smart Download**: Automatically downloads missing songs from YouTube with intelligent matching to prevent duplicates
 - **Library Organization**: Maintains a master repository of all downloaded MP3s with metadata
 - **USB Export**: Creates organized playlist folders ready for USB transfer
-- **Dual Interface**: Traditional desktop GUI and modern web interface
+- **Desktop Interface**: Traditional Tkinter GUI
 - **Internationalization**: Supports multiple languages (Chinese/English)
 - **Resume Support**: Can resume interrupted downloads
 

@@ -1,6 +1,6 @@
 # Playlist Administrator 優化決策清單
 
-本文件不是直接列「想法」，而是依照目前程式碼現況，整理成可以執行的優先順序。
+本文件依照目前程式碼現況，整理成可以執行的優先順序。
 
 ## 結論先講
 
@@ -10,14 +10,14 @@
 
 1. 移除啟動時 `proactive_name_fetch`
 2. 移除 Spotify API 殘留顯示與設定鍵
-3. 統一 Spotube 設定心智模型
+3. 收斂 Spotube 設定，並以 Tk 為唯一正式設定來源
 4. 補文件，讓後續清理不再靠猜
 
 ## 優先級排序
 
-## P1：立刻可做，風險低
+### P1：立刻可做，風險低
 
-### 1. 移除啟動時 `proactive_name_fetch`
+#### 1. 移除啟動時 `proactive_name_fetch`
 
 位置：
 
@@ -34,7 +34,7 @@
 - 這是最乾淨的低風險優化
 - 保留函式本身即可，因為 `add_url()` 仍依賴抓名稱流程
 
-### 2. 清掉 `view_playlist_songs()` 的 Spotify API 殘留文字
+#### 2. 移除 `view_playlist_songs()` 的 Spotify API 殘留文字
 
 位置：
 
@@ -51,12 +51,12 @@
 - 這屬於純顯示層清理
 - 幾乎沒有行為風險
 
-### 3. 從設定預設值與文件中移除舊 Spotify API 概念
+#### 3. 從設定預設值與文件中移除舊 Spotify API 概念
 
 位置：
 
 - `utils/config.py`
-- 舊文件與說明
+- 文件與說明
 
 原因：
 
@@ -66,23 +66,19 @@
 
 這幾個概念若還在設定檔或文件裡，只會增加誤導與維護成本。
 
-判斷：
+### P2：可以做，但要保守
 
-- 若只做「不再讀取、不再顯示、不再寫入」，風險低
-
-## P2：可以做，但要保守
-
-### 4. 簡化 Spotube 設定
+#### 4. 簡化 Spotube 設定
 
 現況問題：
 
-- Tk 和 Streamlit 的設定欄位不一致
+- 過去 Tk 和 Streamlit 的設定欄位不一致
 - 使用者要理解 `spotube_exact_match`
 - `spotube_convert_matched_only`
 - `spotube_strict_matching`
 - `spotube_folder_name`
 
-這四個欄位的差別，學習成本偏高
+這四個欄位的差別，學習成本偏高。
 
 我建議先做的版本：
 
@@ -95,11 +91,11 @@
 
 1. 這條路修改面最小
 2. 不需要立刻重寫底層轉檔策略
-3. 能先把兩套 UI 靠攏
+3. 能先把設定模型收斂到 Tk 版本
 
-## P3：先不要急著動
+### P3：先不要急著動
 
-### 5. 不建議現在移除 Spotube 轉檔主體
+#### 5. 不建議現在移除 Spotube 轉檔主體
 
 原因：
 
@@ -107,7 +103,7 @@
 - 很多狀態判斷、metadata 命名校正都還有實際用途
 - 若直接拔掉，容易影響既有使用者音樂庫
 
-### 6. 不建議現在移除 `_metadata_based_mp3_path`
+#### 6. 不建議現在移除 `_metadata_based_mp3_path`
 
 原因：
 
@@ -118,14 +114,14 @@
 
 ### 1. 文件與程式碼不同步
 
-- `docs/architecture.md` 寫成很多功能已移除
+- `docs/architecture.md` 曾寫成很多功能已移除
 - 但 `core/library.py` 中 Spotube 轉檔仍在
 
-### 2. Tk 與 Streamlit 的設定定義不同步
+### 2. 已移除的 Streamlit 曾讓設定定義不同步
 
 - Tk 有 `spotube_strict_matching`
-- Streamlit 沒有
-- Streamlit 有 `spotube_folder_name`
+- 舊 Streamlit 沒有
+- 舊 Streamlit 有 `spotube_folder_name`
 - Tk 沒有
 
 ### 3. 設定鍵已經超出目前產品想表達的複雜度
@@ -143,7 +139,7 @@
 ### 第二階段
 
 - 簡化 Spotube 設定
-- 統一 Tk / Streamlit 的設定欄位
+- 以 Tk 設定欄位為唯一正式定義
 - 視需要把隱藏設定改成硬編碼或自動偵測
 
 ## 驗證重點
@@ -162,4 +158,4 @@
 1. `gui/app.py` 移除啟動背景 `proactive_name_fetch`
 2. `gui/app.py` 清掉 `view_playlist_songs()` 的 fetch method 顯示
 3. `utils/config.py` 清理舊 Spotify API 預設值或相依讀取
-4. `gui/settings.py` / `streamlit_app.py` 開始收斂 Spotube 選項
+4. `gui/settings.py` 與底層設定開始收斂 Spotube 選項

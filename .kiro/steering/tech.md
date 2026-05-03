@@ -3,7 +3,6 @@
 ## Core Technologies
 - **Python 3.x**: Primary programming language
 - **Tkinter**: Desktop GUI framework
-- **Streamlit**: Web-based UI framework
 - **yt-dlp**: YouTube downloading engine
 - **ffmpeg**: Audio processing and conversion
 - **BeautifulSoup4**: Web scraping for playlist analysis
@@ -19,8 +18,6 @@ ffmpeg-python    # FFmpeg Python bindings
 mutagen          # Audio metadata
 pygame           # Audio playback
 syncedlyrics     # Lyrics synchronization
-streamlit        # Web UI
-watchdog         # File system monitoring
 zhconv           # Chinese text conversion
 pyinstaller      # Executable packaging
 ```
@@ -41,9 +38,6 @@ pip install -r requirements.txt
 
 # Run desktop GUI
 python main.py
-
-# Run web interface
-streamlit run streamlit_app.py
 
 # Build executable
 pyinstaller app.spec

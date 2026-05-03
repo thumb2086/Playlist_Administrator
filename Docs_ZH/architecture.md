@@ -2,7 +2,7 @@
 
 ## 專案定位
 
-Playlist Administrator 是一個以本機音樂庫為核心的歌單管理工具，主要用途不是下載音樂，而是：
+Playlist Administrator 是一個以本機音樂庫為核心的桌面工具，主要用途不是下載音樂，而是：
 
 - 從 Spotify `playlist` URL 抓取歌單曲目
 - 用本機音樂庫做歌曲比對
@@ -11,10 +11,9 @@ Playlist Administrator 是一個以本機音樂庫為核心的歌單管理工具
 - 視需要把 Spotube 來源的 `M4A` 轉成 `MP3`
 - 匯出指定歌單到 USB / SD
 
-目前專案同時有三個入口：
+目前專案有兩個正式入口：
 
 - `main.py`: Tkinter 桌面版主介面
-- `streamlit_app.py`: Streamlit 網頁版介面
 - `cli.py`: 命令列工具
 
 ## 核心模組
@@ -24,9 +23,6 @@ Playlist Administrator 是一個以本機音樂庫為核心的歌單管理工具
 - `main.py`
   - 建立 Tk root
   - 初始化 `gui.app.PlaylistApp`
-- `streamlit_app.py`
-  - 提供簡化版操作面板
-  - 可做更新、歌單管理、匯出、設定
 - `cli.py`
   - 提供 `update`、`scrape`、`match`、`fetch-playlist`
 
@@ -74,14 +70,14 @@ Playlist Administrator 是一個以本機音樂庫為核心的歌單管理工具
 
 ```mermaid
 flowchart TD
-    A["啟動 main.py / streamlit_app.py / cli.py"] --> B["load_config()"]
+    A["啟動 main.py / cli.py"] --> B["load_config()"]
     B --> C{"base_path 是否存在"}
     C -- 否 --> D["要求使用者選擇 Base Folder"]
     C -- 是 --> E["derive_paths() 推導 Library / Playlists / USB_Output"]
     D --> E
     E --> F["ensure_dirs() 建立必要資料夾"]
     F --> G["建立 UI 或執行 CLI 命令"]
-    G --> H["Tk 版額外啟動背景任務<br/>含 proactive_name_fetch / update check"]
+    G --> H["Tk 版額外啟動背景任務<br/>含 update check"]
 ```
 
 ### 新增 Spotify 歌單流程
@@ -152,7 +148,7 @@ flowchart TD
 
 ## 目前觀察到的真實狀態
 
-### 仍然存在但文件曾寫成已移除
+### 仍然存在但需要後續簡化
 
 - Spotube M4A 轉 MP3 流程仍存在
   - `core/library.py` 的 `convert_spotube_m4a_to_mp3()`
@@ -165,14 +161,6 @@ flowchart TD
 - `gui/app.py` 啟動時會 `after(500)` 呼叫 `proactive_name_fetch`
 - `gui/app.py` 的 `view_playlist_songs()` 仍顯示 `spotify_fetch_method` / `spotify_client_id`
 - `spotify_fetch_method`、`spotify_client_id`、`spotify_client_secret` 已不再是主流程必要設定
-
-## 專案目前最重要的幾條主線
-
-1. Spotify embed 抓歌單
-2. 本機音樂檔名 / metadata 比對
-3. 播放清單輸出與整理
-4. Spotube M4A 轉 MP3 輔助流程
-5. 匯出到外部裝置
 
 ## 建議閱讀順序
 

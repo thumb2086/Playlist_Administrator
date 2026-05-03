@@ -80,4 +80,4 @@ GitHub Actions 會自動編譯 Windows 安裝版。請到 GitHub Releases 下載
 - Spotify 抓取依賴 embed 頁面，需要網路連線，無需認證。
 - 播放清單預設使用 MP3 檔案。
 - 下載相關工具（yt-dlp、DAB、spotDL）在 `core/downloader.py`，但預設更新流程未使用。
-- `streamlit_app.py` 已列為棄用入口，後續會移除。
+- Tkinter 是目前唯一支援的 UI 入口。

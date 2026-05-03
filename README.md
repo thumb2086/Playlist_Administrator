@@ -80,4 +80,4 @@ Key settings:
 - Spotify scraping relies on the embed page and requires network access. No authentication needed.
 - Playlists use MP3 files by default.
 - Download utilities (yt-dlp, DAB, spotDL) exist in `core/downloader.py` but are not used by the default update flow.
-- `streamlit_app.py` is deprecated and will be removed in a later cleanup phase.
+- Tkinter is the only supported UI entrypoint.
