@@ -211,8 +211,55 @@ class SettingsWindow:
         tk.Label(lf_conv, text="(關閉允許智能匹配，可能跳過部分轉換)",
                  font=get_font(9), fg=COLORS['text_muted'], bg=COLORS['surface']).pack(anchor="w")
 
-        # ===== RIGHT COLUMN =====
+        # 4. Lyrics Section - Dark theme
+        lf_lyrics = tk.LabelFrame(left_column, text="Lyrics",
+                                  font=get_font(11, bold=True),
+                                  fg=COLORS['text'], bg=COLORS['surface'],
+                                  highlightbackground=COLORS['border'],
+                                  highlightthickness=1, bd=0,
+                                  padx=12, pady=10)
+        lf_lyrics.pack(fill="x", pady=(0, 12))
 
+        self.enable_retro_lyrics_var = tk.BooleanVar(value=bool(self.config.get('enable_retroactive_lyrics', False)))
+        tk.Checkbutton(
+            lf_lyrics,
+            text="Enable lyric download",
+            variable=self.enable_retro_lyrics_var,
+            font=get_font(10),
+            fg=COLORS['text'], bg=COLORS['surface'],
+            selectcolor=COLORS['elevated'],
+            activebackground=COLORS['surface'],
+            activeforeground=COLORS['accent']
+        ).pack(anchor="w")
+        tk.Label(
+            lf_lyrics,
+            text="Download synced lyrics for songs that do not already have .lrc files.",
+            font=get_font(9),
+            fg=COLORS['text_muted'],
+            bg=COLORS['surface']
+        ).pack(anchor="w")
+
+        tk.Label(lf_lyrics, text="Lyrics folder name:",
+                 font=get_font(10), fg=COLORS['text_secondary'], bg=COLORS['surface']).pack(anchor="w", pady=(8, 0))
+        self.lyrics_folder_var = tk.StringVar(value=self.config.get('lyrics_folder_name', 'Lyrics'))
+        self.lyrics_folder_entry = tk.Entry(lf_lyrics, textvariable=self.lyrics_folder_var,
+                                            font=get_font(10),
+                                            bg=COLORS['elevated'], fg=COLORS['text'],
+                                            insertbackground=COLORS['text'],
+                                            selectbackground=COLORS['accent'],
+                                            selectforeground=COLORS['bg'],
+                                            relief="flat", highlightthickness=1,
+                                            highlightbackground=COLORS['border'])
+        self.lyrics_folder_entry.pack(fill="x", pady=4)
+        tk.Label(
+            lf_lyrics,
+            text="Lyrics will be stored inside the music library under this folder.",
+            font=get_font(9),
+            fg=COLORS['text_muted'],
+            bg=COLORS['surface']
+        ).pack(anchor="w")
+
+        # ===== RIGHT COLUMN =====
         # 4. Sync Section - Moved to right column for balance
         lf_sync_right = tk.LabelFrame(right_column, text="同步 (Sync)",
                                       font=get_font(11, bold=True),
@@ -346,15 +393,19 @@ class SettingsWindow:
         new_path = self.path_var.get()
         new_ffmpeg = self.ffmpeg_var.get()
         new_theme = self.theme_var.get()
+        new_lyrics_folder = self.lyrics_folder_var.get().strip() or 'Lyrics'
 
         lang_changed = new_lang != self.config.get('language')
         path_changed = new_path != self.config.get('base_path')
+        lyrics_folder_changed = new_lyrics_folder != self.config.get('lyrics_folder_name', 'Lyrics')
         theme_changed = new_theme != self.config.get('theme', 'dark')
 
         # 2. Update Config
         self.config['language'] = new_lang
         self.config['base_path'] = new_path
         self.config['ffmpeg_path'] = new_ffmpeg
+        self.config['lyrics_folder_name'] = new_lyrics_folder
+        self.config['enable_retroactive_lyrics'] = bool(self.enable_retro_lyrics_var.get())
         self.config['spotube_convert_matched_only'] = bool(self.convert_matched_only_var.get())
         self.config['spotube_strict_matching'] = bool(self.strict_matching_var.get())
         self.config['auto_sync_on_add'] = bool(self.auto_sync_on_add_var.get())
@@ -367,7 +418,7 @@ class SettingsWindow:
         set_debug_mode(self.config['debug_mode'])
         
         # Special handling for path change
-        if path_changed:
+        if path_changed or lyrics_folder_changed:
             from utils.config import derive_paths, ensure_dirs
             derive_paths(self.config)
             ensure_dirs(self.config)

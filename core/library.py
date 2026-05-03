@@ -2135,9 +2135,11 @@ def update_library_logic_legacy(config, stats, log_func, progress_func=None, pos
     songs_missing_lyrics = [] # List of (song_name, existing_path)
     
     # Pre-scan existing files for missing lyrics
+    from utils.config import get_lyrics_file_path, get_legacy_lyrics_file_path
     for audio_path in audio_files_cache:
-        lrc_path = os.path.splitext(audio_path)[0] + ".lrc"
-        if not os.path.exists(lrc_path):
+        lrc_path = get_lyrics_file_path(config, audio_path)
+        legacy_lrc_path = get_legacy_lyrics_file_path(audio_path)
+        if not os.path.exists(lrc_path) and not os.path.exists(legacy_lrc_path):
             # Extract song name from filename
             song_name = os.path.splitext(os.path.basename(audio_path))[0]
             songs_missing_lyrics.append((song_name, audio_path))
@@ -2632,7 +2634,8 @@ def update_library_logic_legacy(config, stats, log_func, progress_func=None, pos
                 if hasattr(stats, 'app') and hasattr(stats.app, 'update_song_status'):
                     stats.app.update_song_status(i, '🔍 搜尋中', name)
             
-            lrc_path = os.path.splitext(path)[0] + ".lrc"
+            from utils.config import get_lyrics_file_path
+            lrc_path = get_lyrics_file_path(config, path)
             success = download_lyrics(name, lrc_path, lambda msg: None)  # Suppress individual logs
             
             with results_lock:

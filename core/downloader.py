@@ -450,6 +450,7 @@ def download_lyrics(song_name, output_path, log_func, failed_cache=None):
                         # CONVERT TO TRADITIONAL CHINESE
                         lrc_text = convert(lrc_text, 'zh-tw')
                         
+                        os.makedirs(os.path.dirname(output_path), exist_ok=True)
                         with open(output_path, "w", encoding="utf-8") as f:
                             f.write(lrc_text)
                         return True
@@ -506,7 +507,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
             dab_downloader = create_dab_downloader(dab_credentials['email'], dab_credentials['password'])
             success = dab_downloader.download_song(
                 song_name, library_path, log_func, file_list, stats, 
-                progress_callback, current_dl, actual_artist_hint
+                progress_callback, current_dl, actual_artist_hint, config
             )
             dab_downloader.logout()
             if success:
@@ -1085,7 +1086,8 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                                 log_func(f"  ⚠️ [Auto Rename Failed] {str(e)}")
                         
                         # Download lyrics
-                        lrc_path = os.path.splitext(final_path)[0] + ".lrc"
+                        from utils.config import get_lyrics_file_path
+                        lrc_path = get_lyrics_file_path(config, final_path)
                         if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', False):
                             download_lyrics(song_name, lrc_path, log_func, lyrics_failed_cache)
                         return final_path
@@ -1112,14 +1114,16 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                                 log_func(f"  ⚠️ [Auto Rename Failed] {str(e)}")
                         
                         # Download lyrics
-                        lrc_path = os.path.splitext(filename)[0] + ".lrc"
+                        from utils.config import get_lyrics_file_path
+                        lrc_path = get_lyrics_file_path(config, filename)
                         if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', False):
                             download_lyrics(song_name, lrc_path, log_func, lyrics_failed_cache)
                         all_candidates_failed = False  # Mark as successful
                         return filename
                     
                     # Download lyrics for final_path even if it doesn't exist yet (it will be created by PP)
-                    lrc_path = os.path.splitext(final_path)[0] + ".lrc"
+                    from utils.config import get_lyrics_file_path
+                    lrc_path = get_lyrics_file_path(config, final_path)
                     if not os.path.exists(lrc_path) and config and config.get('enable_retroactive_lyrics', False):
                         download_lyrics(song_name, lrc_path, log_func, lyrics_failed_cache)
                     

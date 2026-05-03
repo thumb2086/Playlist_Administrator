@@ -1034,10 +1034,10 @@ class PlaylistApp:
         self.current_time_lbl.pack(side="left")
 
         # Progress slider (custom styled)
-        self.progress_var = tk.DoubleVar(value=0)
+        self.playback_progress_var = tk.DoubleVar(value=0)
         self.progress_slider = tk.Scale(progress_frame, from_=0, to=100,
                                         orient="horizontal",
-                                        variable=self.progress_var,
+                                        variable=self.playback_progress_var,
                                         showvalue=False,
                                         bg=COLORS['surface'],
                                         fg=COLORS['accent'],
@@ -1178,6 +1178,7 @@ class PlaylistApp:
         self.current_lyrics = []  # List of (time_ms, text)
         self.lyrics_update_job = None
         self.lyrics_offsets = self.config.get('lyrics_offsets', {})
+        self.current_track_duration = 0
 
         # 延遲初始化 Pygame，確保 UI 完全載入後才執行（避免啟動時阻塞）
         self.root.after(1000, self._init_pygame_async)
@@ -1216,8 +1217,8 @@ class PlaylistApp:
         progress_frame = tk.Frame(progress_container, bg=COLORS['bg'])
         progress_frame.pack(fill="x")
 
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100,
+        self.task_progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.task_progress_var, maximum=100,
                                            style='Dark.Horizontal.TProgressbar')
         self.progress_bar.pack(side="left", fill="x", expand=True)
 
@@ -1332,7 +1333,7 @@ class PlaylistApp:
 
         if total_val > 0:
             pct = (current_val / total_val) * 100
-            self.progress_var.set(pct)
+            self.task_progress_var.set(pct)
             
             # Format progress text with ETA
             progress_text = f"{current_val}/{total_val}"
@@ -1374,7 +1375,7 @@ class PlaylistApp:
             else:
                 self.speed_label.config(text=_('speed_ready'))
         else:
-            self.progress_var.set(0)
+            self.task_progress_var.set(0)
             self.progress_label.config(text="")
             self.speed_label.config(text=_('speed_ready'))
     
@@ -1431,6 +1432,56 @@ class PlaylistApp:
         self.song_status_tree.heading('#0', text=_('song_status_no'))
         self.song_status_tree.heading('Status', text=_('song_status_status'))
         self.song_status_tree.heading('Song', text=_('song_status_song'))
+
+    def _is_zh(self):
+        return self.config.get('language', 'zh-TW') == 'zh-TW'
+
+    def _format_time(self, seconds):
+        try:
+            total_seconds = max(0, int(seconds))
+        except (TypeError, ValueError):
+            total_seconds = 0
+        minutes, secs = divmod(total_seconds, 60)
+        return f"{minutes}:{secs:02d}"
+
+    def _playlist_loaded_text(self, playlist_name):
+        if self._is_zh():
+            return f"\u5df2\u8f09\u5165\u64ad\u653e\u6e05\u55ae\uff1a{playlist_name}"
+        return f"Loaded Playlist: {playlist_name}"
+
+    def _playlist_loaded_songs_text(self, count):
+        if self._is_zh():
+            return f"\u5df2\u8f09\u5165 {count} \u9996\u6b4c\u66f2"
+        return f"{count} songs loaded"
+
+    def _resolve_lyrics_path(self, song_path):
+        from utils.config import get_lyrics_file_path, get_legacy_lyrics_file_path
+        new_path = get_lyrics_file_path(self.config, song_path)
+        if os.path.exists(new_path):
+            return new_path
+        legacy_path = get_legacy_lyrics_file_path(song_path)
+        if os.path.exists(legacy_path):
+            return legacy_path
+        return new_path
+
+    def _get_track_duration_seconds(self, song_path):
+        duration = 0
+        try:
+            from mutagen import File as MutagenFile
+            audio = MutagenFile(song_path)
+            if audio and getattr(audio, 'info', None) and getattr(audio.info, 'length', None):
+                duration = int(round(audio.info.length))
+        except Exception:
+            duration = 0
+
+        if duration <= 0:
+            try:
+                import pygame
+                duration = int(round(pygame.mixer.Sound(song_path).get_length()))
+            except Exception:
+                duration = 0
+
+        return duration
 
     def refresh_url_list(self, audio_cache=None):
         """刷新 URL 列表 - 同步版本（会阻塞UI，适合小数据量）"""
@@ -1507,6 +1558,8 @@ class PlaylistApp:
             self.current_playlist_songs = songs
             self.original_playlist_order = list(songs)
             self.current_song_idx = 0
+            self.song_title_lbl.config(text=self._playlist_loaded_text(playlist_name))
+            self.song_artist_lbl.config(text=self._playlist_loaded_songs_text(len(songs)))
             self.log(f"-> 已載入 {len(songs)} 首歌曲到播放器")
             
             # Auto-start playing first song
@@ -2311,6 +2364,11 @@ class PlaylistApp:
             self.is_playing = True
             self.play_btn.config(text="⏸")
             self.current_playing = song_path # Track current song for lyrics offset
+            self.current_track_duration = self._get_track_duration_seconds(song_path)
+            self.current_time_lbl.config(text="0:00")
+            self.total_time_lbl.config(text=self._format_time(self.current_track_duration))
+            self.progress_slider.config(to=max(self.current_track_duration, 1))
+            self.playback_progress_var.set(0)
             # Decode URL-encoded filename for display
             import urllib.parse
             display_name = urllib.parse.unquote(os.path.basename(song_path))
@@ -2328,7 +2386,7 @@ class PlaylistApp:
 
     def load_lyrics(self, song_path):
         self.current_lyrics = []
-        lrc_path = os.path.splitext(song_path)[0] + ".lrc"
+        lrc_path = self._resolve_lyrics_path(song_path)
         if os.path.exists(lrc_path):
             try:
                 import re
@@ -2408,10 +2466,21 @@ class PlaylistApp:
         if curr_ms < 0:
             self.lyrics_update_job = self.root.after(200, self.refresh_lyrics)
             return
+
+        current_seconds = max(0, int(curr_ms / 1000))
+        self.current_time_lbl.config(text=self._format_time(current_seconds))
+        if self.current_track_duration > 0:
+            self.playback_progress_var.set(min(current_seconds, self.current_track_duration))
+        else:
+            self.playback_progress_var.set(current_seconds)
+            if current_seconds > 0 and self.progress_slider.cget('to') != str(current_seconds):
+                self.progress_slider.config(to=max(current_seconds, 1))
         
         # Only update lyrics if we have lyrics loaded
         if not self.current_lyrics:
             # No lyrics available - keep the "no lyrics" message
+            if self.current_track_duration > 0:
+                self.total_time_lbl.config(text=self._format_time(self.current_track_duration))
             self.lyrics_update_job = self.root.after(200, self.refresh_lyrics)
             return
         

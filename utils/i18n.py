@@ -132,6 +132,8 @@ class I18N:
         'player_title': "Playback Control",
         'player_playlist_label': "Playlist:",
         'player_load_btn': "Load",
+        'player_loaded_playlist': "Loaded Playlist: {0}",
+        'player_loaded_songs': "{0} songs loaded",
         'player_play': "Play",
         'player_pause': "Pause",
         'player_next': "Next",

@@ -22,7 +22,7 @@ class DABDownloader:
     
     def download_song(self, song_name: str, library_path: str, log_func, 
                      file_list=None, stats=None, progress_callback=None, 
-                     current_dl=0, artist_name: str = None) -> str:
+                     current_dl=0, artist_name: str = None, config=None) -> str:
         """Download song in lossless FLAC format with metadata"""
         
         try:
@@ -91,7 +91,9 @@ class DABDownloader:
             self._add_metadata(output_path, track_info, log_func)
             
             # Download lyrics if available
-            lyrics_path = output_path.replace('.flac', '.lrc')
+            from utils.config import get_lyrics_file_path
+            lyrics_path = get_lyrics_file_path(config or {'library_path': library_path}, output_path)
+            os.makedirs(os.path.dirname(lyrics_path), exist_ok=True)
             self._download_lyrics(track_artist, track_title, lyrics_path, log_func)
             
             log_func(f"  ✅ [DAB Complete] {safe_title}.flac")

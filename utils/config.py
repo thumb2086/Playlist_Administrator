@@ -82,6 +82,7 @@ def load_config():
     defaults = {
         'audio_format': 'mp3',
         'ffmpeg_path': 'bin/ffmpeg.exe',
+        'lyrics_folder_name': 'Lyrics',
         'language': 'zh-TW',
         'spotify_urls': [],
         'url_names': {},
@@ -147,9 +148,26 @@ def derive_paths(config):
     config['library_path'] = os.path.normpath(library_root)
     config['playlists_path'] = os.path.normpath(os.path.join(base_path, 'Playlists'))
     config['export_path'] = os.path.normpath(os.path.join(base_path, 'USB_Output'))
+    config['lyrics_path'] = os.path.normpath(os.path.join(library_root, config.get('lyrics_folder_name', 'Lyrics')))
     if os.path.basename(base_path).lower() == 'spotube' and config.get('spotube_folder_name', 'spotube') == 'spotube':
         config['spotube_folder_name'] = ''
     return config
+
+def get_lyrics_dir(config):
+    lyrics_path = config.get('lyrics_path')
+    if lyrics_path:
+        return os.path.normpath(lyrics_path)
+
+    library_path = config.get('library_path') or config.get('base_path') or get_app_data_dir()
+    folder_name = config.get('lyrics_folder_name', 'Lyrics')
+    return os.path.normpath(os.path.join(library_path, folder_name))
+
+def get_lyrics_file_path(config, audio_path):
+    base_name = os.path.splitext(os.path.basename(audio_path))[0]
+    return os.path.normpath(os.path.join(get_lyrics_dir(config), f"{base_name}.lrc"))
+
+def get_legacy_lyrics_file_path(audio_path):
+    return os.path.normpath(os.path.splitext(audio_path)[0] + ".lrc")
 
 def get_data_file(filename):
     """取得資料檔案路徑（會根據當前 CONFIG_DIR 自動導航）"""
@@ -205,7 +223,7 @@ def ensure_dirs(config):
     if 'base_path' not in config or not config['base_path']:
         return
         
-    for key in ['library_path', 'playlists_path', 'export_path']:
+    for key in ['library_path', 'playlists_path', 'export_path', 'lyrics_path']:
         path = config.get(key)
         if path and isinstance(path, str):
             if not os.path.exists(path):
