@@ -4,8 +4,20 @@ from utils.config import save_config, prompt_and_set_base_path
 from utils.i18n import I18N, _
 from utils.version import __version__, GITHUB_OWNER, GITHUB_REPO
 
-# Import dark theme colors from app module
-from gui.app import COLORS, get_font, FONT_MONO
+from gui import app as app_theme
+
+
+class _ThemeColors:
+    def __getitem__(self, key):
+        return app_theme.COLORS[key]
+
+    def get(self, key, default=None):
+        return app_theme.COLORS.get(key, default)
+
+
+COLORS = _ThemeColors()
+get_font = app_theme.get_font
+FONT_MONO = app_theme.FONT_MONO
 
 class SettingsWindow:
     def __init__(self, parent, config, on_close_callback=None):

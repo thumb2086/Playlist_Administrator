@@ -110,9 +110,6 @@ class PlaylistApp:
         self.root.geometry("1400x850")
         self.root.configure(bg=COLORS['bg'])
 
-        # --- Configure ttk styles for dark theme ---
-        self._configure_ttk_styles()
-
         # --- UI Throttling & Batching ---
         self.last_progress_update = 0
         self.last_speed_update = 0
@@ -130,6 +127,10 @@ class PlaylistApp:
         # Load theme from config (default to dark)
         self.current_theme = self.config.get('theme', 'dark')
         self._apply_theme_colors()
+        self.root.configure(bg=COLORS['bg'])
+
+        # --- Configure ttk styles after theme is known ---
+        self._configure_ttk_styles()
 
         # Load language from config (fix: ensure language is restored after restart/cancel)
         lang = self.config.get('language', 'zh-TW')
@@ -212,7 +213,7 @@ class PlaylistApp:
         dialog = UpdateDialog(self.root, update_info, on_close_callback=on_dialog_close)
 
     def _configure_ttk_styles(self):
-        """Configure ttk widget styles for dark theme"""
+        """Configure ttk widget styles for the current theme"""
         style = ttk.Style()
 
         # Use 'clam' theme for better customization support on Windows
@@ -220,6 +221,22 @@ class PlaylistApp:
             style.theme_use('clam')
         except tk.TclError:
             pass  # Fallback to default if clam not available
+
+        # Notebook / tab chrome
+        style.configure("TNotebook",
+                       background=COLORS['bg'],
+                       borderwidth=0,
+                       tabmargins=(8, 4, 8, 0))
+        style.configure("TNotebook.Tab",
+                       background=COLORS['surface'],
+                       foreground=COLORS['text_secondary'],
+                       padding=(14, 6),
+                       borderwidth=0)
+        style.map("TNotebook.Tab",
+                 background=[('selected', COLORS['elevated']),
+                            ('active', COLORS['surface'])],
+                 foreground=[('selected', COLORS['text']),
+                            ('active', COLORS['text'])])
 
         # Configure Treeview (song status list) - Dark theme
         style.configure("Treeview",
@@ -248,7 +265,9 @@ class PlaylistApp:
                        fieldbackground=COLORS['elevated'],
                        background=COLORS['elevated'],
                        foreground=COLORS['text'],
-                       arrowcolor=COLORS['text'])
+                       arrowcolor=COLORS['text'],
+                       borderwidth=0,
+                       relief='flat')
         style.map("TCombobox",
                  fieldbackground=[('readonly', COLORS['elevated']),
                                  ('disabled', COLORS['surface'])],
@@ -287,22 +306,36 @@ class PlaylistApp:
         # Update root
         self.root.configure(bg=COLORS['bg'])
 
+        def widget_class(widget):
+            try:
+                return widget.winfo_class().lower()
+            except tk.TclError:
+                return ""
+
         # Helper to update widget colors
         def update_widget_colors(widget):
             try:
-                widget_type = widget.winfo_class()
+                widget_type = widget_class(widget)
 
-                if widget_type == 'Frame' or widget_type == 'Tk':
+                if widget_type in ('frame', 'tk', 'toplevel', 'panedwindow'):
                     widget.configure(bg=COLORS['bg'])
-                elif widget_type == 'Label':
-                    # Determine text color based on current config
-                    if hasattr(widget, '_is_secondary_text'):
-                        widget.configure(bg=COLORS['bg'], fg=COLORS['text_secondary'])
-                    elif hasattr(widget, '_is_muted_text'):
-                        widget.configure(bg=COLORS['bg'], fg=COLORS['text_muted'])
+                elif widget_type == 'label':
+                    # Determine background and text color based on parent and current config
+                    parent = widget.master
+                    parent_type = widget_class(parent) if parent else None
+                    # If inside LabelFrame, use surface background
+                    if parent_type == 'labelframe':
+                        bg_color = COLORS['surface']
                     else:
-                        widget.configure(bg=COLORS['bg'], fg=COLORS['text'])
-                elif widget_type == 'Button':
+                        bg_color = COLORS['bg']
+                    
+                    if hasattr(widget, '_is_secondary_text'):
+                        widget.configure(bg=bg_color, fg=COLORS['text_secondary'])
+                    elif hasattr(widget, '_is_muted_text'):
+                        widget.configure(bg=bg_color, fg=COLORS['text_muted'])
+                    else:
+                        widget.configure(bg=bg_color, fg=COLORS['text'])
+                elif widget_type == 'button':
                     # Check if primary/accent button by checking current bg
                     current_bg = widget.cget('bg')
                     if current_bg in [COLORS_DARK['accent'], COLORS_LIGHT['accent'], '#1DB954', '#1ed760']:
@@ -315,32 +348,44 @@ class PlaylistApp:
                         widget.configure(bg=COLORS['elevated'], fg=COLORS['text'],
                                        activebackground=COLORS['surface'],
                                        activeforeground=COLORS['text'])
-                elif widget_type == 'Entry':
+                elif widget_type == 'entry':
                     widget.configure(bg=COLORS['elevated'], fg=COLORS['text'],
                                    insertbackground=COLORS['text'],
-                                   highlightbackground=COLORS['border'])
-                elif widget_type == 'Listbox':
+                                   highlightbackground=COLORS['border'],
+                                   highlightcolor=COLORS['accent'],
+                                   readonlybackground=COLORS['elevated'])
+                elif widget_type == 'listbox':
                     widget.configure(bg=COLORS['elevated'], fg=COLORS['text'],
                                    selectbackground=COLORS['accent'],
-                                   selectforeground=COLORS['bg'])
-                elif widget_type == 'Text':
+                                   selectforeground=COLORS['bg'],
+                                   highlightbackground=COLORS['border'],
+                                   highlightcolor=COLORS['accent'])
+                elif widget_type == 'text':
                     widget.configure(bg=COLORS['elevated'], fg=COLORS['text_secondary'])
-                elif widget_type == 'Scale':
+                elif widget_type == 'scale':
                     widget.configure(bg=COLORS['surface'], fg=COLORS['accent'],
                                    troughcolor=COLORS['elevated'])
-                elif widget_type == 'Checkbutton':
+                elif widget_type == 'checkbutton':
                     widget.configure(bg=COLORS['surface'], fg=COLORS['text'],
                                    selectcolor=COLORS['elevated'],
-                                   activebackground=COLORS['surface'])
-                elif widget_type == 'LabelFrame':
+                                   activebackground=COLORS['surface'],
+                                   activeforeground=COLORS['text'])
+                elif widget_type == 'labelframe':
                     widget.configure(bg=COLORS['surface'], fg=COLORS['text'],
-                                   highlightbackground=COLORS['border'])
-                elif widget_type == 'Scrollbar':
-                    widget.configure(bg=COLORS['surface'], troughcolor=COLORS['elevated'])
-                elif widget_type == 'TCombobox':
+                                   highlightbackground=COLORS['border'],
+                                   highlightcolor=COLORS['border'],
+                                   bd=0, relief='flat')
+                elif widget_type == 'scrollbar':
+                    widget.configure(bg=COLORS['surface'], troughcolor=COLORS['elevated'],
+                                   highlightbackground=COLORS['border'],
+                                   activebackground=COLORS['surface'],
+                                   relief='flat')
+                elif widget_type in ('panedwindow', 'separator'):
+                    widget.configure(bg=COLORS['bg'])
+                elif widget_type in ('combobox', 'tcombobox'):
                     # ttk widgets are handled by style reconfiguration
                     pass
-                elif widget_type == 'Treeview':
+                elif widget_type in ('treeview', 'tview'):
                     # ttk widgets are handled by style reconfiguration
                     pass
             except tk.TclError:
@@ -871,14 +916,25 @@ class PlaylistApp:
                                    padx=12, pady=4)
         self.reset_btn.grid(row=0, column=2, sticky="e")
 
-        # Playlist listbox container - Now directly in library_top_frame
-        # This ensures proper vertical space allocation
+        # Playlist listbox container - use a horizontal paned layout so the
+        # playlist list can be wider by default and still remain resizable.
         list_container = tk.Frame(self.library_top_frame, bg=COLORS['surface'])
         list_container.pack(fill="both", expand=True, padx=12, pady=6)
 
-        # Left side: Playlists (60% width)
-        pl_side = tk.Frame(list_container, bg=COLORS['surface'])
-        pl_side.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        self.list_paned = tk.PanedWindow(
+            list_container,
+            orient="horizontal",
+            bg=COLORS['surface'],
+            bd=0,
+            sashwidth=8,
+            opaqueresize=True,
+            showhandle=False,
+        )
+        self.list_paned.pack(fill="both", expand=True)
+
+        # Left side: Playlists
+        pl_side = tk.Frame(self.list_paned, bg=COLORS['surface'])
+        self.list_paned.add(pl_side, minsize=420)
         tk.Label(pl_side, text="🎵 播放清單",
                  font=get_font(11, bold=True),
                  fg=COLORS['text'], bg=COLORS['surface']).pack(anchor="w", pady=(0, 4))
@@ -910,13 +966,13 @@ class PlaylistApp:
                                         padx=8, pady=4)
         self.view_songs_btn.pack(side="bottom", fill="x", pady=(4, 0))
 
-        # Right side: Song Status List (40% width) - Moved here from bottom
-        self.song_status_frame = tk.LabelFrame(list_container, text=_('song_status_title'),
+        # Right side: Song Status List
+        self.song_status_frame = tk.LabelFrame(self.list_paned, text=_('song_status_title'),
                                                font=get_font(11, bold=True),
                                                fg=COLORS['text'], bg=COLORS['surface'],
                                                highlightbackground=COLORS['border'],
                                                highlightthickness=1, bd=0)
-        self.song_status_frame.pack(side="left", fill="both", expand=True, padx=(8, 0))
+        self.list_paned.add(self.song_status_frame, minsize=520)
 
         # Reduce listbox height to ensure action buttons have space
         self.pl_listbox.config(height=10)
@@ -932,7 +988,9 @@ class PlaylistApp:
         # Configure column widths
         self.song_status_tree.column('#0', width=40)
         self.song_status_tree.column('Status', width=60)
-        self.song_status_tree.column('Song', width=180)
+        self.song_status_tree.column('Song', width=280, stretch=True)
+
+        self.root.after(0, self._set_initial_playlist_split)
 
         # Add scrollbar
         song_scroll = tk.Scrollbar(self.song_status_frame, orient="vertical",
@@ -1269,6 +1327,14 @@ class PlaylistApp:
         self.action_frame.pack(side="bottom", fill="x", padx=12, pady=(0, 8))
 
         self._create_action_buttons()
+
+    def _set_initial_playlist_split(self):
+        """Set an initial split that gives the playlist list more room."""
+        try:
+            self.list_paned.update_idletasks()
+            self.list_paned.sash_place(0, 470, 0)
+        except Exception:
+            pass
 
     def log(self, message, immediate=False):
         # Filter log messages - only show errors and important messages
@@ -1639,7 +1705,7 @@ class PlaylistApp:
         
         method_text = {
             'embed': '📄 Embed 頁面抓取（無需登入）',
-            'api': '� OAuth 使用者授權（登入 Spotify）',
+            'api': '🔐 OAuth 使用者授權（登入 Spotify）',
             'auto': '⚡ 自動選擇'
         }.get(fetch_method, f'📄 {fetch_method}')
         
@@ -1831,17 +1897,11 @@ class PlaylistApp:
 
                 self.stats_tab_song_format_lbl.config(text=f"  ├ 純 MP3: {mp3_only} 首")
 
-                # 純 M4A 用警示色標示（未轉換的歌曲）
-                if m4a_only > 0:
-                    self.stats_tab_unconverted_lbl.config(
-                        text=f"  ├ 純 M4A: {m4a_only} 首（⚠️ 未轉換）",
-                        fg=COLORS['warning'] if 'warning' in COLORS else COLORS['accent']
-                    )
-                else:
-                    self.stats_tab_unconverted_lbl.config(
-                        text=f"  ├ 純 M4A: {m4a_only} 首（✓ 全部轉換）",
-                        fg=COLORS['success'] if 'success' in COLORS else '#4caf50'
-                    )
+                # 純 M4A 格式統計（不表示轉換狀態）
+                self.stats_tab_unconverted_lbl.config(
+                    text=f"  ├ 純 M4A: {m4a_only} 首",
+                    fg=COLORS['text_secondary'] if 'text_secondary' in COLORS else COLORS['text']
+                )
 
                 self.stats_tab_dual_format_lbl.config(text=f"  └ 雙格式: {dual_format} 首（同時有MP3和M4A）")
 
@@ -1877,7 +1937,8 @@ class PlaylistApp:
         def thread_update():
             try:
                 # 在背景執行緒執行昂貴的檔案掃描
-                stats = get_detailed_stats(self.config, None)
+                # force=True 時不使用快取
+                stats = get_detailed_stats(self.config, None, use_cache=not force)
                 # 完成後再更新 UI（在主執行緒）
                 self.root.after(0, lambda: update_ui(stats))
             except Exception as e:
