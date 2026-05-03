@@ -1,6 +1,6 @@
 ﻿# Playlist Administrator
 
-![Version](https://img.shields.io/badge/version-1.5.0-blue)
+![Version](https://img.shields.io/badge/version-1.5.2-blue)
 
 Library maintenance for local music libraries: build/update Spotify playlists, manage exports, and organize music. Default workflow does not download audio.
 
@@ -11,7 +11,6 @@ Library maintenance for local music libraries: build/update Spotify playlists, m
 - Move unsorted tracks to `_Unsorted` when needed.
 - Export selected playlists to USB/SD in Copy or Mirror mode.
 - Tkinter desktop UI with a built-in player and lyrics (`.lrc`).
-- Tkinter desktop UI with built-in player and settings.
 - Command-line interface for automation.
 
 ## Quick Start
@@ -31,18 +30,56 @@ Library maintenance for local music libraries: build/update Spotify playlists, m
 
 ## CLI Usage
 
+### `update`
+Run the full update flow: scrape Spotify URLs, rebuild playlist files, and prune missing tracks.
+
 ```bash
-# Update library and playlists
 python cli.py update
+python cli.py update --config path/to/config.json
+python cli.py update --force          # Ignore last_updated cache
+python cli.py update --progress       # Print progress callbacks
+```
 
-# Scrape Spotify URLs only
+### `scrape`
+Scrape Spotify and rebuild playlist files without a full library update.
+
+```bash
+python cli.py scrape
 python cli.py scrape --url "https://open.spotify.com/playlist/..."
+python cli.py scrape --url "https://open.spotify.com/playlist/..." --url "https://open.spotify.com/album/..."
+python cli.py scrape --force          # Ignore last_updated cache for selected URLs
+```
 
-# Fetch playlist tracks via embed
+### `fetch-playlist`
+Fetch playlist tracks via the embed page and optionally save them to a debug file.
+
+```bash
+python cli.py fetch-playlist "https://open.spotify.com/playlist/..."
 python cli.py fetch-playlist "https://open.spotify.com/playlist/..." --show-tracks
+python cli.py fetch-playlist "https://open.spotify.com/playlist/..." --output tracks.txt
+```
 
-# Test local matching
-python cli.py match --file "_spotify_debug.txt"
+### `match`
+Test local track matching: reads a track list from `_spotify_debug.txt` (or a specified file) and searches your library for each track.
+
+```bash
+python cli.py match
+python cli.py match --file "My Playlist Tracks.txt"
+python cli.py match --prefer-mp3      # Default: search MP3 files first (default: true)
+python cli.py match --no-prefer-mp3  # Search all audio formats equally
+python cli.py match --verbose         # Print every matched path
+python cli.py match --fail-on-missing # Exit with code 1 when any track is missing
+```
+
+## Config Override
+
+All commands accept `--config path/to/config.json` to override the default config location. When a config path is provided:
+
+- `base_path` defaults to the directory containing the config file.
+- The config is loaded from the specified file and used for all operations.
+
+```bash
+python cli.py update --config ./my-library/config.json
 ```
 
 ## Install (EXE)

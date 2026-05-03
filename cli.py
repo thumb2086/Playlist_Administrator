@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import glob
 import json
 import os
@@ -170,18 +170,24 @@ def cmd_match(args):
     method_counts = {}
 
     for track in tracks:
-        path = None
-        method = None
+        path = find_song_exact_format(track, mp3_index)
+        method = "exact"
 
-        if args.prefer_mp3:
-            path = find_song_simple_match(track, "mp3", lib_index)
+        if not path and not args.prefer_mp3:
+            path = find_song_exact_format(track, lib_index)
+            method = "exact-all"
+
+        if not path:
+            path = find_song_simple_match(track, mp3_index)
             method = "simple"
-            if not path:
-                path = find_song_exact_format(track, "mp3", lib_index)
-                method = "exact"
-            if not path and metadata_index:
-                path = find_song_in_library(track, mp3_index, metadata_index=metadata_index)
-                method = "metadata"
+
+        if not path and not args.prefer_mp3:
+            path = find_song_simple_match(track, lib_index)
+            method = "simple-all"
+
+        if not path:
+            path = find_song_in_library(track, mp3_index, metadata_index=metadata_index)
+            method = "metadata"
 
         if not path and not args.prefer_mp3:
             path = find_song_in_library(track, lib_index, metadata_index=all_metadata_index)
@@ -235,27 +241,27 @@ def cmd_fetch_playlist(args):
 
     session = requests.Session()
 
-    # 使用 Embed 頁面抓取
-    print(f"[方法] Embed 頁面抓取（無需認證）")
+    # Use Embed API to fetch playlist.
+    print(f"[INFO] Fetching via Embed API...")
     result = fetch_legacy_embed_playlist(args.url, session)
 
     print(f"\nURL: {args.url}")
-    print(f"來源: {result.source}")
-    print(f"狀態碼: {result.status_code}")
+    print(f"Source: {result.source}")
+    print(f"HTTP Status: {result.status_code}")
     if result.playlist_name:
-        print(f"播放清單名稱: {result.playlist_name}")
+        print(f"Playlist Name: {result.playlist_name}")
     if result.error:
-        print(f"錯誤: {result.error}")
-    print(f"曲目數量: {len(result.tracks)}")
+        print(f"Error: {result.error}")
+    print(f"Tracks Found: {len(result.tracks)}")
 
     if args.show_tracks and result.tracks:
-        print(f"\n曲目列表:")
+        print(f"\nTrack List:")
         for i, track in enumerate(result.tracks, 1):
             print(f"{i}. {track}")
 
     if args.output and result.tracks:
         _write_debug_tracks(args.output, result.tracks)
-        print(f"已寫入曲目到: {args.output}")
+        print(f"Output written to: {args.output}")
 
     return 0 if result.tracks else 1
 
@@ -288,11 +294,11 @@ def build_parser():
 
     fetch_parser = subparsers.add_parser(
         "fetch-playlist",
-        help="使用 Embed 頁面取得 Spotify 播放清單曲目。",
+        help="Fetch playlist tracks via the Spotify embed API.",
     )
-    fetch_parser.add_argument("url", help="Spotify 播放清單 URL。")
-    fetch_parser.add_argument("--show-tracks", action="store_true", help="顯示完整曲目列表。")
-    fetch_parser.add_argument("--output", help="將曲目列表寫入 debug 文字檔。")
+    fetch_parser.add_argument("url", help="Spotify playlist URL.")
+    fetch_parser.add_argument("--show-tracks", action="store_true", help="Print the track list.")
+    fetch_parser.add_argument("--output", help="Write track list to a debug file.")
     fetch_parser.set_defaults(func=cmd_fetch_playlist)
 
     return parser
