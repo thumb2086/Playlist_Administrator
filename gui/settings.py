@@ -11,7 +11,7 @@ class SettingsWindow:
     def __init__(self, parent, config, on_close_callback=None):
         self.top = tk.Toplevel(parent)
         self.top.title("設定 (Settings)")
-        self.top.geometry("900x780")  # Increased height to show all content and buttons
+        self.top.geometry("920x900")  # Increased height to show all content and buttons
         self.top.resizable(False, False)
         self.top.configure(bg=COLORS['bg'])
 
@@ -211,54 +211,6 @@ class SettingsWindow:
         tk.Label(lf_conv, text="(關閉允許智能匹配，可能跳過部分轉換)",
                  font=get_font(9), fg=COLORS['text_muted'], bg=COLORS['surface']).pack(anchor="w")
 
-        # 4. Lyrics Section - Dark theme
-        lf_lyrics = tk.LabelFrame(left_column, text="Lyrics",
-                                  font=get_font(11, bold=True),
-                                  fg=COLORS['text'], bg=COLORS['surface'],
-                                  highlightbackground=COLORS['border'],
-                                  highlightthickness=1, bd=0,
-                                  padx=12, pady=10)
-        lf_lyrics.pack(fill="x", pady=(0, 12))
-
-        self.enable_retro_lyrics_var = tk.BooleanVar(value=bool(self.config.get('enable_retroactive_lyrics', False)))
-        tk.Checkbutton(
-            lf_lyrics,
-            text="Enable lyric download",
-            variable=self.enable_retro_lyrics_var,
-            font=get_font(10),
-            fg=COLORS['text'], bg=COLORS['surface'],
-            selectcolor=COLORS['elevated'],
-            activebackground=COLORS['surface'],
-            activeforeground=COLORS['accent']
-        ).pack(anchor="w")
-        tk.Label(
-            lf_lyrics,
-            text="Download synced lyrics for songs that do not already have .lrc files.",
-            font=get_font(9),
-            fg=COLORS['text_muted'],
-            bg=COLORS['surface']
-        ).pack(anchor="w")
-
-        tk.Label(lf_lyrics, text="Lyrics folder name:",
-                 font=get_font(10), fg=COLORS['text_secondary'], bg=COLORS['surface']).pack(anchor="w", pady=(8, 0))
-        self.lyrics_folder_var = tk.StringVar(value=self.config.get('lyrics_folder_name', 'Lyrics'))
-        self.lyrics_folder_entry = tk.Entry(lf_lyrics, textvariable=self.lyrics_folder_var,
-                                            font=get_font(10),
-                                            bg=COLORS['elevated'], fg=COLORS['text'],
-                                            insertbackground=COLORS['text'],
-                                            selectbackground=COLORS['accent'],
-                                            selectforeground=COLORS['bg'],
-                                            relief="flat", highlightthickness=1,
-                                            highlightbackground=COLORS['border'])
-        self.lyrics_folder_entry.pack(fill="x", pady=4)
-        tk.Label(
-            lf_lyrics,
-            text="Lyrics will be stored inside the music library under this folder.",
-            font=get_font(9),
-            fg=COLORS['text_muted'],
-            bg=COLORS['surface']
-        ).pack(anchor="w")
-
         # ===== RIGHT COLUMN =====
         # 4. Sync Section - Moved to right column for balance
         lf_sync_right = tk.LabelFrame(right_column, text="同步 (Sync)",
@@ -350,9 +302,57 @@ class SettingsWindow:
             activeforeground=COLORS['accent']
         ).pack(anchor="w")
 
+        # 7. Lyrics Section - full width to keep both columns balanced
+        lf_lyrics = tk.LabelFrame(container, text=_('lyrics_section_title'),
+                                  font=get_font(11, bold=True),
+                                  fg=COLORS['text'], bg=COLORS['surface'],
+                                  highlightbackground=COLORS['border'],
+                                  highlightthickness=1, bd=0,
+                                  padx=12, pady=10)
+        lf_lyrics.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+
+        self.enable_retro_lyrics_var = tk.BooleanVar(value=bool(self.config.get('enable_retroactive_lyrics', False)))
+        tk.Checkbutton(
+            lf_lyrics,
+            text=_('lyrics_enable_download'),
+            variable=self.enable_retro_lyrics_var,
+            font=get_font(10),
+            fg=COLORS['text'], bg=COLORS['surface'],
+            selectcolor=COLORS['elevated'],
+            activebackground=COLORS['surface'],
+            activeforeground=COLORS['accent']
+        ).pack(anchor="w")
+        tk.Label(
+            lf_lyrics,
+            text=_('lyrics_enable_download_desc'),
+            font=get_font(9),
+            fg=COLORS['text_muted'],
+            bg=COLORS['surface']
+        ).pack(anchor="w")
+
+        tk.Label(lf_lyrics, text=_('lyrics_folder_label'),
+                 font=get_font(10), fg=COLORS['text_secondary'], bg=COLORS['surface']).pack(anchor="w", pady=(8, 0))
+        self.lyrics_folder_var = tk.StringVar(value=self.config.get('lyrics_folder_name', 'Lyrics'))
+        self.lyrics_folder_entry = tk.Entry(lf_lyrics, textvariable=self.lyrics_folder_var,
+                                            font=get_font(10),
+                                            bg=COLORS['elevated'], fg=COLORS['text'],
+                                            insertbackground=COLORS['text'],
+                                            selectbackground=COLORS['accent'],
+                                            selectforeground=COLORS['bg'],
+                                            relief="flat", highlightthickness=1,
+                                            highlightbackground=COLORS['border'])
+        self.lyrics_folder_entry.pack(fill="x", pady=4)
+        tk.Label(
+            lf_lyrics,
+            text=_('lyrics_folder_desc'),
+            font=get_font(9),
+            fg=COLORS['text_muted'],
+            bg=COLORS['surface']
+        ).pack(anchor="w")
+
         # Buttons row - spans both columns at bottom
         btn_frame = tk.Frame(container, bg=COLORS['bg'])
-        btn_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(16, 0))
+        btn_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(16, 0))
 
         # Center the buttons
         btn_inner = tk.Frame(btn_frame, bg=COLORS['bg'])
