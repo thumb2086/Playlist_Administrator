@@ -528,43 +528,54 @@ class PlaylistApp:
     def _create_action_buttons(self):
         """创建操作按钮（放在 action_frame 中）"""
         # Action buttons with dark theme styling
-        self.update_btn = tk.Button(self.action_frame, text=_('update_all_btn'),
+        buttons_row = tk.Frame(self.action_frame, bg=COLORS['surface'])
+        buttons_row.pack(fill="x", padx=6, pady=6)
+        buttons_row.columnconfigure(0, weight=0)
+        buttons_row.columnconfigure(1, weight=1)
+        buttons_row.columnconfigure(2, weight=1)
+        buttons_row.columnconfigure(3, weight=1)
+
+        self.update_btn = tk.Button(buttons_row, text=_('update_all_btn'),
                                     command=self.run_update,
                                     bg=COLORS['accent'], fg=COLORS['bg'],
                                     activebackground=COLORS['accent_hover'],
                                     activeforeground=COLORS['bg'],
-                                    width=12, font=get_font(11, bold=True),
-                                    relief="flat", cursor="hand2")
-        self.update_btn.pack(side="left", padx=6, pady=6)
+                                    font=get_font(11, bold=True),
+                                    relief="flat", cursor="hand2",
+                                    padx=14, pady=6)
+        self.update_btn.grid(row=0, column=0, sticky="w", padx=(0, 8))
 
-        self.pause_btn = tk.Button(self.action_frame, text=_('pause_btn'),
+        self.pause_btn = tk.Button(buttons_row, text=_('pause_btn'),
                                    command=self.toggle_pause,
                                    bg=COLORS['elevated'], fg=COLORS['text'],
                                    activebackground=COLORS['surface'],
                                    activeforeground=COLORS['text'],
                                    height=2, state="disabled",
                                    font=get_font(11, bold=True),
-                                   relief="flat", cursor="hand2")
-        self.pause_btn.pack(side="left", fill="x", expand=True, padx=6, pady=6)
+                                   relief="flat", cursor="hand2",
+                                   padx=14, pady=6)
+        self.pause_btn.grid(row=0, column=1, sticky="ew", padx=6)
 
-        self.cancel_btn = tk.Button(self.action_frame, text=_('cancel_btn'),
+        self.cancel_btn = tk.Button(buttons_row, text=_('cancel_btn'),
                                     command=self.run_cancel,
                                     bg=COLORS['error'], fg=COLORS['text'],
                                     activebackground='#ff4557',
                                     activeforeground=COLORS['text'],
                                     height=2, state="disabled",
                                     font=get_font(11, bold=True),
-                                    relief="flat", cursor="hand2")
-        self.cancel_btn.pack(side="left", fill="x", expand=True, padx=6, pady=6)
+                                    relief="flat", cursor="hand2",
+                                    padx=14, pady=6)
+        self.cancel_btn.grid(row=0, column=2, sticky="ew", padx=6)
 
-        self.export_btn = tk.Button(self.action_frame, text=_('export_usb_btn'),
+        self.export_btn = tk.Button(buttons_row, text=_('export_usb_btn'),
                                     command=self.open_export_window,
                                     bg=COLORS['elevated'], fg=COLORS['text'],
                                     activebackground=COLORS['surface'],
                                     activeforeground=COLORS['text'],
                                     height=2, font=get_font(11, bold=True),
-                                    relief="flat", cursor="hand2")
-        self.export_btn.pack(side="left", fill="x", expand=True, padx=6, pady=6)
+                                    relief="flat", cursor="hand2",
+                                    padx=14, pady=6)
+        self.export_btn.grid(row=0, column=3, sticky="ew", padx=(6, 0))
 
     def _update_basic_list(self):
         """只更新基础列表显示，不扫描音乐库（快速启动模式）"""
@@ -822,8 +833,14 @@ class PlaylistApp:
 
         btn_frame = tk.Frame(self.url_frame, bg=COLORS['surface'])
         btn_frame.pack(fill="x", padx=12, pady=8)
+        btn_frame.columnconfigure(0, weight=0)
+        btn_frame.columnconfigure(1, weight=1)
+        btn_frame.columnconfigure(2, weight=0)
 
-        self.add_btn = tk.Button(btn_frame, text=_('add_url_btn'),
+        left_btns = tk.Frame(btn_frame, bg=COLORS['surface'])
+        left_btns.grid(row=0, column=0, sticky="w")
+
+        self.add_btn = tk.Button(left_btns, text=_('add_url_btn'),
                                  command=self.add_url, font=get_font(10),
                                  bg=COLORS['accent'], fg=COLORS['bg'],
                                  activebackground=COLORS['accent_hover'],
@@ -832,7 +849,7 @@ class PlaylistApp:
                                  padx=12, pady=4)
         self.add_btn.pack(side="left", padx=(0, 8))
 
-        self.remove_btn = tk.Button(btn_frame, text=_('remove_url_btn'),
+        self.remove_btn = tk.Button(left_btns, text=_('remove_url_btn'),
                                     command=self.remove_url, font=get_font(10),
                                     bg=COLORS['elevated'], fg=COLORS['text'],
                                     activebackground=COLORS['surface'],
@@ -848,7 +865,7 @@ class PlaylistApp:
                                    activeforeground=COLORS['text'],
                                    relief="flat", cursor="hand2",
                                    padx=12, pady=4)
-        self.reset_btn.pack(side="right")
+        self.reset_btn.grid(row=0, column=2, sticky="e")
 
         # Playlist listbox container - Now directly in library_top_frame
         # This ensures proper vertical space allocation
@@ -935,14 +952,15 @@ class PlaylistApp:
         # Playlist Selector at the top
         player_top_bar = tk.Frame(player_main_container, bg=COLORS['bg'])
         player_top_bar.pack(fill="x", pady=(0, 12))
+        player_top_bar.columnconfigure(1, weight=1)
 
         tk.Label(player_top_bar, text=_('player_playlist_label'),
-                 font=get_font(11), fg=COLORS['text_secondary'], bg=COLORS['bg']).pack(side="left", padx=(0, 8))
+                 font=get_font(11), fg=COLORS['text_secondary'], bg=COLORS['bg']).grid(row=0, column=0, sticky="w", padx=(0, 8))
 
         # Style the combobox
         self.player_playlist_combo = ttk.Combobox(player_top_bar, state="readonly",
                                                    font=get_font(11), width=35)
-        self.player_playlist_combo.pack(side="left", padx=8)
+        self.player_playlist_combo.grid(row=0, column=1, sticky="ew", padx=8)
 
         self.player_load_btn = tk.Button(player_top_bar, text=_('player_load_btn'),
                                            command=self.load_selected_playlist,
@@ -952,7 +970,7 @@ class PlaylistApp:
                                            font=get_font(10, bold=True),
                                            relief="flat", cursor="hand2",
                                            padx=16, pady=4)
-        self.player_load_btn.pack(side="left", padx=8)
+        self.player_load_btn.grid(row=0, column=2, sticky="e", padx=(8, 0))
 
         # ===== PLAYER CARD =====
         self.player_frame = tk.Frame(player_main_container, bg=COLORS['surface'],
