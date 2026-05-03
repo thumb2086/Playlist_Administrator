@@ -9,6 +9,9 @@ from core.sync_manager import sync_folders
 from utils.config import derive_paths, ensure_dirs, load_config, save_config
 from utils.version import get_version
 
+DEPRECATION_NOTICE = (
+    "Streamlit UI is deprecated. Please use Tkinter with `python main.py`."
+)
 
 st.set_page_config(
     page_title="Playlist Administrator",
@@ -16,6 +19,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+st.warning(DEPRECATION_NOTICE, icon="WARNING")
 
 st.markdown(
     """

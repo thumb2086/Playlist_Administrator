@@ -11,7 +11,7 @@
 - 必要時把未分類歌曲移到 `_Unsorted`。
 - 將選取播放清單匯出到 USB/SD（Copy 或 Mirror）。
 - Tkinter 桌面 UI 內建播放器與歌詞（`.lrc`）。
-- Streamlit UI 含儀表板與設定頁。
+- Tkinter 桌面 UI 內建播放器、歌詞與設定視窗。
 - 命令列介面供自動化使用。
 
 ## 快速開始
@@ -20,13 +20,9 @@
    ```bash
    pip install -r requirements.txt
    ```
-2. 啟動介面：
+2. 啟動桌面介面：
    ```bash
    python main.py
-   ```
-   或：
-   ```bash
-   streamlit run streamlit_app.py
    ```
 3. 設定 Base Folder（音樂庫根目錄）。應包含：
    - `Music/` - 您的音訊檔案（MP3、FLAC 等）
@@ -70,7 +66,6 @@ GitHub Actions 會自動編譯 Windows 安裝版。請到 GitHub Releases 下載
 ## 專案結構
 
 - `main.py`: Tkinter 入口。
-- `streamlit_app.py`: Streamlit UI。
 - `cli.py`: 命令列介面。
 - `core/`: 核心流程（播放清單、Spotify 抓取、同步/匯出、metadata）。
 - `gui/`: Tkinter 介面與設定視窗。
@@ -85,3 +80,4 @@ GitHub Actions 會自動編譯 Windows 安裝版。請到 GitHub Releases 下載
 - Spotify 抓取依賴 embed 頁面，需要網路連線，無需認證。
 - 播放清單預設使用 MP3 檔案。
 - 下載相關工具（yt-dlp、DAB、spotDL）在 `core/downloader.py`，但預設更新流程未使用。
+- `streamlit_app.py` 已列為棄用入口，後續會移除。

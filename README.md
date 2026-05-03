@@ -11,7 +11,7 @@ Library maintenance for local music libraries: build/update Spotify playlists, m
 - Move unsorted tracks to `_Unsorted` when needed.
 - Export selected playlists to USB/SD in Copy or Mirror mode.
 - Tkinter desktop UI with a built-in player and lyrics (`.lrc`).
-- Streamlit UI with dashboard and settings.
+- Tkinter desktop UI with built-in player and settings.
 - Command-line interface for automation.
 
 ## Quick Start
@@ -20,13 +20,9 @@ Library maintenance for local music libraries: build/update Spotify playlists, m
    ```bash
    pip install -r requirements.txt
    ```
-2. Run the UI:
+2. Run the desktop UI:
    ```bash
    python main.py
-   ```
-   Or:
-   ```bash
-   streamlit run streamlit_app.py
    ```
 3. Set your Base Folder (library root). It should contain:
    - `Music/` - Your audio files (MP3, FLAC, etc.)
@@ -70,7 +66,6 @@ Key settings:
 ## Project Structure
 
 - `main.py`: Tkinter entry point.
-- `streamlit_app.py`: Streamlit UI.
 - `cli.py`: Command-line interface.
 - `core/`: Core logic (playlist build/prune, scraping, sync/export, metadata helpers).
 - `gui/`: Tkinter UI and settings.
@@ -85,3 +80,4 @@ Key settings:
 - Spotify scraping relies on the embed page and requires network access. No authentication needed.
 - Playlists use MP3 files by default.
 - Download utilities (yt-dlp, DAB, spotDL) exist in `core/downloader.py` but are not used by the default update flow.
+- `streamlit_app.py` is deprecated and will be removed in a later cleanup phase.
