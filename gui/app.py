@@ -870,7 +870,7 @@ class PlaylistApp:
         # Playlist listbox container - Now directly in library_top_frame
         # This ensures proper vertical space allocation
         list_container = tk.Frame(self.library_top_frame, bg=COLORS['surface'])
-        list_container.pack(fill="both", expand=True, padx=12, pady=8)
+        list_container.pack(fill="both", expand=True, padx=12, pady=6)
 
         # Left side: Playlists (60% width)
         pl_side = tk.Frame(list_container, bg=COLORS['surface'])
@@ -880,7 +880,7 @@ class PlaylistApp:
                  fg=COLORS['text'], bg=COLORS['surface']).pack(anchor="w", pady=(0, 4))
 
         # Styled listbox with dark theme
-        self.pl_listbox = tk.Listbox(pl_side, height=14, font=get_font(11),
+        self.pl_listbox = tk.Listbox(pl_side, height=10, font=get_font(11),
                                      exportselection=False,
                                      bg=COLORS['elevated'], fg=COLORS['text'],
                                      selectbackground=COLORS['accent'],
@@ -904,7 +904,7 @@ class PlaylistApp:
                                         activeforeground=COLORS['accent_hover'],
                                         relief="flat", cursor="hand2",
                                         padx=8, pady=4)
-        self.view_songs_btn.pack(side="bottom", fill="x", pady=(8, 0))
+        self.view_songs_btn.pack(side="bottom", fill="x", pady=(4, 0))
 
         # Right side: Song Status List (40% width) - Moved here from bottom
         self.song_status_frame = tk.LabelFrame(list_container, text=_('song_status_title'),
@@ -915,12 +915,12 @@ class PlaylistApp:
         self.song_status_frame.pack(side="left", fill="both", expand=True, padx=(8, 0))
 
         # Reduce listbox height to ensure action buttons have space
-        self.pl_listbox.config(height=12)
+        self.pl_listbox.config(height=10)
 
         # Create treeview for song status with dark theme
         columns = ('Status', 'Song')
         self.song_status_tree = ttk.Treeview(self.song_status_frame, columns=columns,
-                                             show='tree headings', height=12)
+                                             show='tree headings', height=10)
         self.song_status_tree.heading('#0', text=_('song_status_no'))
         self.song_status_tree.heading('Status', text=_('song_status_status'))
         self.song_status_tree.heading('Song', text=_('song_status_song'))
@@ -935,7 +935,7 @@ class PlaylistApp:
                                    command=self.song_status_tree.yview,
                                    bg=COLORS['surface'], troughcolor=COLORS['elevated'])
         song_scroll.pack(side="right", fill="y")
-        self.song_status_tree.pack(side="left", fill="both", expand=True, padx=8, pady=8)
+        self.song_status_tree.pack(side="left", fill="both", expand=True, padx=8, pady=6)
         self.song_status_tree.config(yscrollcommand=song_scroll.set)
 
         # Initialize song status data
