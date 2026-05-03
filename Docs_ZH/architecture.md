@@ -1,151 +1,185 @@
-# 架构文档
+# Playlist Administrator 架構與流程
 
-## 概述
+## 專案定位
 
-Playlist Administrator 是一个音乐库管理工具，用于从本地音频文件构建和更新 Spotify 播放列表。它使用 Spotify 的嵌入页面进行抓取（无需认证），专注于播放列表的 MP3 文件。
+Playlist Administrator 是一個以本機音樂庫為核心的歌單管理工具，主要用途不是下載音樂，而是：
 
-## 核心组件
+- 從 Spotify `playlist` URL 抓取歌單曲目
+- 用本機音樂庫做歌曲比對
+- 產生或更新 `.m3u8` 播放清單
+- 清理遺失曲目、整理未分類歌曲
+- 視需要把 Spotube 來源的 `M4A` 轉成 `MP3`
+- 匯出指定歌單到 USB / SD
 
-### 核心模块 (`core/`)
+目前專案同時有三個入口：
 
-- **`spotify_playlist_fetcher.py`**: 通过嵌入页面获取 Spotify 播放列表
-  - `fetch_legacy_embed_playlist()`: 获取播放列表曲目的主要函数
-  - `fetch_playlist()`: 统一接口（简化为仅使用嵌入页面）
-  - 已移除: `SpotifyWebAPI` 类和 `fetch_via_web_api()` 函数
+- `main.py`: Tkinter 桌面版主介面
+- `streamlit_app.py`: Streamlit 網頁版介面
+- `cli.py`: 命令列工具
 
-- **`spotify.py`**: Spotify 抓取和播放列表构建
-  - `scrape_via_spotify_embed()`: 主要抓取函数
-  - 解析嵌入页面以提取曲目信息
-  - 构建 `.m3u8` 播放列表文件
-  - 强制仅匹配 MP3 文件用于播放列表
+## 核心模組
 
-- **`library.py`**: 库管理和文件操作
-  - `update_library_logic()`: 主要更新工作流
-  - 已移除: M4A 转 MP3 转换函数
-  - 已移除: `_resolve_spotube_paths()`, `_has_m4a_files()`, `_get_m4a_cache_key()`, `_m4a_files_from_source()`, `convert_spotube_m4a_to_mp3()`
+### 入口層
 
-- **`audio_converter.py`**: 音频格式转换
-  - `convert_audio_file()`: 通用音频转换
-  - `_migrate_m4a_metadata_to_mp3()`: 元数据迁移（读取 M4A，写入 MP3 - 不修改 M4A）
+- `main.py`
+  - 建立 Tk root
+  - 初始化 `gui.app.PlaylistApp`
+- `streamlit_app.py`
+  - 提供簡化版操作面板
+  - 可做更新、歌單管理、匯出、設定
+- `cli.py`
+  - 提供 `update`、`scrape`、`match`、`fetch-playlist`
 
-- **`downloader.py`**: 下载工具（yt-dlp, DAB, spotDL）
-  - 默认更新流程中不使用
-  - 可手动使用
+### GUI 層
 
-### GUI (`gui/`)
+- `gui/app.py`
+  - 主視窗、歌單列表、更新流程、播放器、狀態顯示
+  - 也包含 URL 新增、歌單檢視、背景更新檢查等行為
+- `gui/settings.py`
+  - Tkinter 設定視窗
+  - 目前仍包含 Spotube 轉檔相關選項
+- `gui/update_dialog.py`
+  - 版本更新通知視窗
 
-- **`app.py`**: Tkinter 主应用程序
-  - 已移除: `load_playlist_into_player()` 调用（函数不存在）
-  - 简化的播放列表加载，仅记录选择
+### 核心流程層
 
-- **`settings.py`**: 设置窗口
-  - 已移除: Spotify OAuth 登录部分
-  - 已移除: M4A/MP3 子文件夹设置
-  - 已移除: 转换工作进程设置
-  - 已移除: "优先 MP3" 复选框
-  - 保留: 语言、基本路径、ffmpeg 路径
+- `core/library.py`
+  - 專案最核心的工作流
+  - `update_library_logic()` 依序執行資料夾建立、Spotube 轉檔、Spotify 抓取、播放清單清理、未分類整理
+- `core/spotify.py`
+  - `scrape_via_spotify_embed()` 是 Spotify 歌單同步主流程
+  - 也負責 URL 名稱抓取與本機檔案比對
+- `core/spotify_playlist_fetcher.py`
+  - 專注在 Spotify embed 頁面的曲目抓取
+- `core/sync_manager.py`
+  - 負責輸出 / 同步到外部資料夾
+- `core/audio_converter.py`
+  - 音訊格式轉換與 metadata 遷移
+- `core/ffmpeg_installer.py`
+  - FFmpeg 檢查與路徑處理
 
-### CLI (`cli.py`)
+### 共用工具層
 
-- **`update`**: 运行完整更新流程
-- **`scrape`**: 仅抓取 Spotify URL
-- **`fetch-playlist`**: 通过嵌入页面获取播放列表曲目
-- **`match`**: 测试本地匹配
-- 已移除: `convert-playlist` 命令
+- `utils/config.py`
+  - 載入 / 儲存設定
+  - 推導 `library_path`、`playlists_path`、`export_path`
+- `utils/i18n.py`
+  - 中英文切換
+- `utils/helpers.py`
+  - 檔名清理、字串正規化
 
-### 配置 (`utils/config.py`)
+## 實際執行流程
 
-已移除的设置:
-- `spotube_m4a_subfolder`
-- `spotube_mp3_subfolder`
-- `prefer_mp3_playlists`
-- `spotube_convert_workers`
-- `spotify_client_id`
-- `spotify_client_secret`
-- `spotify_fetch_method`
+### 啟動流程
 
-保留的设置:
-- `base_path`
-- `ffmpeg_path`
-- `spotube_folder_name`
-- `spotube_exact_match`
-
-## 最近变更
-
-### Spotify API 移除
-- 移除 Spotify Web API 集成（OAuth、客户端凭证）
-- 移除 `SpotifyWebAPI` 类和所有认证逻辑
-- 简化为仅使用嵌入页面抓取
-- 获取 Spotify 播放列表无需认证
-
-### M4A 转换移除
-- 移除 M4A 转 MP3 转换功能
-- 移除 M4A 文件夹创建和管理
-- 移除转换工作进程设置
-- 移除 M4A 缓存系统
-- 播放列表现在仅使用 MP3 文件
-
-### GUI 简化
-- 移除 Spotify OAuth 登录界面
-- 移除 M4A/MP3 子文件夹配置
-- 移除转换设置
-- 修复缺失的 `load_playlist_into_player` 方法错误
-
-### CLI 清理
-- 移除 `convert-playlist` 命令
-- 保留核心功能: update, scrape, fetch-playlist, match
-
-## 文件结构
-
-```
-Playlist Administrator/
-├── main.py                    # Tkinter 入口点
-├── streamlit_app.py           # Streamlit UI
-├── cli.py                     # 命令行接口
-├── core/
-│   ├── spotify_playlist_fetcher.py  # Spotify 获取（仅嵌入页面）
-│   ├── spotify.py                    # Spotify 抓取和播放列表构建
-│   ├── library.py                    # 库管理
-│   ├── audio_converter.py            # 音频转换
-│   ├── downloader.py                 # 下载工具
-│   ├── sync_manager.py              # 同步操作
-│   ├── metadata_enricher.py          # 元数据丰富
-│   └── file_renamer.py              # 文件重命名
-├── gui/
-│   ├── app.py                       # Tkinter 主应用
-│   └── settings.py                  # 设置窗口
-├── utils/
-│   ├── config.py                    # 配置
-│   ├── helpers.py                   # 辅助函数
-│   └── i18n.py                      # 国际化
-├── tools/
-│   └── fix_flac_names.py            # FLAC 命名工具
-├── docs/
-│   └── architecture.md              # 本文档（英文）
-├── Docs_ZH/
-│   └── architecture.md              # 本文档（中文）
-├── README.md                        # 英文文档
-├── README_ZH.md                     # 中文文档
-└── requirements.txt                 # Python 依赖
+```mermaid
+flowchart TD
+    A["啟動 main.py / streamlit_app.py / cli.py"] --> B["load_config()"]
+    B --> C{"base_path 是否存在"}
+    C -- 否 --> D["要求使用者選擇 Base Folder"]
+    C -- 是 --> E["derive_paths() 推導 Library / Playlists / USB_Output"]
+    D --> E
+    E --> F["ensure_dirs() 建立必要資料夾"]
+    F --> G["建立 UI 或執行 CLI 命令"]
+    G --> H["Tk 版額外啟動背景任務<br/>含 proactive_name_fetch / update check"]
 ```
 
-## 工作流程
+### 新增 Spotify 歌單流程
 
-1. **设置**: 配置基本路径（包含 Music/ 和 Playlists/）
-2. **添加 URL**: 添加 Spotify 播放列表/专辑/艺人 URL
-3. **更新**: 运行更新流程
-   - 通过嵌入页面抓取 Spotify URL
-   - 构建本地音频文件库索引
-   - 匹配 Spotify 曲目到本地 MP3 文件
-   - 创建/更新 `.m3u8` 播放列表文件
-   - 从播放列表中移除缺失的条目
-   - 将未排序的曲目移动到 `_Unsorted`
-4. **导出**: 根据需要导出播放列表到 USB/SD
+```mermaid
+flowchart TD
+    A["使用者輸入 Spotify playlist URL"] --> B["gui.app.add_url()"]
+    B --> C["正規化 URL 並檢查重複"]
+    C --> D["scrape_via_spotify_embed(target_urls=[url])"]
+    D --> E["透過 embed 頁面抓歌單名稱"]
+    E --> F{"名稱是否成功取得"}
+    F -- 否 --> G["顯示錯誤，不加入設定"]
+    F -- 是 --> H["寫入 spotify_urls 與 url_names"]
+    H --> I["save_config()"]
+    I --> J["更新 UI 列表"]
+```
 
-## 注意事项
+### 全量更新流程
 
-- Spotify 抓取需要网络访问但无需认证
-- 播放列表仅使用 MP3 文件
-- M4A 文件不会被应用程序修改
-- 下载工具存在但默认流程中不使用
-- FFmpeg 是可选的（仅音频转换时需要）
+```mermaid
+flowchart TD
+    A["使用者按 Update / CLI update"] --> B["core.library.update_library_logic()"]
+    B --> C["ensure_dirs()"]
+    C --> D["Spotube M4A -> MP3 轉檔"]
+    D --> E["scrape_via_spotify_embed()"]
+    E --> F["抓取 Spotify 曲目"]
+    F --> G["掃描本機音樂庫並比對歌曲"]
+    G --> H["產生 / 更新 m3u8"]
+    H --> I["prune_missing_from_playlists()"]
+    I --> J["move_unsorted_songs()"]
+    J --> K["完成"]
+```
+
+### 匯出流程
+
+```mermaid
+flowchart TD
+    A["選擇要匯出的歌單"] --> B["sync_manager / export_usb_logic"]
+    B --> C["依模式 Copy 或 Mirror 準備輸出資料夾"]
+    C --> D["逐首尋找來源檔案"]
+    D --> E{"是否需要轉換品質"}
+    E -- 是 --> F["audio_converter 轉換"]
+    E -- 否 --> G["直接複製"]
+    F --> G
+    G --> H["完成匯出"]
+```
+
+## 設定與資料位置
+
+### 設定檔
+
+- 主要 app data 設定檔：
+  - `%LOCALAPPDATA%\\Playlist Administrator\\data\\config.json`
+- 若設定了 `base_path`：
+  - `base_path\\config.json` 會成為主要設定來源
+- app data 下的設定會保留一份 pointer：
+  - 至少記住 `base_path` 與 `language`
+
+### 由 `base_path` 推導出的路徑
+
+- `library_path`
+  - 通常是 `base_path\\Music`
+  - 但若 `base_path` 本身看起來就是音樂根目錄，則直接使用 `base_path`
+- `playlists_path`
+  - `base_path\\Playlists`
+- `export_path`
+  - `base_path\\USB_Output`
+
+## 目前觀察到的真實狀態
+
+### 仍然存在但文件曾寫成已移除
+
+- Spotube M4A 轉 MP3 流程仍存在
+  - `core/library.py` 的 `convert_spotube_m4a_to_mp3()`
+- `spotube_convert_matched_only` 仍在使用
+- `spotube_strict_matching` 仍在使用
+- `spotube_m4a_subfolder` / `spotube_mp3_subfolder` 雖然沒有預設值，但底層函數仍支援
+
+### 明顯屬於殘留邏輯
+
+- `gui/app.py` 啟動時會 `after(500)` 呼叫 `proactive_name_fetch`
+- `gui/app.py` 的 `view_playlist_songs()` 仍顯示 `spotify_fetch_method` / `spotify_client_id`
+- `spotify_fetch_method`、`spotify_client_id`、`spotify_client_secret` 已不再是主流程必要設定
+
+## 專案目前最重要的幾條主線
+
+1. Spotify embed 抓歌單
+2. 本機音樂檔名 / metadata 比對
+3. 播放清單輸出與整理
+4. Spotube M4A 轉 MP3 輔助流程
+5. 匯出到外部裝置
+
+## 建議閱讀順序
+
+1. `main.py`
+2. `gui/app.py`
+3. `core/library.py`
+4. `core/spotify.py`
+5. `core/spotify_playlist_fetcher.py`
+6. `utils/config.py`
+7. `gui/settings.py`
