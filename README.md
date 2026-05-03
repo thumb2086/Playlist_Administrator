@@ -1,6 +1,6 @@
 ﻿# Playlist Administrator
 
-![Version](https://img.shields.io/badge/version-1.5.2-blue)
+![Version](https://img.shields.io/badge/version-1.6.0-blue)
 
 Library maintenance for local music libraries: build/update Spotify playlists, manage exports, and organize music. Default workflow does not download audio.
 
