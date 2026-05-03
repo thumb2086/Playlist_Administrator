@@ -797,7 +797,7 @@ class PlaylistApp:
         self.notebook.add(self.tab_library, text=_('tab_library'))
 
         # 主容器：固定高度列表区域（不可滚动，整体固定）
-        self.library_top_frame = tk.Frame(self.tab_library, bg=COLORS['surface'], height=520)
+        self.library_top_frame = tk.Frame(self.tab_library, bg=COLORS['surface'], height=430)
         self.library_top_frame.pack(fill="x", padx=12, pady=(8, 8))
         self.library_top_frame.pack_propagate(False)  # 固定高度
 
