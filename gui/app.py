@@ -530,30 +530,32 @@ class PlaylistApp:
         # Action buttons with dark theme styling
         buttons_row = tk.Frame(self.action_frame, bg=COLORS['surface'])
         buttons_row.pack(fill="x", padx=6, pady=6)
-        buttons_row.columnconfigure(0, weight=0)
-        buttons_row.columnconfigure(1, weight=1)
-        buttons_row.columnconfigure(2, weight=1)
-        buttons_row.columnconfigure(3, weight=1)
+        buttons_row.columnconfigure(0, weight=1, uniform="action")
+        buttons_row.columnconfigure(1, weight=1, uniform="action")
+        buttons_row.columnconfigure(2, weight=1, uniform="action")
+        buttons_row.columnconfigure(3, weight=1, uniform="action")
 
         self.update_btn = tk.Button(buttons_row, text=_('update_all_btn'),
                                     command=self.run_update,
                                     bg=COLORS['accent'], fg=COLORS['bg'],
                                     activebackground=COLORS['accent_hover'],
                                     activeforeground=COLORS['bg'],
-                                    font=get_font(11, bold=True),
+                                    font=get_font(10, bold=True),
                                     relief="flat", cursor="hand2",
-                                    padx=14, pady=6)
-        self.update_btn.grid(row=0, column=0, sticky="w", padx=(0, 8))
+                                    padx=10, pady=5,
+                                    height=1)
+        self.update_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
 
         self.pause_btn = tk.Button(buttons_row, text=_('pause_btn'),
                                    command=self.toggle_pause,
                                    bg=COLORS['elevated'], fg=COLORS['text'],
                                    activebackground=COLORS['surface'],
                                    activeforeground=COLORS['text'],
-                                   height=2, state="disabled",
-                                   font=get_font(11, bold=True),
+                                   state="disabled",
+                                   font=get_font(10, bold=True),
                                    relief="flat", cursor="hand2",
-                                   padx=14, pady=6)
+                                   padx=10, pady=5,
+                                   height=1)
         self.pause_btn.grid(row=0, column=1, sticky="ew", padx=6)
 
         self.cancel_btn = tk.Button(buttons_row, text=_('cancel_btn'),
@@ -561,10 +563,11 @@ class PlaylistApp:
                                     bg=COLORS['error'], fg=COLORS['text'],
                                     activebackground='#ff4557',
                                     activeforeground=COLORS['text'],
-                                    height=2, state="disabled",
-                                    font=get_font(11, bold=True),
+                                    state="disabled",
+                                    font=get_font(10, bold=True),
                                     relief="flat", cursor="hand2",
-                                    padx=14, pady=6)
+                                    padx=10, pady=5,
+                                    height=1)
         self.cancel_btn.grid(row=0, column=2, sticky="ew", padx=6)
 
         self.export_btn = tk.Button(buttons_row, text=_('export_usb_btn'),
@@ -572,9 +575,10 @@ class PlaylistApp:
                                     bg=COLORS['elevated'], fg=COLORS['text'],
                                     activebackground=COLORS['surface'],
                                     activeforeground=COLORS['text'],
-                                    height=2, font=get_font(11, bold=True),
+                                    font=get_font(10, bold=True),
                                     relief="flat", cursor="hand2",
-                                    padx=14, pady=6)
+                                    padx=10, pady=5,
+                                    height=1)
         self.export_btn.grid(row=0, column=3, sticky="ew", padx=(6, 0))
 
     def _update_basic_list(self):
