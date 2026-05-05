@@ -15,6 +15,36 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Set build version from tag
+      id: build_version
+      shell: pwsh
+      run: |
+        $tag = "${{ github.ref_name }}"
+        if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$') {
+          throw "Release tags must look like v1.2.3. Got: $tag"
+        }
+
+        $version = $Matches.version
+        "APP_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "app_tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "app_version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+        Write-Host "Setting build version to $version from tag $tag"
+
+        $versionFile = "utils/version.py"
+        $versionText = Get-Content $versionFile -Raw -Encoding UTF8
+        $versionText = $versionText -replace '(?m)^__version__ = ".*"', "__version__ = `"$version`""
+        Set-Content $versionFile $versionText -Encoding UTF8
+
+        foreach ($readme in @("README.md", "README_ZH.md")) {
+          if (Test-Path $readme) {
+            $readmeText = Get-Content $readme -Raw -Encoding UTF8
+            $readmeText = $readmeText -replace 'version-[0-9A-Za-z.+-]+-blue', "version-$version-blue"
+            Set-Content $readme $readmeText -Encoding UTF8
+          }
+        }
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -36,12 +66,13 @@ jobs:
 
     - name: Build installer
       run: |
-        & "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" "/DMyAppVersion=${{ github.ref_name }}" "installer\\PlaylistAdministrator.iss"
+        & "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" "/DMyAppVersion=${{ steps.build_version.outputs.app_version }}" "installer\\PlaylistAdministrator.iss"
 
     - name: Create Release
       id: create_release
       uses: softprops/action-gh-release@v2
       with:
+        name: Playlist Administrator ${{ steps.build_version.outputs.app_tag }}
         files: installer/dist_installer/PlaylistAdministrator-Setup.exe
       env:
         GITHUB_TOKEN: ${{ github.token }}
