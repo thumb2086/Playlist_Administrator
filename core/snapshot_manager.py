@@ -8,9 +8,14 @@ import json
 from datetime import datetime
 from utils.helpers import sanitize_filename
 from utils.config import get_data_file
+from utils.i18n import _
 
 SNAPSHOT_CACHE_FILENAME = 'snapshot_cache.json'
-REMOVED_SONGS_FILENAME = '_Removed Songs.m3u8'
+
+
+def _get_removed_songs_filename():
+    """Get the localized filename for removed songs playlist."""
+    return "_" + _('removed_songs_pl') + ".m3u8"
 
 
 def load_snapshot_cache():
@@ -86,12 +91,12 @@ def update_snapshot(cache_data, playlist_name, tracks):
 
 def get_existing_removed_songs(playlists_path):
     """
-    Get list of songs already in _Removed Songs.m3u8 to avoid duplicates.
+    Get list of songs already in removed songs playlist to avoid duplicates.
     
     Returns:
         Set of track names (format: "Artist - Song")
     """
-    removed_m3u_path = os.path.join(playlists_path, REMOVED_SONGS_FILENAME)
+    removed_m3u_path = os.path.join(playlists_path, _get_removed_songs_filename())
     existing = set()
     
     if not os.path.exists(removed_m3u_path):
@@ -118,7 +123,7 @@ def get_existing_removed_songs(playlists_path):
 
 def append_to_removed_songs_m3u8(removed_tracks, config, lib_index):
     """
-    Append removed tracks to _Removed Songs.m3u8 file.
+    Append removed tracks to removed songs playlist file.
     Uses Echo Nightly compatible format (UTF-8 no BOM, LF, URI encoded paths).
     
     Args:
@@ -133,7 +138,7 @@ def append_to_removed_songs_m3u8(removed_tracks, config, lib_index):
     if not playlists_path:
         return 0
     
-    removed_m3u_path = os.path.join(playlists_path, REMOVED_SONGS_FILENAME)
+    removed_m3u_path = os.path.join(playlists_path, _get_removed_songs_filename())
     
     # Get existing tracks to avoid duplicates
     existing_tracks = get_existing_removed_songs(playlists_path)
