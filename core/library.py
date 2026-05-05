@@ -1938,10 +1938,7 @@ def move_unsorted_songs(config, log_func):
     orphans = list(orphans_map.values())
             
     # 3. Create playlist for unsorted songs (without moving files)
-    # Use a localized name for the playlist
-    # If it's explicitly a single track from user, we might want to call it "Single Tracks"
-    pl_name = "_" + _('removed_songs_pl')
-    m3u_path = os.path.join(playlists_path, f"{pl_name}.m3u8")
+    m3u_path = os.path.join(playlists_path, "_Unsorted.m3u8")
     
     # Check if we should also handle manual single tracks (songs in Music/Single Tracks)
     single_tracks_dir = os.path.join(library_path, "Single Tracks")
