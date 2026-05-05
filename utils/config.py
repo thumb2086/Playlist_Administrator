@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 from tkinter import filedialog, messagebox
 
 def get_app_dir():
@@ -247,3 +248,27 @@ def debug_print(*args, **kwargs):
     global _DEBUG_MODE
     if _DEBUG_MODE:
         print(*args, **kwargs)
+
+# Global timing storage for task-level timing
+_TIMING_DATA = {}
+
+def timing_start(task_name):
+    """Start timing a task (only in debug mode)"""
+    global _DEBUG_MODE, _TIMING_DATA
+    if _DEBUG_MODE:
+        _TIMING_DATA[task_name] = time.time()
+        debug_print(f"[TIMING] 開始: {task_name}")
+
+def timing_end(task_name, log_func=None):
+    """End timing a task and print duration (only in debug mode)"""
+    global _DEBUG_MODE, _TIMING_DATA
+    if _DEBUG_MODE and task_name in _TIMING_DATA:
+        elapsed = time.time() - _TIMING_DATA[task_name]
+        msg = f"[TIMING] 完成: {task_name} - 耗時 {elapsed:.3f}s"
+        if log_func:
+            log_func(msg)
+        else:
+            debug_print(msg)
+        del _TIMING_DATA[task_name]
+        return elapsed
+    return None

@@ -118,6 +118,8 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                   new playlists quickly.
     """
     from utils.i18n import _
+    from utils.config import timing_start, timing_end
+
     target_urls = target_urls or config.get('spotify_urls', [])
     if not target_urls:
         log_func(_('skip_no_urls'))
@@ -145,10 +147,13 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
     track_map_added = 0
     track_map_changed = 0
 
+    # Track overall timing for all playlists
+    timing_start("全部Spotify抓取")
+
     for sp_url in target_urls:
         if stats and stats.stop_event and stats.stop_event.is_set():
             return
-        
+
         # Skip if already updated today
         if last_updated.get(sp_url) == today:
             name = config.get('url_names', {}).get(sp_url, sp_url)
@@ -157,6 +162,10 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
             if stats and name not in stats.playlist_changes:
                 stats.playlist_changes[name] = {'added': [], 'removed': []}
             continue
+
+        # Start timing for this specific playlist
+        playlist_timer_name = f"Spotify抓取-{sp_url}"
+        timing_start(playlist_timer_name)
 
         sp_id = None
         is_artist = "artist/" in sp_url
@@ -586,7 +595,11 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                             with open(debug_file, 'w', encoding='utf-8') as dbg_f:
                                 for i, track in enumerate(tracks):
                                     dbg_f.write(f"{i+1}. {track}\n")
-                        
+
+                        # Start timing for song matching
+                        match_timer_name = f"歌曲匹配-{pl_name or '未知歌單'}"
+                        timing_start(match_timer_name)
+
                         for track in tracks:
                             clean_track = track.strip()
 
@@ -633,6 +646,13 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                             # Write EXTINF and the relative path with LF (Echo Nightly compatible)
                             f.write(f"#EXTINF:-1,{clean_track}\n")
                             f.write(f"{m3u_entry_path}\n")
+
+                        # End timing for song matching
+                        match_elapsed = timing_end(match_timer_name, log_func)
+                        if match_elapsed and len(tracks) > 0:
+                            avg_time = match_elapsed / len(tracks)
+                            log_func(f"[TIMING] 歌曲匹配完成: {len(tracks)} 首, 總耗時 {match_elapsed:.3f}s, 平均每首 {avg_time:.4f}s")
+
                     log_func(_('saved_tracks', kept_tracks, os.path.basename(m3u_path)))
                     if missing_tracks > 0:
                         log_func(f" -> 略過 {missing_tracks} 首本機找不到的歌曲，未寫入 {os.path.basename(m3u_path)}")
@@ -671,7 +691,17 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
 
         except Exception as e:
             log_func(_('scrape_error', e))
-    
+        finally:
+            # End timing for this playlist
+            elapsed = timing_end(playlist_timer_name, log_func)
+            if elapsed and 'pl_name' in locals() and pl_name:
+                log_func(f"[TIMING] 歌單 '{pl_name}' 處理完成，耗時 {elapsed:.3f}s")
+
+    # End overall timing
+    total_elapsed = timing_end("全部Spotify抓取", log_func)
+    if total_elapsed:
+        log_func(f"[TIMING] 全部 {len(target_urls)} 個歌單處理完成，總耗時 {total_elapsed:.3f}s")
+
     if track_map_updated:
         try:
             with open(track_map_path, 'w', encoding='utf-8') as tf:
