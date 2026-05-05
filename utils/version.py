@@ -4,7 +4,9 @@ Version information for Playlist Administrator
 
 # Current version - update this when releasing a new version
 # v1.5.2 - Fix M3U8 path encoding: remove URL encoding for Windows/Echo Nightly compatibility
-__version__ = "1.5.2"
+# NOTE: On CI builds, this file is automatically updated from the git tag.
+#       Manual changes here are only for development use.
+__version__ = "1.6.0"
 
 # GitHub repository info for update checking
 GITHUB_OWNER = "thumb2086"
@@ -37,7 +39,7 @@ def compare_versions(current, latest):
     """
     current_tuple = parse_version(current)
     latest_tuple = parse_version(latest)
-    
+
     if current_tuple < latest_tuple:
         return -1
     elif current_tuple > latest_tuple:
