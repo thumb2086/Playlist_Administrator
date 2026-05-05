@@ -1987,7 +1987,7 @@ class PlaylistApp:
                 self.stats_tab_size_lbl.config(text=f"總容量: {size_str}")
 
                 # Playlist stats
-                pl_files = len([f for f in os.listdir(self.config.get('playlists_path', '')) if f.endswith(('.m3u8', '.m3u'))])
+                pl_files = stats.get('playlist_file_count', 0)
                 self.stats_tab_pl_count_lbl.config(text=f"清單數量: {pl_files} 個")
                 self.stats_tab_pl_songs_lbl.config(text=f"清單歌曲總數: {stats['total_playlist_entries']} 首")
                 self.stats_tab_unique_pl_lbl.config(text=f"清單唯一歌曲: {stats['unique_playlist_entries']} 首")

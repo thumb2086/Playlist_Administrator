@@ -3065,9 +3065,9 @@ def export_usb_logic(config, selected_playlists, log_func, export_quality='origi
         log_func(_('open_dir_error', abs_export_path))
 
 
-def _get_stats_cache_key(audio_files, include_metadata_format=False):
+def _get_stats_cache_key(audio_files, playlists_path=None, include_metadata_format=False):
     """Generate cache key based on file paths and modification times."""
-    cache_str = f"metadata_format={include_metadata_format}\n"
+    cache_str = f"stats_schema=2\nmetadata_format={include_metadata_format}\n"
     for f in sorted(audio_files):
         try:
             if os.path.exists(f):
@@ -3076,6 +3076,18 @@ def _get_stats_cache_key(audio_files, include_metadata_format=False):
                 cache_str += f"{f}:{mtime}:{size}\n"
         except (OSError, IOError):
             continue
+    if playlists_path and os.path.isdir(playlists_path):
+        playlist_files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
+                         glob.glob(os.path.join(playlists_path, "*.m3u")) + \
+                         glob.glob(os.path.join(playlists_path, "*.txt"))
+        for f in sorted(playlist_files):
+            try:
+                if os.path.exists(f):
+                    mtime = os.path.getmtime(f)
+                    size = os.path.getsize(f)
+                    cache_str += f"playlist:{f}:{mtime}:{size}\n"
+            except (OSError, IOError):
+                continue
     return hashlib.md5(cache_str.encode('utf-8')).hexdigest()
 
 
@@ -3126,7 +3138,7 @@ def get_detailed_stats(config, audio_files=None, use_cache=True, include_metadat
     
     # Check cache if enabled
     if use_cache:
-        cache_key = _get_stats_cache_key(audio_files, include_metadata_format)
+        cache_key = _get_stats_cache_key(audio_files, playlists_path, include_metadata_format)
         cached_data = _load_stats_cache(cache_key)
         if cached_data is not None:
             return cached_data
@@ -3271,7 +3283,14 @@ def get_detailed_stats(config, audio_files=None, use_cache=True, include_metadat
     all_pl_songs = []
     unique_pl_songs = set()
     unique_pl_tokens = set()
-    skip_markers = ["_unsorted", "single tracks", "_unsorted_songs"]
+    skip_markers = [
+        "_unsorted",
+        "single tracks",
+        "_unsorted_songs",
+        "_removed songs",
+        "已移除",
+        "_spotify_debug",
+    ]
     playlist_cache = {}
     for pl_file in pl_files:
         base = os.path.basename(pl_file).lower()
@@ -3344,6 +3363,7 @@ def get_detailed_stats(config, audio_files=None, use_cache=True, include_metadat
           'm4a_count': m4a_count,
           'total_size_mb': total_size_mb,
           'recent_5': recent_5,
+          'playlist_file_count': len(playlist_cache),
           'total_playlist_entries': total_playlist_entries,
           'unique_playlist_entries': unique_playlist_entries,
           'unique_playlist_tokens': unique_playlist_tokens,
