@@ -2019,13 +2019,13 @@ class PlaylistApp:
 
         def thread_update():
             try:
-                # 統計頁優先保持 UI 可操作；逐檔 metadata 讀取很慢，
-                # 轉檔流程仍保留 metadata 比對，這裡使用快速檔名統計。
+                # 統計頁在背景執行緒用 metadata 匹配 MP3/M4A，
+                # 才能正確顯示已轉檔但檔名不同的歌曲。
                 stats = get_detailed_stats(
                     self.config,
                     None,
                     use_cache=not force,
-                    include_metadata_format=False
+                    include_metadata_format=True
                 )
                 # 完成後再更新 UI（在主執行緒）
                 self.root.after(0, lambda s=stats: update_ui(s))
