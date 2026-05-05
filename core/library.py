@@ -464,42 +464,51 @@ def _matches_playlist_index(src, playlist_index):
                     return True
     return False
 
-def _find_existing_mp3_for_source(src, mp3_index, metadata_index=None, strict_mode=True):
+def _find_existing_mp3_for_source(src, mp3_index, metadata_index=None):
     """
-    Find existing MP3 for an M4A source.
+    Find existing MP3 for an M4A source using metadata matching.
     
-    Args:
-        strict_mode: If True, only match exact filenames. If False, allow metadata-based fuzzy matching.
+    This function uses metadata (title/artist) to match songs, ensuring that
+    files with different names but same content are recognized as duplicates.
     """
-    # STRICT MODE: Only use the original filename (first item from _source_match_names)
-    # This prevents matching files with different names (e.g., "2317" vs "23_17")
-    if strict_mode:
-        # Get only the original filename stem
+    # Get source metadata identity
+    src_id = _audio_metadata_identity(src)
+    if not src_id:
+        # Fallback: if no metadata, use filename matching
         original_name = os.path.splitext(os.path.basename(src))[0]
         found = find_song_exact_format(original_name, 'mp3', mp3_index)
-        if found and os.path.exists(found) and _converted_mp3_matches_source(src, found):
-            return found
-        # In strict mode, we don't check any other variants
-        return None
-    
-    # NON-STRICT MODE: Use all variants from _source_match_names (legacy behavior)
-    for name in _source_match_names(src):
-        found = find_song_exact_format(name, 'mp3', mp3_index)
         if found and os.path.exists(found):
-            if _converted_mp3_matches_source(src, found):
-                return found
-        
-        if not found and metadata_index:
-            found = find_song_in_library(name, mp3_index, metadata_index=metadata_index)
-            if found and found.lower().endswith('.mp3') and os.path.exists(found):
-                src_id = _audio_metadata_identity(src)
-                dest_id = _audio_metadata_identity(found)
-                if src_id and dest_id:
-                    src_title, src_artist = src_id
-                    dest_title, dest_artist = dest_id
-                    if src_title and dest_title and src_title == dest_title:
-                        if (not src_artist and not dest_artist) or (src_artist and dest_artist and src_artist == dest_artist):
-                            return found
+            return found
+        return None
+
+    src_title, src_artist = src_id
+
+    # Search through all MP3 files for metadata match.
+    if isinstance(mp3_index, dict):
+        all_mp3_files = []
+        for file_list in mp3_index.values():
+            all_mp3_files.extend(file_list)
+    else:
+        all_mp3_files = mp3_index
+
+    for mp3_file in all_mp3_files:
+        if not mp3_file.lower().endswith('.mp3'):
+            continue
+        if not os.path.exists(mp3_file):
+            continue
+
+        dest_id = _audio_metadata_identity(mp3_file)
+        if not dest_id:
+            continue
+
+        dest_title, dest_artist = dest_id
+
+        # Match by title (required) and artist (if available)
+        if src_title and dest_title and src_title == dest_title:
+            if (not src_artist and not dest_artist) or \
+               (src_artist and dest_artist and src_artist == dest_artist):
+                return mp3_file
+
     return None
 
 def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None, status_cb=None, source_files=None):
@@ -604,31 +613,21 @@ def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=No
                 status_cb(i, _('conv_status_skipped'), f"{name} (not in playlist)")
             continue
 
-        # Check for existing MP3 - use strict mode (exact filename match only)
-        # This ensures all M4A files get converted unless there's an exact filename match
-        strict_matching = config.get('spotube_strict_matching', True)
-        existing_mp3 = _find_existing_mp3_for_source(src, mp3_index, metadata_index, strict_mode=strict_matching)
+        # Check for existing MP3 using metadata matching
+        existing_mp3 = _find_existing_mp3_for_source(src, mp3_index, metadata_index)
         if existing_mp3:
             skipped += 1
             if status_cb:
                 status_cb(i, _('conv_status_skipped'), name)
             continue
 
-        if os.path.exists(dest):
-            try:
-                if os.path.getmtime(dest) >= os.path.getmtime(src) and _converted_mp3_matches_source(src, dest):
-                    skipped += 1
-                    if status_cb:
-                        status_cb(i, _('conv_status_skipped'), name)
-                    continue
-            except Exception:
-                pass
-
         to_convert.append((i, src, dest, name))
 
     # Debug logging for conversion decision
     if config.get('debug_mode', False):
-        log_func(f" -> 轉檔決策: 總任務 {len(tasks)}, 因播放清單跳過 {len([t for t in tasks if playlist_index and not _matches_playlist_index(t[0], playlist_index)])}, 因已有MP3跳過 {sum(1 for t in tasks if _find_existing_mp3_for_source(t[0], mp3_index, metadata_index))}, 實際待轉檔 {len(to_convert)}")
+        playlist_skip = len([t for t in tasks if playlist_index and not _matches_playlist_index(t[0], playlist_index)])
+        mp3_skip = sum(1 for t in tasks if _find_existing_mp3_for_source(t[0], mp3_index, metadata_index))
+        log_func(f" -> 轉檔決策: 總任務 {len(tasks)}, 因播放清單跳過 {playlist_skip}, 因已有MP3跳過 {mp3_skip}, 實際待轉檔 {len(to_convert)}")
 
     processed = skipped
     if progress_cb:
@@ -1031,6 +1030,10 @@ def build_metadata_index(audio_files, log_func=None):
     tuple(normalized_title_tokens) -> list[file_path]
      This is an O(N) operation to be done once, instead of O(N) per missing song.
     """
+    from utils.config import timing_start, timing_end
+
+    timing_start("MetadataIndex建立")
+
     try:
         from mutagen.flac import FLAC
         from mutagen.easyid3 import EasyID3
@@ -1038,6 +1041,7 @@ def build_metadata_index(audio_files, log_func=None):
         from mutagen.mp4 import MP4
         from pathlib import Path
     except ImportError:
+        timing_end("MetadataIndex建立", log_func)
         return {}
 
     index = {}
@@ -1087,8 +1091,13 @@ def build_metadata_index(audio_files, log_func=None):
             continue
             
     if log_func and count > 0:
-        pass 
-        
+        pass
+
+    # End timing and report
+    elapsed = timing_end("MetadataIndex建立", log_func)
+    if elapsed and log_func and len(audio_files) > 0:
+        log_func(f"[TIMING] Metadata 索引建立完成: {count} 個標題, 平均每首 {elapsed/len(audio_files):.4f}s")
+
     return index
 
 def find_song_in_library(song_name, library_source, metadata_index=None, artist=None, target_duration=None):
@@ -3056,7 +3065,46 @@ def export_usb_logic(config, selected_playlists, log_func, export_quality='origi
         log_func(_('open_dir_error', abs_export_path))
 
 
-def get_detailed_stats(config, audio_files=None):
+def _get_stats_cache_key(audio_files, include_metadata_format=False):
+    """Generate cache key based on file paths and modification times."""
+    cache_str = f"metadata_format={include_metadata_format}\n"
+    for f in sorted(audio_files):
+        try:
+            if os.path.exists(f):
+                mtime = os.path.getmtime(f)
+                size = os.path.getsize(f)
+                cache_str += f"{f}:{mtime}:{size}\n"
+        except (OSError, IOError):
+            continue
+    return hashlib.md5(cache_str.encode('utf-8')).hexdigest()
+
+
+def _load_stats_cache(cache_key):
+    """Load cached stats if valid."""
+    try:
+        cache_file = get_data_file('stats_cache.json')
+        if not os.path.exists(cache_file):
+            return None
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            cache = json.load(f)
+        if cache.get('key') == cache_key:
+            return cache.get('data')
+    except Exception:
+        pass
+    return None
+
+
+def _save_stats_cache(cache_key, data):
+    """Save stats to cache."""
+    try:
+        cache_file = get_data_file('stats_cache.json')
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump({'key': cache_key, 'data': data, 'timestamp': time.time()}, f)
+    except Exception:
+        pass
+
+
+def get_detailed_stats(config, audio_files=None, use_cache=True, include_metadata_format=False):
     """
     Returns a dictionary with:
     - total_songs: count of unique files in library
@@ -3076,6 +3124,13 @@ def get_detailed_stats(config, audio_files=None):
         all_files = [f for f in glob.glob(search_pattern, recursive=True) if os.path.isfile(f)]
         audio_files = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
     
+    # Check cache if enabled
+    if use_cache:
+        cache_key = _get_stats_cache_key(audio_files, include_metadata_format)
+        cached_data = _load_stats_cache(cache_key)
+        if cached_data is not None:
+            return cached_data
+
     # Count unique tracks (dedupe m4a/mp3/etc with same normalized tokens)
     # placeholder: filled after tokenization
     total_songs = 0
@@ -3144,11 +3199,14 @@ def get_detailed_stats(config, audio_files=None):
     # Count songs with multiple formats (library duplicates)
     library_duplicates = sum(1 for exts in token_to_exts.values() if len(exts) > 1)
 
-    # Calculate format distribution by unique songs (not files)
+    # Calculate format distribution by unique songs. Metadata matching is much
+    # slower on large libraries, so stats use filename tokens by default and
+    # only opt into metadata matching for callers that explicitly need it.
     mp3_only_count = 0
     m4a_only_count = 0
     dual_format_count = 0
-    for tokens_tuple, exts in token_to_exts.items():
+
+    for exts in token_to_exts.values():
         has_mp3 = '.mp3' in exts
         has_m4a = '.m4a' in exts
         if has_mp3 and has_m4a:
@@ -3157,6 +3215,50 @@ def get_detailed_stats(config, audio_files=None):
             mp3_only_count += 1
         elif has_m4a:
             m4a_only_count += 1
+
+    if include_metadata_format and mp3_files and m4a_files:
+        _metadata_cache = {}
+
+        def _get_cached_metadata(file_path):
+            if file_path not in _metadata_cache:
+                _metadata_cache[file_path] = _audio_metadata_identity(file_path)
+            return _metadata_cache[file_path]
+
+        def _metadata_matches(left_artist, right_artist):
+            return (not left_artist and not right_artist) or (
+                left_artist and right_artist and left_artist == right_artist
+            )
+
+        mp3_metadata_index = {}
+        m4a_metadata_index = {}
+        for mp3_file in mp3_files:
+            identity = _get_cached_metadata(mp3_file)
+            if identity and identity[0]:
+                mp3_metadata_index.setdefault(identity[0], set()).add(identity[1])
+        for m4a_file in m4a_files:
+            identity = _get_cached_metadata(m4a_file)
+            if identity and identity[0]:
+                m4a_metadata_index.setdefault(identity[0], set()).add(identity[1])
+
+        metadata_dual_titles = set()
+        for title_tokens, mp3_artists in mp3_metadata_index.items():
+            m4a_artists = m4a_metadata_index.get(title_tokens)
+            if not m4a_artists:
+                continue
+            if any(_metadata_matches(mp3_artist, m4a_artist)
+                   for mp3_artist in mp3_artists
+                   for m4a_artist in m4a_artists):
+                metadata_dual_titles.add(title_tokens)
+
+        if metadata_dual_titles:
+            filename_dual_titles = {
+                tokens for tokens, exts in token_to_exts.items()
+                if '.mp3' in exts and '.m4a' in exts
+            }
+            extra_dual = len(metadata_dual_titles - filename_dual_titles)
+            dual_format_count += extra_dual
+            mp3_only_count = max(0, mp3_only_count - extra_dual)
+            m4a_only_count = max(0, m4a_only_count - extra_dual)
 
     # unconverted_count is songs that only have M4A format
     unconverted_count = m4a_only_count
@@ -3170,11 +3272,13 @@ def get_detailed_stats(config, audio_files=None):
     unique_pl_songs = set()
     unique_pl_tokens = set()
     skip_markers = ["_unsorted", "single tracks", "_unsorted_songs"]
+    playlist_cache = {}
     for pl_file in pl_files:
         base = os.path.basename(pl_file).lower()
         if any(x in base for x in skip_markers):
             continue
         songs = parse_playlist(pl_file)
+        playlist_cache[pl_file] = songs
         all_pl_songs.extend(songs)
         for s in songs:
             unique_pl_songs.add(s)
@@ -3206,8 +3310,7 @@ def get_detailed_stats(config, audio_files=None):
     
     # Count song occurrences in playlists
     song_occurrences = {}
-    for pl_file in pl_files:
-        songs = parse_playlist(pl_file)
+    for songs in playlist_cache.values():
         for song_name in songs:
             query_tokens = tuple(get_normalized_tokens(song_name))
             if query_tokens:
@@ -3233,7 +3336,7 @@ def get_detailed_stats(config, audio_files=None):
     
     savings_mb = actual_savings_bytes / (1024 * 1024)
 
-    return {
+    result = {
           'total_songs': unique_library_tracks,
           'flac_count': flac_count,
           'lossy_count': lossy_count,
@@ -3255,3 +3358,9 @@ def get_detailed_stats(config, audio_files=None):
           'dual_format_count': dual_format_count,
           'total_file_count': len(audio_files),
       }
+
+    # Save to cache
+    if use_cache:
+        _save_stats_cache(cache_key, result)
+
+    return result

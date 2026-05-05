@@ -136,9 +136,14 @@ class PlaylistApp:
         lang = self.config.get('language', 'zh-TW')
         I18N.set_language(lang)
         
-        # Log config path for debugging
+        # Enable file logging and log startup
+        from utils.logger import enable_file_logging
         from utils.config import CONFIG_FILE
-        self.log(f"--- 系統啟動 | 設定檔路徑: {CONFIG_FILE} ---", immediate=True)
+        if self.config.get('base_path'):
+            log_path = enable_file_logging(self.config['base_path'], max_files=10)
+            self.log(f"--- 系統啟動 | 日誌檔案: {log_path} ---", immediate=True)
+        else:
+            self.log(f"--- 系統啟動 | 設定檔路徑: {CONFIG_FILE} ---", immediate=True)
 
         # Prompt for base path if not set
         if 'base_path' not in self.config or not self.config['base_path']:
@@ -214,45 +219,45 @@ class PlaylistApp:
 
     def _configure_ttk_styles(self):
         """Configure ttk widget styles for the current theme"""
-        style = ttk.Style()
+        self.style = ttk.Style()
 
         # Use 'clam' theme for better customization support on Windows
         try:
-            style.theme_use('clam')
+            self.style.theme_use('clam')
         except tk.TclError:
             pass  # Fallback to default if clam not available
 
         # Notebook / tab chrome
-        style.configure("TNotebook",
+        self.style.configure("TNotebook",
                        background=COLORS['bg'],
                        borderwidth=0,
                        tabmargins=(8, 4, 8, 0))
-        style.configure("TNotebook.Tab",
+        self.style.configure("TNotebook.Tab",
                        background=COLORS['surface'],
                        foreground=COLORS['text_secondary'],
                        padding=(14, 6),
                        borderwidth=0)
-        style.map("TNotebook.Tab",
+        self.style.map("TNotebook.Tab",
                  background=[('selected', COLORS['elevated']),
                             ('active', COLORS['surface'])],
                  foreground=[('selected', COLORS['text']),
                             ('active', COLORS['text'])])
 
         # Configure Treeview (song status list) - Dark theme
-        style.configure("Treeview",
+        self.style.configure("Treeview",
                        background=COLORS['elevated'],
                        foreground=COLORS['text'],
                        fieldbackground=COLORS['elevated'],
                        rowheight=24,
                        borderwidth=0,
                        relief='flat')
-        style.configure("Treeview.Heading",
+        self.style.configure("Treeview.Heading",
                        background=COLORS['surface'],
                        foreground=COLORS['text'],
                        font=get_font(10, bold=True),
                        borderwidth=0,
                        relief='flat')
-        style.map("Treeview",
+        self.style.map("Treeview",
                  background=[('selected', COLORS['accent']),
                             ('!selected', COLORS['elevated'])],
                  foreground=[('selected', COLORS['bg']),
@@ -261,14 +266,14 @@ class PlaylistApp:
                                  ('!selected', COLORS['elevated'])])
 
         # Configure Combobox (player playlist selector)
-        style.configure("TCombobox",
+        self.style.configure("TCombobox",
                        fieldbackground=COLORS['elevated'],
                        background=COLORS['elevated'],
                        foreground=COLORS['text'],
                        arrowcolor=COLORS['text'],
                        borderwidth=0,
                        relief='flat')
-        style.map("TCombobox",
+        self.style.map("TCombobox",
                  fieldbackground=[('readonly', COLORS['elevated']),
                                  ('disabled', COLORS['surface'])],
                  selectbackground=[('readonly', COLORS['accent'])],
@@ -276,7 +281,7 @@ class PlaylistApp:
                  foreground=[('readonly', COLORS['text'])])
 
         # Configure Progressbar
-        style.configure("Horizontal.TProgressbar",
+        self.style.configure("Horizontal.TProgressbar",
                        background=COLORS['accent'],
                        troughcolor=COLORS['elevated'],
                        borderwidth=0,
@@ -845,11 +850,6 @@ class PlaylistApp:
         self.tab_library = tk.Frame(self.notebook, bg=COLORS['bg'])
         self.notebook.add(self.tab_library, text=_('tab_library'))
 
-        # 主容器：固定高度列表区域（不可滚动，整体固定）
-        self.library_top_frame = tk.Frame(self.tab_library, bg=COLORS['surface'], height=430)
-        self.library_top_frame.pack(fill="x", padx=12, pady=(8, 8))
-        self.library_top_frame.pack_propagate(False)  # 固定高度
-
         # Tab 2: Player - Dark theme
         self.tab_player = tk.Frame(self.notebook, bg=COLORS['bg'])
         self.notebook.add(self.tab_player, text=_('tab_player'))
@@ -862,8 +862,37 @@ class PlaylistApp:
         self._stats_tab_loaded = False
         self.notebook.bind('<<NotebookTabChanged>>', self._on_tab_changed)
 
-        # 1. URL Section (In Tab 1 Top Pane) - Dark theme card
-        self.url_frame = tk.LabelFrame(self.library_top_frame, text=_('step_1_title'),
+        # 主容器：內部標籤頁（節省高度空間）
+        self.library_top_frame = tk.Frame(self.tab_library, bg=COLORS['surface'])
+        self.library_top_frame.pack(fill="both", expand=True, padx=12, pady=(8, 8))
+
+        # 建立內部標籤頁：播放清單管理
+        self.inner_notebook = ttk.Notebook(self.library_top_frame)
+        self.inner_notebook.pack(fill="both", expand=True)
+        # 配置內部標籤頁樣式
+        self.style.configure("Inner.TNotebook", background=COLORS['surface'], borderwidth=0)
+        self.style.configure("Inner.TNotebook.Tab",
+                       background=COLORS['surface'],
+                       foreground=COLORS['text_secondary'],
+                       padding=(10, 4),
+                       borderwidth=0)
+        self.style.map("Inner.TNotebook.Tab",
+                 background=[('selected', COLORS['elevated']),
+                            ('active', COLORS['surface'])],
+                 foreground=[('selected', COLORS['text']),
+                            ('active', COLORS['text'])])
+        self.inner_notebook.configure(style="Inner.TNotebook")
+
+        # 內部標籤頁 1：URL 管理
+        self.inner_tab_urls = tk.Frame(self.inner_notebook, bg=COLORS['surface'])
+        self.inner_notebook.add(self.inner_tab_urls, text="Spotify 網址管理")
+
+        # 內部標籤頁 2：播放清單列表
+        self.inner_tab_playlists = tk.Frame(self.inner_notebook, bg=COLORS['surface'])
+        self.inner_notebook.add(self.inner_tab_playlists, text="播放清單與歌曲狀態")
+
+        # 1. URL Section (In inner tab 1) - Dark theme card
+        self.url_frame = tk.LabelFrame(self.inner_tab_urls, text=_('step_1_title'),
                                        font=get_font(11, bold=True),
                                        fg=COLORS['text'], bg=COLORS['surface'],
                                        highlightbackground=COLORS['border'],
@@ -916,10 +945,9 @@ class PlaylistApp:
                                    padx=12, pady=4)
         self.reset_btn.grid(row=0, column=2, sticky="e")
 
-        # Playlist listbox container - use a horizontal paned layout so the
-        # playlist list can be wider by default and still remain resizable.
-        list_container = tk.Frame(self.library_top_frame, bg=COLORS['surface'])
-        list_container.pack(fill="both", expand=True, padx=12, pady=6)
+        # 標籤頁 2：播放清單列表和歌曲狀態
+        list_container = tk.Frame(self.inner_tab_playlists, bg=COLORS['surface'])
+        list_container.pack(fill="both", expand=True, padx=8, pady=8)
 
         self.list_paned = tk.PanedWindow(
             list_container,
@@ -934,7 +962,7 @@ class PlaylistApp:
 
         # Left side: Playlists
         pl_side = tk.Frame(self.list_paned, bg=COLORS['surface'])
-        self.list_paned.add(pl_side, minsize=420)
+        self.list_paned.add(pl_side, minsize=550)
         tk.Label(pl_side, text="🎵 播放清單",
                  font=get_font(11, bold=True),
                  fg=COLORS['text'], bg=COLORS['surface']).pack(anchor="w", pady=(0, 4))
@@ -1275,16 +1303,16 @@ class PlaylistApp:
                                        font=get_font(11, bold=True),
                                        fg=COLORS['text'], bg=COLORS['surface'],
                                        highlightbackground=COLORS['border'],
-                                       highlightthickness=1, bd=0, height=120)
+                                       highlightthickness=1, bd=0, height=180)
         self.log_frame.pack(side="bottom", fill="x", padx=12, pady=(0, 8))
         self.log_frame.pack_propagate(False)  # 固定高度
 
-        # Log with fixed height
+        # Log with increased height
         self.log_text = scrolledtext.ScrolledText(self.log_frame, state='disabled',
                                                   bg=COLORS['elevated'],
                                                   fg=COLORS['text_secondary'],
                                                   font=(FONT_MONO, 10),
-                                                  height=6,
+                                                  height=10,
                                                   relief="flat",
                                                   highlightthickness=1,
                                                   highlightbackground=COLORS['border'])
@@ -1330,21 +1358,35 @@ class PlaylistApp:
 
     def _set_initial_playlist_split(self):
         """Set an initial split that gives the playlist list more room."""
+        # Delay setting the sash position until the inner tab is visible
+        self.root.after(100, self._do_set_playlist_split)
+
+    def _do_set_playlist_split(self):
+        """Actually set the playlist panel split position."""
         try:
+            # Make sure we're on the playlist tab and it's rendered
+            self.inner_notebook.select(self.inner_tab_playlists)
+            self.inner_tab_playlists.update_idletasks()
             self.list_paned.update_idletasks()
-            self.list_paned.sash_place(0, 470, 0)
+            self.list_paned.sash_place(0, 550, 0)
         except Exception:
             pass
 
     def log(self, message, immediate=False):
+        from utils.logger import log_to_file
+
         # Filter log messages - only show errors and important messages
         msg_str = str(message)
         msg_lower = msg_str.lower()
         is_error = any(keyword in msg_lower for keyword in ['error', 'failed', 'critical', 'warning', 'missing'])
         is_important = any(keyword in msg_str for keyword in ['---', '->'])
-        
+
+        # Always write to log file (if enabled)
+        level = 'ERROR' if is_error else 'INFO'
+        log_to_file(msg_str, level)
+
         # Don't interfere with player panel - keep it for lyrics only
-        
+
         if is_error or is_important:
             self.log_queue.append(msg_str)
             # Only schedule update if log_text is initialized
@@ -1352,8 +1394,7 @@ class PlaylistApp:
                 # For important progress messages, use shorter delay
                 delay = 50 if immediate and ("left" in msg_lower or "progress" in msg_lower) else 200
                 self.log_update_job = self.root.after(delay, self._process_log_queue)
-    
-        
+
     def update_song_status(self, song_index, status, song_name):
         """Update song status in the treeview"""
         from utils.config import debug_print
@@ -1863,13 +1904,20 @@ class PlaylistApp:
         self.stats_tab_not_in_pl_lbl.pack(anchor="w", pady=2)
 
         # Refresh Button
-        tk.Button(stats_container, text="🔄 重新整理", command=lambda: self._refresh_stats_tab(force=True),
-                  font=get_font(10), bg=COLORS['accent'], fg=COLORS['bg'],
-                  activebackground=COLORS['accent_hover'], padx=20, pady=5,
-                  relief="flat", cursor="hand2").pack(anchor="w", pady=(10, 0))
+        self.stats_refresh_btn = tk.Button(
+            stats_container,
+            text="🔄 重新整理",
+            command=lambda: self._refresh_stats_tab(force=True),
+            font=get_font(10), bg=COLORS['accent'], fg=COLORS['bg'],
+            activebackground=COLORS['accent_hover'], padx=20, pady=5,
+            relief="flat", cursor="hand2"
+        )
+        self.stats_refresh_btn.pack(anchor="w", pady=(10, 0))
 
         # 標記 stats 尚未初始化，避免啟動時自動載入造成阻塞
         self._stats_initialized = False
+        self._stats_loading = False
+        self._stats_refresh_generation = 0
 
     def _refresh_stats_tab(self, force=False):
         """Refresh statistics displayed in the stats tab (改為背景執行緒計算)"""
@@ -1878,10 +1926,30 @@ class PlaylistApp:
         # 如果不是強制刷新，且已經初始化過，則跳過
         if not force and getattr(self, '_stats_initialized', False):
             return
+        if getattr(self, '_stats_loading', False) and not force:
+            return
+
+        self._stats_refresh_generation = getattr(self, '_stats_refresh_generation', 0) + 1
+        generation = self._stats_refresh_generation
+        self._stats_loading = True
+
+        def set_loading_state():
+            try:
+                self.stats_refresh_btn.config(state="disabled", text="載入中...")
+                self.stats_tab_total_lbl.config(text="歌曲總數: 掃描中...")
+                self.stats_tab_files_lbl.config(text="檔案統計: 掃描中...")
+                self.stats_tab_pl_count_lbl.config(text="清單數量: 掃描中...")
+            except Exception:
+                pass
+
+        set_loading_state()
 
         def update_ui(stats):
             try:
+                if generation != getattr(self, '_stats_refresh_generation', 0):
+                    return
                 self._stats_initialized = True
+                self._stats_loading = False
 
                 # Library stats
                 total_size_gb = stats['total_size_mb'] / 1024
@@ -1929,21 +1997,41 @@ class PlaylistApp:
                 savings_str = f"{savings_gb:.2f} GB" if savings_gb >= 1 else f"{stats['savings_mb']:.1f} MB"
                 self.stats_tab_savings_lbl.config(text=f"重複歌曲節省空間: {savings_str}")
                 self.stats_tab_not_in_pl_lbl.config(text=f"未收錄在清單的歌曲: {stats['not_in_playlists_count']} 首")
+                self.stats_refresh_btn.config(state="normal", text="🔄 重新整理")
 
             except Exception as e:
                 print(f"Error refreshing stats tab: {e}")
+                self._stats_loading = False
                 self._stats_initialized = True  # 標記為已初始化，避免卡住
+                try:
+                    self.stats_refresh_btn.config(state="normal", text="🔄 重新整理")
+                except Exception:
+                    pass
+
+        def update_error(message):
+            if generation != getattr(self, '_stats_refresh_generation', 0):
+                return
+            self._stats_loading = False
+            self._stats_initialized = True
+            self.stats_tab_total_lbl.config(text="歌曲總數: 載入失敗")
+            self.stats_tab_files_lbl.config(text=f"檔案統計: {message}")
+            self.stats_refresh_btn.config(state="normal", text="🔄 重新整理")
 
         def thread_update():
             try:
-                # 在背景執行緒執行昂貴的檔案掃描
-                # force=True 時不使用快取
-                stats = get_detailed_stats(self.config, None, use_cache=not force)
+                # 統計頁優先保持 UI 可操作；逐檔 metadata 讀取很慢，
+                # 轉檔流程仍保留 metadata 比對，這裡使用快速檔名統計。
+                stats = get_detailed_stats(
+                    self.config,
+                    None,
+                    use_cache=not force,
+                    include_metadata_format=False
+                )
                 # 完成後再更新 UI（在主執行緒）
-                self.root.after(0, lambda: update_ui(stats))
+                self.root.after(0, lambda s=stats: update_ui(s))
             except Exception as e:
                 print(f"Error computing stats: {e}")
-                self._stats_initialized = True
+                self.root.after(0, lambda msg=str(e): update_error(msg))
 
         threading.Thread(target=thread_update, daemon=True).start()
 
@@ -1973,7 +2061,7 @@ class PlaylistApp:
             if current_tab == stats_tab_idx and not self._stats_tab_loaded:
                 self._stats_tab_loaded = True
                 # 延遲載入統計數據，確保頁面切換流暢
-                self.root.after(100, lambda: self._refresh_stats_tab(force=True))
+                self.root.after(100, lambda: self._refresh_stats_tab(force=False))
         except Exception as e:
             print(f"Tab change error: {e}")
 
