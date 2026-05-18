@@ -12,6 +12,7 @@ from utils.helpers import sanitize_filename, normalize_name
 from utils.config import ensure_dirs, get_data_file
 from utils.i18n import _
 from core.spotify import get_spotify_name
+from core.snapshot_manager import is_removed_songs_playlist_name
 
 DEFAULT_ARTIST_ALIASES = {
     'claire kuo': '郭靜',
@@ -38,6 +39,20 @@ DEFAULT_ARTIST_ALIASES = {
     'chih siou': '持修',
     'show luo': '羅志祥',
 }
+
+INTERNAL_PLAYLIST_MARKERS = ("_unsorted", "single tracks", "_unsorted_songs")
+
+
+def is_internal_playlist_name(name):
+    """Return True when a playlist name/path belongs to an internal playlist."""
+    if not name:
+        return False
+
+    normalized = os.path.splitext(os.path.basename(name))[0].strip().lower()
+    if is_removed_songs_playlist_name(normalized):
+        return True
+
+    return any(marker in normalized for marker in INTERNAL_PLAYLIST_MARKERS)
 
 
 def _artist_aliases_file_path():
@@ -179,7 +194,7 @@ def load_playlists_data(config):
     # Add other m3u8 files found in the folder that aren't in the config (local playlists)
     for m3u_file in m3u8_files:
         name = os.path.splitext(os.path.basename(m3u_file))[0]
-        if name in processed_names or name.startswith('_'): # Skip internal ones like _Unsorted
+        if name in processed_names or is_internal_playlist_name(name):
             continue
             
         comp, missing, total = report.get(m3u_file, (False, 0, 0))
@@ -431,11 +446,9 @@ def _build_playlist_song_index(playlists_path):
     files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
             glob.glob(os.path.join(playlists_path, "*.m3u")) + \
             glob.glob(os.path.join(playlists_path, "*.txt"))
-    skip_markers = ["_unsorted", "single tracks", "_unsorted_songs", "_removed songs", "已移除"]
     index = {}
     for pl_file in files:
-        base = os.path.basename(pl_file).lower()
-        if any(marker in base for marker in skip_markers):
+        if is_internal_playlist_name(pl_file):
             continue
         for song_name in parse_playlist(pl_file):
             tokens = tuple(get_normalized_tokens(song_name))
@@ -749,16 +762,13 @@ def prune_missing_from_playlists(config, log_func, pause_event=None, stop_event=
 
     total_removed = 0
     total_files = 0
-    skip_markers = ["_unsorted", "single tracks", "_unsorted_songs"]
-
     for pl_file in pl_files:
         if stop_event and stop_event.is_set():
             log_func(" -> Prune cancelled.")
             break
         if pause_event:
             pause_event.wait()
-        base = os.path.basename(pl_file).lower()
-        if any(marker in base for marker in skip_markers):
+        if is_internal_playlist_name(pl_file):
             continue
         total_files += 1
         removed = 0
@@ -1897,8 +1907,8 @@ def move_unsorted_songs(config, log_func):
     total_playlist_entries = 0
     for pl_file in all_playlist_files:
         base = os.path.basename(pl_file)
-        # Skip the unsorted/single tracks playlists themselves
-        if any(x in base for x in ["_未分類", "_Unsorted", "Single Tracks", "單曲"]): continue
+        if is_internal_playlist_name(base):
+            continue
         songs = parse_playlist(pl_file)
         total_playlist_entries += len(songs)
         songs_in_playlists.update(songs)
@@ -2124,6 +2134,7 @@ def update_library_logic_legacy(config, stats, log_func, progress_func=None, pos
     files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
             glob.glob(os.path.join(playlists_path, "*.m3u")) + \
             glob.glob(os.path.join(playlists_path, "*.txt"))
+    files = [pl_file for pl_file in files if not is_internal_playlist_name(pl_file)]
             
     if not files:
         log_func(_('no_pl_files'))
@@ -2911,6 +2922,7 @@ def get_playlist_completeness_report(files, library_path):
             failed_flac_cache = {}
     
     report = {}
+    files = [pl_file for pl_file in files if not is_internal_playlist_name(pl_file)]
     for pl_file in files:
         songs = parse_playlist(pl_file)
         missing = 0
@@ -3280,18 +3292,10 @@ def get_detailed_stats(config, audio_files=None, use_cache=True, include_metadat
     all_pl_songs = []
     unique_pl_songs = set()
     unique_pl_tokens = set()
-    skip_markers = [
-        "_unsorted",
-        "single tracks",
-        "_unsorted_songs",
-        "_removed songs",
-        "已移除",
-        "_spotify_debug",
-    ]
     playlist_cache = {}
     for pl_file in pl_files:
         base = os.path.basename(pl_file).lower()
-        if any(x in base for x in skip_markers):
+        if is_internal_playlist_name(base) or "_spotify_debug" in base:
             continue
         songs = parse_playlist(pl_file)
         playlist_cache[pl_file] = songs

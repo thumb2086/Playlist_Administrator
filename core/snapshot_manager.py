@@ -11,6 +11,10 @@ from utils.config import get_data_file
 
 SNAPSHOT_CACHE_FILENAME = 'snapshot_cache.json'
 REMOVED_SONGS_FILENAME = '_Removed Songs.m3u8'
+LEGACY_REMOVED_SONGS_FILENAMES = (
+    REMOVED_SONGS_FILENAME,
+    '_已移除的歌曲.m3u8',
+)
 
 
 def load_snapshot_cache():
@@ -43,6 +47,132 @@ def save_snapshot_cache(cache_data):
         return True
     except Exception:
         return False
+
+
+def get_removed_songs_playlist_paths(playlists_path):
+    """Return removed-songs playlist candidates, canonical path first."""
+    if not playlists_path:
+        return []
+
+    return [os.path.join(playlists_path, name) for name in LEGACY_REMOVED_SONGS_FILENAMES]
+
+
+def get_removed_songs_playlist_path(playlists_path):
+    """Return the canonical removed-songs playlist path."""
+    if not playlists_path:
+        return None
+    return os.path.join(playlists_path, REMOVED_SONGS_FILENAME)
+
+
+def is_removed_songs_playlist_name(name):
+    """Return True when a playlist filename/stem matches removed-songs aliases."""
+    if not name:
+        return False
+
+    normalized = os.path.splitext(os.path.basename(name))[0].strip().lower()
+    aliases = {
+        os.path.splitext(filename)[0].strip().lower()
+        for filename in LEGACY_REMOVED_SONGS_FILENAMES
+    }
+    return normalized in aliases
+
+
+def _read_removed_songs_entries(path):
+    """Read removed-songs entries from one playlist file while preserving order."""
+    entries = []
+    if not path or not os.path.exists(path):
+        return entries
+
+    try:
+        with open(path, 'r', encoding='utf-8-sig') as f:
+            lines = [line.rstrip('\r\n') for line in f.readlines()]
+    except UnicodeDecodeError:
+        with open(path, 'r', encoding='gbk', errors='ignore') as f:
+            lines = [line.rstrip('\r\n') for line in f.readlines()]
+    except Exception:
+        return entries
+
+    index = 0
+    while index < len(lines):
+        line = lines[index].strip()
+        if not line:
+            index += 1
+            continue
+        if line.startswith('#EXTINF:'):
+            parts = line.split(',', 1)
+            track_name = parts[1].strip() if len(parts) > 1 else ''
+            path_line = ''
+            if index + 1 < len(lines):
+                path_line = lines[index + 1].strip()
+            if track_name:
+                entries.append((track_name, path_line))
+            index += 2
+            continue
+        index += 1
+
+    return entries
+
+
+def normalize_removed_songs_playlist(playlists_path):
+    """
+    Collapse legacy removed-songs playlists into the canonical file.
+
+    Returns:
+        Dict with keys: canonical_path, migrated, merged, removed_legacy, total_tracks.
+    """
+    canonical_path = get_removed_songs_playlist_path(playlists_path)
+    result = {
+        "canonical_path": canonical_path,
+        "migrated": False,
+        "merged": False,
+        "removed_legacy": [],
+        "total_tracks": 0,
+    }
+    if not playlists_path:
+        return result
+
+    candidate_paths = get_removed_songs_playlist_paths(playlists_path)
+    existing_paths = [path for path in candidate_paths if os.path.exists(path)]
+    if not existing_paths:
+        return result
+
+    legacy_paths = [path for path in existing_paths if os.path.normcase(path) != os.path.normcase(canonical_path)]
+    if not legacy_paths:
+        result["total_tracks"] = len(_read_removed_songs_entries(canonical_path))
+        return result
+
+    if not os.path.exists(canonical_path) and len(existing_paths) == 1:
+        os.replace(existing_paths[0], canonical_path)
+        result["migrated"] = True
+        result["removed_legacy"].append(existing_paths[0])
+        result["total_tracks"] = len(_read_removed_songs_entries(canonical_path))
+        return result
+
+    merged_entries = []
+    seen_tracks = set()
+    for path in existing_paths:
+        for track_name, entry_path in _read_removed_songs_entries(path):
+            if track_name in seen_tracks:
+                continue
+            seen_tracks.add(track_name)
+            merged_entries.append((track_name, entry_path))
+
+    os.makedirs(playlists_path, exist_ok=True)
+    with open(canonical_path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write("#EXTM3U\n")
+        for track_name, entry_path in merged_entries:
+            f.write(f"#EXTINF:-1,{track_name}\n")
+            f.write(f"{entry_path}\n")
+
+    result["merged"] = True
+    result["total_tracks"] = len(merged_entries)
+    for path in legacy_paths:
+        try:
+            os.remove(path)
+            result["removed_legacy"].append(path)
+        except Exception:
+            pass
+    return result
 
 
 def detect_removed_songs(old_tracks, current_tracks):
@@ -91,28 +221,12 @@ def get_existing_removed_songs(playlists_path):
     Returns:
         Set of track names (format: "Artist - Song")
     """
-    removed_m3u_path = os.path.join(playlists_path, REMOVED_SONGS_FILENAME)
     existing = set()
-    
-    if not os.path.exists(removed_m3u_path):
-        return existing
-    
-    try:
-        with open(removed_m3u_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        
-        # Parse M3U format to extract track names from #EXTINF lines
-        for line in lines:
-            line = line.strip()
-            if line.startswith('#EXTINF:'):
-                # Format: #EXTINF:-1,Artist - Song
-                parts = line.split(',', 1)
-                if len(parts) > 1:
-                    track_name = parts[1].strip()
-                    existing.add(track_name)
-    except Exception:
-        pass
-    
+
+    for removed_m3u_path in get_removed_songs_playlist_paths(playlists_path):
+        for track_name, _ in _read_removed_songs_entries(removed_m3u_path):
+            existing.add(track_name)
+
     return existing
 
 
@@ -132,8 +246,9 @@ def append_to_removed_songs_m3u8(removed_tracks, config, lib_index):
     playlists_path = config.get('playlists_path')
     if not playlists_path:
         return 0
-    
-    removed_m3u_path = os.path.join(playlists_path, REMOVED_SONGS_FILENAME)
+
+    normalize_removed_songs_playlist(playlists_path)
+    removed_m3u_path = get_removed_songs_playlist_path(playlists_path)
     
     # Get existing tracks to avoid duplicates
     existing_tracks = get_existing_removed_songs(playlists_path)

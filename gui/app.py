@@ -10,6 +10,7 @@ from utils.i18n import I18N, _
 from utils.version_checker import should_check_for_updates, perform_update_check
 from utils.version import get_version
 from core.library import UpdateStats, update_library_logic, export_usb_logic, get_detailed_stats
+from core.library import is_internal_playlist_name
 
 # ===== Dark Theme Color System (Spotify-inspired) =====
 COLORS_DARK = {
@@ -753,7 +754,7 @@ class PlaylistApp:
         local_items = []
         for pl_file in pl_files:
             name = os.path.splitext(os.path.basename(pl_file))[0]
-            if name in processed_names or name.startswith('_'):
+            if name in processed_names or is_internal_playlist_name(name):
                 continue
             is_complete, missing, total = report.get(pl_file, (True, 0, 0))
             if is_complete:
@@ -768,7 +769,7 @@ class PlaylistApp:
             all_playlist_names.append(url_names.get(url, url))
         for pl_file in pl_files:
             name = os.path.splitext(os.path.basename(pl_file))[0]
-            if name not in all_playlist_names and not name.startswith('_'):
+            if name not in all_playlist_names and not is_internal_playlist_name(name):
                 all_playlist_names.append(name)
         all_playlist_names.sort()
 
@@ -2441,6 +2442,7 @@ class PlaylistApp:
         files = glob.glob(os.path.join(playlists_path, "*.m3u8")) + \
                 glob.glob(os.path.join(playlists_path, "*.m3u")) + \
                 glob.glob(os.path.join(playlists_path, "*.txt"))
+        files = [f for f in files if not is_internal_playlist_name(f)]
         
         # New: Check completeness first
         from core.library import get_playlist_completeness_report

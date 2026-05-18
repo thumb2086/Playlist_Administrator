@@ -127,6 +127,16 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
 
     playlists_path = config['playlists_path']
     ensure_dirs(config)
+    try:
+        from core.snapshot_manager import normalize_removed_songs_playlist
+        normalize_result = normalize_removed_songs_playlist(playlists_path)
+        canonical_name = os.path.basename(normalize_result["canonical_path"]) if normalize_result["canonical_path"] else "_Removed Songs.m3u8"
+        if normalize_result["migrated"]:
+            log_func(f" -> 已將 Removed Songs 內部歌單遷移為 '{canonical_name}'")
+        elif normalize_result["merged"]:
+            log_func(f" -> 已收斂 Removed Songs 內部歌單為 '{canonical_name}'，共 {normalize_result['total_tracks']} 首")
+    except Exception as removed_songs_e:
+        log_func(f" -> Removed Songs 內部歌單整理失敗: {removed_songs_e}")
 
     import datetime
     today = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -665,17 +675,16 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                             update_snapshot, save_snapshot_cache,
                             append_to_removed_songs_m3u8
                         )
-                        
+
                         cache_data = load_snapshot_cache()
                         old_tracks = cache_data.get("playlists", {}).get(pl_name, {}).get("tracks", [])
                         removed = detect_removed_songs(old_tracks, tracks)
-                        
+
                         if removed:
-                            # Append removed songs to _Removed Songs.m3u8
                             appended = append_to_removed_songs_m3u8(removed, config, lib_index)
                             if appended > 0:
-                                log_func(f" -> 發現並記錄 {appended} 首下架歌曲到 '_Removed Songs.m3u8'")
-                        
+                                log_func(f" -> 已記錄 {appended} 首歌曲到 Removed Songs 內部歌單 '_Removed Songs.m3u8'")
+
                         # Update snapshot with current tracks
                         update_snapshot(cache_data, pl_name, tracks)
                         save_snapshot_cache(cache_data)
