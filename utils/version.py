@@ -6,7 +6,7 @@ Version information for Playlist Administrator
 # v1.5.2 - Fix M3U8 path encoding: remove URL encoding for Windows/Echo Nightly compatibility
 # NOTE: On CI builds, this file is automatically updated from the git tag.
 #       Manual changes here are only for development use.
-__version__ = "1.6.0"
+__version__ = "1.6.2"
 
 # GitHub repository info for update checking
 GITHUB_OWNER = "thumb2086"
