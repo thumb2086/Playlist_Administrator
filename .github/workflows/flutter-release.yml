@@ -52,16 +52,20 @@ jobs:
         run: |
           flutter build windows --release
 
+      - name: Copy executable to root
+        run: |
+          Copy-Item build/windows/x64/runner/Release/playlist_administrator.exe PlaylistAdministrator.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: PlaylistAdministrator
-          path: build/windows/x64/runner/Release/PlaylistAdministrator.exe
+          path: PlaylistAdministrator.exe
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: "Playlist Administrator ${{ github.ref_name }}"
-          files: build/windows/x64/runner/Release/PlaylistAdministrator.exe
+          files: PlaylistAdministrator.exe
         env:
           GITHUB_TOKEN: ${{ github.token }}
