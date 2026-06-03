@@ -169,7 +169,7 @@ class LibraryPageState extends State<LibraryPage> {
       decoration: BoxDecoration(
         color: const Color(0xFF1e1e1e),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isFull ? const Color(0xFF1DB954).withOpacity(0.3) : const Color(0xFF2a2a2a)),
+        border: Border.all(color: isFull ? const Color(0xFF1DB954).withValues(alpha: 0.3) : const Color(0xFF2a2a2a)),
       ),
       child: Material(
         color: Colors.transparent,

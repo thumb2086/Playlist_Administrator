@@ -134,7 +134,7 @@ class PipelineOrchestrator {
     if (tasks.isEmpty) return;
 
     // Convert in batches
-    final batchSize = 50;
+    const batchSize = 50;
     int converted = 0;
     for (int i = 0; i < tasks.length; i += batchSize) {
       if (state.isCancelled) return;
