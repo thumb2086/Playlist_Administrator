@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:path_provider/path_provider.dart';
 import '../models/config_model.dart';
 
 class ConfigService {
@@ -10,9 +9,15 @@ class ConfigService {
   late AppConfig config;
   String? _configPath;
 
+  String get _appDataDir {
+    final localAppData = Platform.environment['LOCALAPPDATA'] ?? 
+        '${Platform.environment['USERPROFILE'] ?? 'C:\\Users\\Default'}\\AppData\\Local';
+    return '$localAppData\\Playlist Administrator\\data';
+  }
+
   Future<void> load() async {
-    final appDir = await getApplicationSupportDirectory();
-    final localFile = File('${appDir.path}\\config.json');
+    final localDir = Directory(_appDataDir);
+    final localFile = File('${localDir.path}\\config.json');
 
     if (await localFile.exists()) {
       final data = jsonDecode(await localFile.readAsString()) as Map<String, dynamic>;

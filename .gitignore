@@ -12,21 +12,11 @@ build/
 .vscode/
 *.iml
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-dist/
-*.spec
-
-# Virtualenv
-.venv/
-.venv.bak/
-
-# Windows
-*.exe
-*.msi
-*.zip
-*.log
+# OS
 Thumbs.db
+.DS_Store
+
+# Python (legacy - removed)
+*.pyc
+__pycache__/
+.venv/
