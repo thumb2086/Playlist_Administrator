@@ -28,8 +28,17 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with SingleTickerProviderStateMixin {
   int _selectedIndex = 0;
+  late AnimationController _animCtrl;
+
+  final _navItems = [
+    _NavItemData(Icons.library_music_outlined, Icons.library_music, '歌單庫'),
+    _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, 'Pipeline'),
+    _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, '統計'),
+    _NavItemData(Icons.download_outlined, Icons.download, 'Spotube'),
+    _NavItemData(Icons.settings_outlined, Icons.settings, '設定'),
+  ];
 
   final _pages = const [
     LibraryPage(),
@@ -39,13 +48,18 @@ class _MainShellState extends State<MainShell> {
     SettingsPage(),
   ];
 
-  final _titles = [
-    '歌單庫',
-    'Pipeline',
-    '統計',
-    'Spotube',
-    '設定',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
+    _animCtrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _animCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,29 +67,30 @@ class _MainShellState extends State<MainShell> {
       body: Row(
         children: [
           _Sidebar(
+            items: _navItems,
             selectedIndex: _selectedIndex,
-            onSelected: (i) => setState(() => _selectedIndex = i),
+            onSelected: (i) {
+              setState(() => _selectedIndex = i);
+              _animCtrl.forward(from: 0);
+            },
           ),
           Expanded(
-            child: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  decoration: const BoxDecoration(
-                    border: Border(bottom: BorderSide(color: Color(0xFF2a2a2a))),
-                  ),
-                  child: Row(
-                    children: [
-                      Text(_titles[_selectedIndex],
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                      const Spacer(),
-                      Text('Playlist Administrator v2',
-                          style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                    ],
-                  ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              transitionBuilder: (child, animation) {
+                return FadeTransition(opacity: animation, child: child);
+              },
+              child: KeyedSubtree(
+                key: ValueKey(_selectedIndex),
+                child: Column(
+                  children: [
+                    _Header(title: _navItems[_selectedIndex].label),
+                    Expanded(child: _pages[_selectedIndex]),
+                  ],
                 ),
-                Expanded(child: _pages[_selectedIndex]),
-              ],
+              ),
             ),
           ),
         ],
@@ -84,75 +99,153 @@ class _MainShellState extends State<MainShell> {
   }
 }
 
+class _NavItemData {
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  const _NavItemData(this.icon, this.activeIcon, this.label);
+}
+
 class _Sidebar extends StatelessWidget {
+  final List<_NavItemData> items;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
-  const _Sidebar({required this.selectedIndex, required this.onSelected});
+  const _Sidebar({required this.items, required this.selectedIndex, required this.onSelected});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 200,
+      width: 220,
       decoration: const BoxDecoration(
-        color: Color(0xFF1a1a1a),
-        border: Border(right: BorderSide(color: Color(0xFF2a2a2a))),
+        color: Color(0xFF111111),
+        border: Border(right: BorderSide(color: AppColors.border, width: 1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 24, 16, 24),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
             child: Row(
               children: [
-                Icon(Icons.queue_music, color: Color(0xFF1DB954), size: 28),
-                SizedBox(width: 8),
-                Text('Playlist Admin',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Container(
+                  width: 36, height: 36,
+                  decoration: const BoxDecoration(
+                    color: AppColors.accent,
+                    borderRadius: BorderRadius.all(Radius.circular(10)),
+                  ),
+                  child: const Icon(Icons.queue_music_rounded, color: Colors.black, size: 20),
+                ),
+                const SizedBox(width: 10),
+                const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Playlist', style: TextStyle(color: AppColors.text, fontSize: 15, fontWeight: FontWeight.bold)),
+                    Text('Administrator', style: TextStyle(color: AppColors.textMuted, fontSize: 10, letterSpacing: 1.2)),
+                  ],
+                ),
               ],
             ),
           ),
-          const Divider(color: Color(0xFF2a2a2a)),
-          _NavItem(icon: Icons.library_music, label: '歌單庫', index: 0, selectedIndex: selectedIndex, onSelected: onSelected),
-          _NavItem(icon: Icons.play_circle, label: 'Pipeline', index: 1, selectedIndex: selectedIndex, onSelected: onSelected),
-          _NavItem(icon: Icons.bar_chart, label: '統計', index: 2, selectedIndex: selectedIndex, onSelected: onSelected),
-          _NavItem(icon: Icons.download, label: 'Spotube', index: 3, selectedIndex: selectedIndex, onSelected: onSelected),
-          _NavItem(icon: Icons.settings, label: '設定', index: 4, selectedIndex: selectedIndex, onSelected: onSelected),
+          const Divider(indent: 20, endIndent: 20),
+          const SizedBox(height: 8),
+          ...List.generate(items.length, (i) {
+            final item = items[i];
+            final selected = i == selectedIndex;
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+              decoration: BoxDecoration(
+                color: selected ? AppColors.accentDim : null,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => onSelected(i),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Row(
+                      children: [
+                        Icon(
+                          selected ? item.activeIcon : item.icon,
+                          color: selected ? AppColors.accent : AppColors.textMuted,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          item.label,
+                          style: TextStyle(
+                            color: selected ? AppColors.text : AppColors.textSecondary,
+                            fontSize: 13,
+                            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (selected)
+                          Container(
+                            width: 3, height: 16,
+                            decoration: const BoxDecoration(
+                              color: AppColors.accent,
+                              borderRadius: BorderRadius.all(Radius.circular(2)),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+          const Spacer(),
+          Container(
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.accentDim,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, color: AppColors.accent, size: 14),
+                const SizedBox(width: 8),
+                Text('v2.0.0', style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w500)),
+                const Spacer(),
+                Text('Flutter', style: TextStyle(color: AppColors.accent.withValues(alpha: 0.7), fontSize: 10)),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-class _NavItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final int index;
-  final int selectedIndex;
-  final ValueChanged<int> onSelected;
-
-  const _NavItem({
-    required this.icon,
-    required this.label,
-    required this.index,
-    required this.selectedIndex,
-    required this.onSelected,
-  });
+class _Header extends StatelessWidget {
+  final String title;
+  const _Header({required this.title});
 
   @override
   Widget build(BuildContext context) {
-    final selected = index == selectedIndex;
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: selected ? const Color(0xFF2a2a2a) : null,
-        borderRadius: BorderRadius.circular(8),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+      decoration: const BoxDecoration(
+        color: AppColors.bg,
+        border: Border(bottom: BorderSide(color: AppColors.border, width: 1)),
       ),
-      child: ListTile(
-        dense: true,
-        leading: Icon(icon, color: selected ? const Color(0xFF1DB954) : Colors.grey, size: 20),
-        title: Text(label, style: TextStyle(color: selected ? Colors.white : Colors.grey[400], fontSize: 14)),
-        onTap: () => onSelected(index),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: Row(
+        children: [
+          Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.accentDim,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Text('PLAYLIST ADMIN', style: TextStyle(color: AppColors.accent, fontSize: 9, letterSpacing: 1.5)),
+          ),
+        ],
       ),
     );
   }

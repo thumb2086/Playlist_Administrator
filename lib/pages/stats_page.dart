@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/config_service.dart';
+import '../widgets/dark_theme.dart';
 
 class StatsPage extends StatefulWidget {
   const StatsPage({super.key});
@@ -11,69 +11,51 @@ class StatsPage extends StatefulWidget {
 }
 
 class _StatsPageState extends State<StatsPage> {
-  int _mp3 = 0, _m4a = 0, _flac = 0;
-  int _playlists = 0, _entries = 0;
-  int _dualFormat = 0;
-  double _totalSizeMb = 0;
+  int _mp3 = 0, _m4a = 0, _flac = 0, _playlists = 0, _entries = 0, _dual = 0;
+  double _sizeGb = 0;
   bool _loading = false;
 
   @override
-  void initState() {
-    super.initState();
-    _load();
-  }
+  void initState() { super.initState(); _load(); }
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final lib = ConfigService.instance.config.libraryPath;
-    final pl = ConfigService.instance.config.playlistsPath;
-
     try {
+      final lib = ConfigService.instance.config.libraryPath;
+      final pl = ConfigService.instance.config.playlistsPath;
       int mp3 = 0, m4a = 0, flac = 0;
-      double sizeMb = 0;
-      final nameToExt = <String, Set<String>>{};
+      double size = 0;
+      final nameExts = <String, Set<String>>{};
 
       if (await Directory(lib).exists()) {
         await for (final e in Directory(lib).list(recursive: true, followLinks: false)) {
           if (e is File) {
             final low = e.path.toLowerCase();
-            final size = await e.length();
-            sizeMb += size / (1024 * 1024);
+            size += await e.length() / (1024 * 1024 * 1024);
             final stem = e.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-            nameToExt.putIfAbsent(stem, () => {});
-
-            if (low.endsWith('.mp3')) { mp3++; nameToExt[stem]!.add('mp3'); }
-            else if (low.endsWith('.m4a')) { m4a++; nameToExt[stem]!.add('m4a'); }
-            else if (low.endsWith('.flac')) { flac++; nameToExt[stem]!.add('flac'); }
+            nameExts.putIfAbsent(stem, () => {});
+            if (low.endsWith('.mp3')) { mp3++; nameExts[stem]!.add('mp3'); }
+            else if (low.endsWith('.m4a')) { m4a++; nameExts[stem]!.add('m4a'); }
+            else if (low.endsWith('.flac')) { flac++; nameExts[stem]!.add('flac'); }
           }
         }
       }
 
       int dual = 0;
-      for (final exts in nameToExt.values) {
-        if (exts.length > 1) dual++;
-      }
+      for (final exts in nameExts.values) { if (exts.length > 1) dual++; }
 
       int plCount = 0, entries = 0;
       if (await Directory(pl).exists()) {
         await for (final e in Directory(pl).list()) {
           if (e is File && e.path.toLowerCase().endsWith('.m3u8')) {
             plCount++;
-            entries += await File(e.path).readAsLines()
+            entries += await e.readAsLines()
                 .then((l) => l.where((line) => !line.startsWith('#') && line.trim().isNotEmpty).length);
           }
         }
       }
-
-      setState(() {
-        _mp3 = mp3; _m4a = m4a; _flac = flac;
-        _playlists = plCount; _entries = entries;
-        _dualFormat = dual; _totalSizeMb = sizeMb;
-        _loading = false;
-      });
-    } catch (e) {
-      setState(() => _loading = false);
-    }
+      setState(() { _mp3 = mp3; _m4a = m4a; _flac = flac; _playlists = plCount; _entries = entries; _dual = dual; _sizeGb = size; _loading = false; });
+    } catch (_) { setState(() => _loading = false); }
   }
 
   @override
@@ -82,93 +64,109 @@ class _StatsPageState extends State<StatsPage> {
     final total = _mp3 + _m4a + _flac;
 
     return Padding(
-      padding: const EdgeInsets.all(16),
-      child: ListView(
-        children: [
-          // Summary cards
-          Row(
-            children: [
-              Expanded(child: _Card('總檔案', '$total', Icons.audio_file, Colors.white)),
-              const SizedBox(width: 8),
-              Expanded(child: _Card('MP3', '$_mp3', Icons.music_note, Colors.blue)),
-              const SizedBox(width: 8),
-              Expanded(child: _Card('M4A', '$_m4a', Icons.music_video, Colors.orange)),
-              const SizedBox(width: 8),
-              Expanded(child: _Card('FLAC', '$_flac', Icons.library_music, Colors.purple)),
-            ],
-          ),
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+      child: ListView(children: [
+        // Metric cards
+        Row(children: [
+          Expanded(child: _MetricCard('總檔案', '$total', Icons.audio_file_rounded, Colors.white, _loading)),
+          const SizedBox(width: 10),
+          Expanded(child: _MetricCard('MP3', '$_mp3', Icons.music_note_rounded, const Color(0xFF4FC3F7), _loading)),
+          const SizedBox(width: 10),
+          Expanded(child: _MetricCard('M4A', '$_m4a', Icons.music_video_rounded, const Color(0xFFFFB74D), _loading)),
+          const SizedBox(width: 10),
+          Expanded(child: _MetricCard('FLAC', '$_flac', Icons.library_music_rounded, const Color(0xFFCE93D8), _loading)),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: _MetricCard('容量', '${_sizeGb.toStringAsFixed(1)} GB', Icons.storage_rounded, AppColors.accent, _loading)),
+          const SizedBox(width: 10),
+          Expanded(child: _MetricCard('雙格式', '$_dual', Icons.compare_arrows_rounded, const Color(0xFF80CBC4), _loading)),
+          const SizedBox(width: 10),
+          Expanded(child: _MetricCard('播放清單', '$_playlists', Icons.playlist_play_rounded, const Color(0xFF81D4FA), _loading)),
+          const SizedBox(width: 10),
+          Expanded(child: _MetricCard('歌曲條目', '$_entries', Icons.list_alt_rounded, const Color(0xFFFFF176), _loading)),
+        ]),
+        const SizedBox(height: 24),
+        if (total > 0) ...[
+          const Text('格式分布', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(child: _Card('容量', '${_totalSizeMb.toStringAsFixed(1)} GB', Icons.storage, const Color(0xFF1DB954))),
-              const SizedBox(width: 8),
-              Expanded(child: _Card('雙格式', '$_dualFormat', Icons.compare_arrows, Colors.teal)),
-              const SizedBox(width: 8),
-              Expanded(child: _Card('清單', '$_playlists', Icons.playlist_play, Colors.cyan)),
-              const SizedBox(width: 8),
-              Expanded(child: _Card('歌曲條目', '$_entries', Icons.list, Colors.amber)),
-            ],
-          ),
-          const SizedBox(height: 24),
-          // Pie chart
-          if (total > 0) ...[
-            const Text('格式分布', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 200,
-              child: PieChart(
-                PieChartData(
+          Container(
+            height: 220,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.card, borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(children: [
+              Expanded(
+                child: PieChart(PieChartData(
                   sections: [
-                    if (_mp3 > 0) PieChartSectionData(value: _mp3.toDouble(), color: Colors.blue, title: 'MP3', radius: 60),
-                    if (_m4a > 0) PieChartSectionData(value: _m4a.toDouble(), color: Colors.orange, title: 'M4A', radius: 60),
-                    if (_flac > 0) PieChartSectionData(value: _flac.toDouble(), color: Colors.purple, title: 'FLAC', radius: 60),
+                    if (_mp3 > 0) PieChartSectionData(value: _mp3.toDouble(), color: const Color(0xFF4FC3F7), title: '', radius: 55),
+                    if (_m4a > 0) PieChartSectionData(value: _m4a.toDouble(), color: const Color(0xFFFFB74D), title: '', radius: 55),
+                    if (_flac > 0) PieChartSectionData(value: _flac.toDouble(), color: const Color(0xFFCE93D8), title: '', radius: 55),
                   ],
-                  centerSpaceRadius: 30,
-                  sectionsSpace: 2,
-                ),
+                  centerSpaceRadius: 35,
+                  sectionsSpace: 3,
+                )),
               ),
-            ),
-          ],
-          const SizedBox(height: 16),
-          Center(
-            child: ElevatedButton.icon(
-              onPressed: _load,
-              icon: const Icon(Icons.refresh),
-              label: const Text('重新整理'),
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1e1e1e)),
-            ),
+              const SizedBox(width: 20),
+              Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _Legend('MP3', '$_mp3', const Color(0xFF4FC3F7)),
+                const SizedBox(height: 8),
+                _Legend('M4A', '$_m4a', const Color(0xFFFFB74D)),
+                const SizedBox(height: 8),
+                _Legend('FLAC', '$_flac', const Color(0xFFCE93D8)),
+              ]),
+            ]),
           ),
         ],
-      ),
+        const SizedBox(height: 16),
+        Center(
+          child: TextButton.icon(
+            onPressed: _load,
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('重新整理資料'),
+          ),
+        ),
+        const SizedBox(height: 24),
+      ]),
     );
   }
 }
 
-class _Card extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-  const _Card(this.label, this.value, this.icon, this.color);
+class _MetricCard extends StatelessWidget {
+  final String label; final String value; final IconData icon; final Color color; final bool loading;
+  const _MetricCard(this.label, this.value, this.icon, this.color, this.loading);
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF1e1e1e),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF2a2a2a)),
+        color: AppColors.card, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 8),
-          Text(value, style: TextStyle(color: color, fontSize: 22, fontWeight: FontWeight.bold)),
-          Text(label, style: TextStyle(color: Colors.grey[500], fontSize: 11)),
-        ],
-      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(height: 10),
+        Text(value, style: TextStyle(color: color, fontSize: 22, fontWeight: FontWeight.bold)),
+        Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+      ]),
     );
+  }
+}
+
+class _Legend extends StatelessWidget {
+  final String label; final String count; final Color color;
+  const _Legend(this.label, this.count, this.color);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(width: 10, height: 10, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
+      const SizedBox(width: 6),
+      Text('$label ', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+      Text(count, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+    ]);
   }
 }
