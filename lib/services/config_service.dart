@@ -20,25 +20,52 @@ class ConfigService {
     final localFile = File('${localDir.path}\\config.json');
 
     if (await localFile.exists()) {
-      final data = jsonDecode(await localFile.readAsString()) as Map<String, dynamic>;
-      final basePath = data['base_path'] as String?;
-      if (basePath != null && basePath.isNotEmpty) {
-        final mainFile = File('$basePath\\config.json');
-        if (await mainFile.exists()) {
-          _configPath = mainFile.path;
-          config = AppConfig.fromJson(jsonDecode(await mainFile.readAsString()) as Map<String, dynamic>);
-          config.basePath = basePath;
-          return;
+      try {
+        final data = jsonDecode(await localFile.readAsString()) as Map<String, dynamic>;
+        final basePath = data['base_path'] as String?;
+        if (basePath != null && basePath.isNotEmpty) {
+          final mainFile = File('$basePath\\config.json');
+          if (await mainFile.exists()) {
+            _configPath = mainFile.path;
+            config = AppConfig.fromJson(jsonDecode(await mainFile.readAsString()) as Map<String, dynamic>);
+            config.basePath = basePath;
+            return;
+          }
         }
-      }
+      } catch (_) {}
     }
 
     config = AppConfig();
+    _configPath = null;
   }
 
   Future<void> save() async {
-    if (_configPath == null) return;
-    final file = File(_configPath!);
-    await file.writeAsString(jsonEncode(config.toJson()));
+    final cfg = config;
+    final basePath = cfg.basePath;
+
+    // Determine where to save
+    String savePath;
+    if (_configPath != null) {
+      savePath = _configPath!;
+    } else if (basePath.isNotEmpty) {
+      // First save: create the main config at basePath
+      await Directory(basePath).create(recursive: true);
+      savePath = '$basePath\\config.json';
+      _configPath = savePath;
+
+      // Also create the pointer file in LOCALAPPDATA
+      final pointerDir = Directory(_appDataDir);
+      await pointerDir.create(recursive: true);
+      final pointerFile = File('${pointerDir.path}\\config.json');
+      await pointerFile.writeAsString(jsonEncode({
+        'base_path': basePath,
+        'language': cfg.language,
+      }));
+    } else {
+      // No basePath set yet - can't save
+      return;
+    }
+
+    await File(savePath).writeAsString(jsonEncode(cfg.toJson()));
   }
 }
