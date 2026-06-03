@@ -5,6 +5,11 @@ import os
 import sys
 import threading
 
+try:
+    import win32gui
+except ImportError:
+    win32gui = None
+
 
 def _bootstrap_local_site_packages():
     # Let the CLI work with the repository-local virtualenv even when it is
@@ -64,7 +69,11 @@ def _make_stats():
 
 
 def _print_log(message):
-    print(message, flush=True)
+    try:
+        print(message, flush=True)
+    except UnicodeEncodeError:
+        safe = message.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
+        print(safe, flush=True)
 
 
 def _progress(current, total=100, eta=None):
@@ -300,6 +309,151 @@ def build_parser():
     fetch_parser.add_argument("--show-tracks", action="store_true", help="Print the track list.")
     fetch_parser.add_argument("--output", help="Write track list to a debug file.")
     fetch_parser.set_defaults(func=cmd_fetch_playlist)
+
+    # ---- Pipeline (new orchestrated flow) ----
+
+    def cmd_pipeline(args):
+        from core.pipeline import PipelineOrchestrator, PipelineState
+
+        config = _load_config(args.config)
+        if args.force:
+            _force_refresh(config)
+
+        state = PipelineState(
+            config=config,
+            log_func=_print_log,
+            progress_cb=lambda step, cur, total, msg: (
+                _progress(cur, total) if args.progress else None
+            ),
+        )
+        orch = PipelineOrchestrator(config)
+        if args.list_steps:
+            for idx, name, weight in orch.list_steps():
+                print(f"  {idx}. {name} (weight {weight})")
+            return 0
+        if args.step is not None:
+            return 0 if orch.run_step(int(args.step), state) else 1
+        if args.from_step is not None:
+            return 0 if orch.run(state, from_step=int(args.from_step)) else 1
+        return 0 if orch.run(state) else 1
+
+    pl_parser = subparsers.add_parser("pipeline", help="Run the full pipeline (convert, scrape, prune, unsorted, metadata).")
+    pl_parser.add_argument("--force", action="store_true", help="Ignore last_updated timestamps.")
+    pl_parser.add_argument("--progress", action="store_true", help="Print progress callbacks.")
+    pl_parser.add_argument("--step", help="Run a single step by index (e.g. 0 = convert).")
+    pl_parser.add_argument("--from-step", help="Start from this step index.")
+    pl_parser.add_argument("--list-steps", action="store_true", help="List all pipeline steps and exit.")
+    pl_parser.set_defaults(func=cmd_pipeline)
+
+    # ---- Spotube automation ----
+
+    def cmd_spotube_download(args):
+        from core.spotube_controller import SpotubeController
+        config = _load_config(args.config)
+        ctrl = SpotubeController(config)
+        ctrl.download_playlist(args.name, force=args.force)
+        return 0
+
+    def cmd_spotube_download_all(args):
+        from core.spotube_controller import SpotubeController
+        config = _load_config(args.config)
+        url_names = config.get("url_names", {})
+        if not url_names:
+            print("ERROR: config.json has no url_names entries.")
+            return 1
+        ctrl = SpotubeController(config)
+        ctrl.download_all_playlists(url_names, force=args.force)
+        return 0
+
+    def cmd_spotube_status(args):
+        from core.spotube_controller import SpotubeController
+        from core.spotube_file_handler import move_spotube_downloads
+        config = _load_config(args.config)
+
+        ctrl = SpotubeController(config)
+        running = ctrl.is_running()
+        print(f"Spotube 執行中: {'是' if running else '否'}")
+        if running and win32gui:
+            hwnd = ctrl.hwnd
+            rect = win32gui.GetWindowRect(hwnd)
+            ox, oy = ctrl._client_origin()
+            print(f"  視窗位置: ({rect[0]}, {rect[1]}) 大小: ({rect[2]-rect[0]}×{rect[3]-rect[1]})")
+            print(f"  客戶區原點: ({ox}, {oy})")
+
+        # Check download folder.
+        dl_path = config.get(
+            "spotube_download_path",
+            os.path.expandvars(r"%USERPROFILE%\Downloads\Spotube"),
+        )
+        if os.path.isdir(dl_path):
+            files = [f for f in os.listdir(dl_path) if f.lower().endswith(".m4a")]
+            print(f"  下載資料夾 ({dl_path}): {len(files)} 個 .m4a 檔案")
+        else:
+            print(f"  下載資料夾不存在: {dl_path}")
+
+        # Count m4a files in library.
+        m4a_path = os.path.join(config.get("library_path", ""), "m4a")
+        if os.path.isdir(m4a_path):
+            m4a_count = len(glob.glob(os.path.join(m4a_path, "*.m4a")))
+            print(f"  Library m4a: {m4a_count} 個檔案")
+        else:
+            print(f"  Library m4a 資料夾不存在: {m4a_path}")
+
+        # List download state
+        downloaded = ctrl.list_downloaded()
+        print(f"  已下載記錄: {len(downloaded)} 個")
+        for name in downloaded[:10]:
+            safe_name = name.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
+            print(f"    [OK] {safe_name}")
+        if len(downloaded) > 10:
+            print(f"    … 還有 {len(downloaded)-10} 個")
+
+        # List config playlists.
+        url_names = config.get("url_names", {})
+        print(f"  已設定歌單: {len(url_names)} 個")
+        for i, (url, name) in enumerate(url_names.items(), 1):
+            safe_name = name.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding)
+            prefix = "[V]" if name in downloaded else "   "
+            print(f"    {prefix} {i}. {safe_name}")
+
+        return 0
+
+    def cmd_spotube_move(args):
+        from core.spotube_file_handler import move_spotube_downloads
+        config = _load_config(args.config)
+        moved = move_spotube_downloads(config, _print_log, dry_run=args.dry_run)
+        return 0
+
+    sp_dl = subparsers.add_parser("spotube-download", help="下載指定歌單 (透過 Spotube GUI 自動化)")
+    sp_dl.add_argument("name", help="歌單名稱（與 url_names 中的名稱匹配）")
+    sp_dl.add_argument("--force", action="store_true", help="忽略已下載記錄，強制重新下載")
+    sp_dl.set_defaults(func=cmd_spotube_download)
+
+    sp_all = subparsers.add_parser("spotube-download-all", help="下載所有已設定的歌單")
+    sp_all.add_argument("--force", action="store_true", help="忽略已下載記錄，強制重新下載")
+    sp_all.set_defaults(func=cmd_spotube_download_all)
+
+    sp_st = subparsers.add_parser("spotube-status", help="檢視 Spotube 和下載狀態")
+    sp_st.set_defaults(func=cmd_spotube_status)
+
+    sp_mv = subparsers.add_parser("spotube-move", help="將 Downloads/Spotube 中的檔案搬移到 Library m4a 資料夾")
+    sp_mv.add_argument("--dry-run", action="store_true", help="僅模擬，不實際搬移")
+    sp_mv.set_defaults(func=cmd_spotube_move)
+
+    def cmd_spotube_reset(args):
+        from core.spotube_controller import SpotubeController
+        config = _load_config(args.config)
+        ctrl = SpotubeController(config)
+        ctrl.reset_state(args.name)
+        if args.name:
+            print(f"已清除 '{args.name}' 的下載記錄")
+        else:
+            print("已清除所有下載記錄")
+        return 0
+
+    sp_rs = subparsers.add_parser("spotube-reset", help="清除已下載記錄")
+    sp_rs.add_argument("--name", help="只清除指定歌單的記錄（省略則全部清除）")
+    sp_rs.set_defaults(func=cmd_spotube_reset)
 
     return parser
 

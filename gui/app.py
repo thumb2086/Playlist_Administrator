@@ -632,6 +632,36 @@ class PlaylistApp:
                                     height=1)
         self.export_btn.grid(row=0, column=3, sticky="ew", padx=(6, 0))
 
+        # ---- Row 2: Spotube automation buttons ----
+        spotube_row = tk.Frame(self.action_frame, bg=COLORS['surface'])
+        spotube_row.pack(fill="x", padx=6, pady=(0, 6))
+        spotube_row.columnconfigure(0, weight=1, uniform="spotube")
+        spotube_row.columnconfigure(1, weight=1, uniform="spotube")
+        spotube_row.columnconfigure(2, weight=1, uniform="spotube")
+        spotube_row.columnconfigure(3, weight=1, uniform="spotube")
+
+        self.spotube_dl_btn = tk.Button(
+            spotube_row, text="Spotube 下載全部",
+            command=self.run_spotube_download_all,
+            bg=COLORS['accent'], fg=COLORS['bg'],
+            activebackground=COLORS['accent_hover'],
+            activeforeground=COLORS['bg'],
+            font=get_font(10, bold=True),
+            relief="flat", cursor="hand2",
+            padx=10, pady=5)
+        self.spotube_dl_btn.grid(row=0, column=0, columnspan=2, sticky="ew", padx=(0, 6))
+
+        self.spotube_move_btn = tk.Button(
+            spotube_row, text="搬移 M4A",
+            command=self.run_spotube_move,
+            bg=COLORS['elevated'], fg=COLORS['text'],
+            activebackground=COLORS['surface'],
+            activeforeground=COLORS['text'],
+            font=get_font(10, bold=True),
+            relief="flat", cursor="hand2",
+            padx=10, pady=5)
+        self.spotube_move_btn.grid(row=0, column=2, columnspan=2, sticky="ew", padx=(6, 0))
+
     def _update_basic_list(self):
         """只更新基础列表显示，不扫描音乐库（快速启动模式）"""
         url_names = self.config.get('url_names', {})
@@ -2246,6 +2276,46 @@ class PlaylistApp:
         self.clear_song_status()
         threading.Thread(target=self._update_thread, daemon=True).start()
 
+    def run_spotube_download_all(self):
+        self.spotube_dl_btn.config(state="disabled", text="下載中…", bg="#cccccc")
+        self.log("--- 開始 Spotube 下載所有歌單 ---")
+        threading.Thread(target=self._spotube_download_all_thread, daemon=True).start()
+
+    def _spotube_download_all_thread(self):
+        try:
+            from core.spotube_controller import SpotubeController
+            ctrl = SpotubeController(self.config)
+            url_names = self.config.get("url_names", {})
+            if url_names:
+                ctrl.download_all_playlists(url_names)
+                self.log("-> Spotube 下載完成")
+            else:
+                self.log("-> 錯誤: 沒有設定歌單")
+        except Exception as e:
+            self.log(f"-> Spotube 下載失敗: {e}")
+        finally:
+            self.root.after(0, lambda: self.spotube_dl_btn.config(
+                state="normal", text="Spotube 下載全部", bg=COLORS['accent']))
+
+    def run_spotube_move(self):
+        self.spotube_move_btn.config(state="disabled", text="搬移中…", bg="#cccccc")
+        self.log("--- 搬移 Spotube 下載檔案 ---")
+        threading.Thread(target=self._spotube_move_thread, daemon=True).start()
+
+    def _spotube_move_thread(self):
+        try:
+            from core.spotube_file_handler import move_spotube_downloads
+            # Wrap log so all messages pass the GUI filter (prepend "-> ")
+            def gui_log(msg):
+                self.log(f"-> {msg}")
+            moved = move_spotube_downloads(self.config, gui_log)
+            self.log("-> --- 搬移完成")
+        except Exception as e:
+            self.log(f"-> 搬移失敗: {e}")
+        finally:
+            self.root.after(0, lambda: self.spotube_move_btn.config(
+                state="normal", text="搬移 M4A", bg=COLORS['elevated']))
+
     def run_cancel(self):
         if messagebox.askyesno(_('cancel_confirm_title'), _('cancel_confirm_msg')):
             self.stop_event.set()
@@ -2255,63 +2325,49 @@ class PlaylistApp:
 
     def _update_thread(self):
         self.log(_('update_start'))
-        stats = UpdateStats() # Initialize stats object
-        stats.pause_event = self.pause_event 
-        stats.stop_event = self.stop_event
-        stats.app = self  # Add app reference for UI updates
-        
-        def post_dl_throttle_callback(cache):
-            self.songs_since_last_refresh += 1
-            now = time.time()
-            # Refresh every 5 songs OR every 5 seconds, whichever comes first
-            if self.songs_since_last_refresh >= 5 or (now - self.last_full_refresh > 5):
-                self.root.after(0, lambda: self.refresh_url_list(cache))
-                self.root.after(0, lambda: self.update_stats_ui(cache))
-                self.songs_since_last_refresh = 0
-                self.last_full_refresh = now
+
+        def gui_log(msg):
+            self.log(msg, immediate=True)
+
+        def gui_progress(step_name, current, total, msg):
+            self.root.after(0, lambda: self.update_progress(current, total))
+            self.root.after(0, lambda: self.speed_label.config(text=f"{step_name}: {msg}"))
 
         try:
-            # Create a wrapper function for immediate progress logging
-            def log_with_immediate(message):
-                self.log(message, immediate=True)
-            
-            update_library_logic(
-                self.config, stats, log_with_immediate, self.update_progress,
-                post_scrape_callback=lambda: self.root.after(0, self.refresh_url_list),
-                post_download_callback=post_dl_throttle_callback,
-                speed_display_callback=self.update_speed_display
+            from core.pipeline import PipelineOrchestrator, PipelineState
+
+            state = PipelineState(
+                config=self.config,
+                log_func=gui_log,
+                progress_cb=gui_progress,
+                pause_event=self.pause_event,
+                stop_event=self.stop_event,
+                status_cb=self.update_song_status,
             )
-            
-            # Reset counters for next run
-            self.songs_since_last_refresh = 0
-            self.last_full_refresh = 0
-            self.root.after(0, self.show_stats_window, stats)
+            orch = PipelineOrchestrator(self.config)
+            orch.run(state)
+
             if self.stop_event.is_set():
                 self.log(_('task_cancelled'))
         except Exception as e:
             import traceback
             tb_str = traceback.format_exc()
             self.log(_('error_critical', f"{e}\n{tb_str}"))
-            
+
         self.log(_('update_end'))
         self.root.after(0, lambda: self.speed_label.config(text=_('speed_ready')))
         self.root.after(0, lambda: self.progress_label.config(text=""))
         self.root.after(0, lambda: self.task_progress_var.set(0))
         
-        # Final refresh with updated audio cache
-        def final_refresh():
-            # Get fresh audio files list after download completion
-            import glob
-            import os
-            library_path = self.config['library_path']
-            search_pattern = os.path.join(library_path, "**", "*")
-            all_files = glob.glob(search_pattern, recursive=True)
-            audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
-            
-            self.refresh_url_list(audio_files_cache)
-            self.update_stats_ui(audio_files_cache)
+        # Final refresh: glob in background, then update UI on main thread
+        import glob
+        library_path = self.config['library_path']
+        search_pattern = os.path.join(library_path, "**", "*")
+        all_files = glob.glob(search_pattern, recursive=True)
+        audio_files_cache = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
         
-        self.root.after(0, final_refresh)
+        self.root.after(0, lambda: self.refresh_url_list(audio_files_cache))
+        self.root.after(0, lambda: self.update_stats_ui(audio_files_cache))
         
         # --- Cleanup phase (ONLY clean up confirmed temporary backups) ---
         try:

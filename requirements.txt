@@ -9,3 +9,7 @@ mutagen
 pygame
 syncedlyrics
 urllib3
+pyautogui
+Pillow
+pygetwindow
+pywin32

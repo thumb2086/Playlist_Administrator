@@ -104,6 +104,10 @@ def load_config():
         'spotube_convert_matched_only': False,  # Only convert M4A files that match playlist entries
         'spotube_strict_matching': True,  # Strict filename matching for M4A->MP3 conversion (True=exact only, False=allow fuzzy)
         'debug_mode': False,  # Enable debug output for troubleshooting
+        'spotube_exe_path': '',  # Path to Spotube.exe (auto-detect if empty)
+        'spotube_download_path': '',  # Where Spotube saves downloads (default: ~/Downloads/Spotube)
+        'spotube_coords': {},  # UI coordinate overrides for Spotube automation
+        'search_names': {},  # Override search terms for specific playlists (e.g. {"日本流行樂合輯": "J-Pop Mix"})
     }
     for key, value in defaults.items():
         config.setdefault(key, value)

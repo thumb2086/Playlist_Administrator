@@ -11,7 +11,14 @@ a = Analysis(
     pathex=[],
     binaries=binaries,  # 這裡帶入 zhconv 的 binaries
     datas=datas,        # 這裡帶入 zhconv 的 datas (包含 zhcdict.json)
-    hiddenimports=hiddenimports, # 這裡帶入 zhconv 的 hiddenimports
+    hiddenimports=hiddenimports + [
+        'core.pipeline',
+        'core.steps.step_convert',
+        'core.steps.step_scrape',
+        'core.steps.step_prune',
+        'core.steps.step_unsorted',
+        'core.steps.step_metadata',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

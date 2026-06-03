@@ -1,36 +1,32 @@
-# Virtual environment
-.venv/
-venv/
-ENV/
+# Flutter
+build/
+.dart_tool/
+.packages
+.pub/
+**/doc/api/
+.flutter-plugins
+.flutter-plugins-dependencies
 
-# Python cache
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Local user data
-config.json
-
-# App data directories
-Library/
-Playlists/
-USB_Export/
-Test_Library/
-
-# Logs and temporary files
-*.log
-*.bak
-
-# IDE and System files
-.vscode/
+# IDE
 .idea/
-.DS_Store
-# Release and Technical guides (Local only)
-Docs_ZH/發布指南.md
-RELEASING.md
+.vscode/
+*.iml
 
-# Data folder (contains all app-generated data)
-data/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+*.spec
 
-# Local standalone binaries
-bin/
+# Virtualenv
+.venv/
+.venv.bak/
+
+# Windows
+*.exe
+*.msi
+*.zip
+*.log
+Thumbs.db

@@ -160,6 +160,31 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
     # Track overall timing for all playlists
     timing_start("全部Spotify抓取")
 
+    # --- Build indices ONCE before the playlist loop (avoid 50x rebuild) ---
+    from core.library import LibraryIndexCache, build_library_index, build_metadata_index, find_song_in_library, find_song_exact_format, find_song_simple_match
+    _lib_index = None
+    _mp3_index = None
+    _metadata_index = None
+    _all_metadata_index = None
+    _indices_built = False
+
+    def _ensure_indices(library_path, log_func):
+        nonlocal _lib_index, _mp3_index, _metadata_index, _all_metadata_index, _indices_built
+        if _indices_built:
+            return _lib_index, _mp3_index, _metadata_index, _all_metadata_index
+        log_func("建立音樂庫索引（一次性）…")
+        _lib_index = LibraryIndexCache.get_index(library_path, log_func)
+        audio_cache = []
+        for paths in _lib_index.values():
+            audio_cache.extend(paths)
+        mp3_files = [f for f in audio_cache if f.lower().endswith('.mp3')]
+        log_func(f"建立元資料索引 ({len(mp3_files)} 個 MP3)…")
+        _mp3_index = build_library_index(mp3_files)
+        _metadata_index = build_metadata_index(mp3_files)
+        _all_metadata_index = build_metadata_index(audio_cache)
+        _indices_built = True
+        return _lib_index, _mp3_index, _metadata_index, _all_metadata_index
+
     for sp_url in target_urls:
         if stats and stats.stop_event and stats.stop_event.is_set():
             return
@@ -572,24 +597,8 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                     library_path = config.get('library_path', 'Music')
                     log_func(f" -> 掃描音樂庫: {library_path}")
                     
-                    # Build index to resolve actual filenames (handles "E" prefix and diff extensions)
-                    log_func(_('scanning_lib'))
-                    from core.library import LibraryIndexCache, build_library_index, build_metadata_index, find_song_in_library, find_song_exact_format, find_song_simple_match
-                    # Use cached library index for faster sync
-                    lib_index = LibraryIndexCache.get_index(library_path, log_func)
-                    # Get audio files from index values for metadata indexing
-                    audio_cache = []
-                    for paths in lib_index.values():
-                        audio_cache.extend(paths)
-                    mp3_files = [f for f in audio_cache if f.lower().endswith('.mp3')]
-                    mp3_index = build_library_index(mp3_files)
-                    metadata_index = build_metadata_index(mp3_files)
-                    all_metadata_index = build_metadata_index(audio_cache)
-                    # Debug: show first few audio files found
-                    if audio_cache:
-                        log_func(f"    範例檔案: {os.path.basename(audio_cache[0])}")
-                        if len(audio_cache) > 1:
-                            log_func(f"    範例檔案: {os.path.basename(audio_cache[1])}")
+                    # Build index (once — cached after first call)
+                    lib_index, mp3_index, metadata_index, all_metadata_index = _ensure_indices(library_path, log_func)
 
                 # Only write M3U files for playlists/albums/artists
                 if "track/" not in sp_url:

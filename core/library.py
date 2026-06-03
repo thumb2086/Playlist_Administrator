@@ -480,47 +480,24 @@ def _matches_playlist_index(src, playlist_index):
 def _find_existing_mp3_for_source(src, mp3_index, metadata_index=None):
     """
     Find existing MP3 for an M4A source using metadata matching.
-    
-    This function uses metadata (title/artist) to match songs, ensuring that
-    files with different names but same content are recognized as duplicates.
+    Uses pre-built metadata_index for O(1) lookup when available.
     """
-    # Get source metadata identity
-    src_id = _audio_metadata_identity(src)
-    if not src_id:
-        # Fallback: if no metadata, use filename matching
-        original_name = os.path.splitext(os.path.basename(src))[0]
-        found = find_song_exact_format(original_name, 'mp3', mp3_index)
-        if found and os.path.exists(found):
-            return found
-        return None
+    # Quick filename-based match first (fast)
+    original_name = os.path.splitext(os.path.basename(src))[0]
+    found_by_name = find_song_exact_format(original_name, 'mp3', mp3_index)
+    if found_by_name and os.path.exists(found_by_name):
+        return found_by_name
 
-    src_title, src_artist = src_id
-
-    # Search through all MP3 files for metadata match.
-    if isinstance(mp3_index, dict):
-        all_mp3_files = []
-        for file_list in mp3_index.values():
-            all_mp3_files.extend(file_list)
-    else:
-        all_mp3_files = mp3_index
-
-    for mp3_file in all_mp3_files:
-        if not mp3_file.lower().endswith('.mp3'):
-            continue
-        if not os.path.exists(mp3_file):
-            continue
-
-        dest_id = _audio_metadata_identity(mp3_file)
-        if not dest_id:
-            continue
-
-        dest_title, dest_artist = dest_id
-
-        # Match by title (required) and artist (if available)
-        if src_title and dest_title and src_title == dest_title:
-            if (not src_artist and not dest_artist) or \
-               (src_artist and dest_artist and src_artist == dest_artist):
-                return mp3_file
+    # Use metadata_index for O(1) lookup (avoids iterating all MP3s)
+    if metadata_index:
+        src_id = _audio_metadata_identity(src)
+        if src_id:
+            src_title_tokens, _ = src_id
+            if src_title_tokens and src_title_tokens in metadata_index:
+                candidates = metadata_index[src_title_tokens]
+                for fp in candidates:
+                    if os.path.exists(fp):
+                        return fp
 
     return None
 
