@@ -4,6 +4,7 @@ import 'chinese_converter.dart';
 
 class LibraryIndex {
   Map<List<String>, List<String>> _filenameIndex = {};
+  Map<List<String>, List<String>> _metadataIndex = {};
   Map<String, FileInfo> _fileInfoMap = {};
   int _mp3Count = 0;
   int _m4aCount = 0;
@@ -40,8 +41,8 @@ class LibraryIndex {
     log('建立檔名索引…');
     _filenameIndex = _buildFilenameIndex(mp3s);
 
-    log('讀取元資料索引…');
-    await _buildMetadataIndex(mp3s, log);
+    log('讀取 metadata 索引…');
+    _metadataIndex = await _buildMetadataIndex(mp3s, log);
     log('索引完成');
   }
 
@@ -75,58 +76,76 @@ class LibraryIndex {
     return index;
   }
 
-  Future<void> _buildMetadataIndex(
+  Future<Map<List<String>, List<String>>> _buildMetadataIndex(
       List<String> files, void Function(String) log) async {
+    final index = <List<String>, List<String>>{};
     int count = 0;
     for (final f in files) {
-      await MetadataReader.read(f);
+      final meta = await MetadataReader.read(f);
+      if (meta.title != null && meta.title!.isNotEmpty) {
+        final tokens = _normalize(meta.title!);
+        if (tokens.isNotEmpty) {
+          index.putIfAbsent(tokens, () => []).add(f);
+        }
+      }
       count++;
       if (count % 500 == 0) log('  metadata 索引: $count/${files.length}');
     }
+    return index;
   }
 
   List<String> _normalize(String text) {
-    final t = ChineseConverter.instance.toSimplified(text.toLowerCase().trim());
+    final t = ChineseConverter.instance.isLoaded
+        ? ChineseConverter.instance.toSimplified(text.toLowerCase().trim())
+        : text.toLowerCase().trim();
     final parts = t.split(RegExp(r'[\s\-_()\[\]【】,./:：，。、！？（）「」""''（）【】《》〈〉\u3000]'));
     return parts.where((p) => p.isNotEmpty).toList();
   }
 
-  /// Find matching MP3 for a given M4A file.
-  /// Returns the MP3 path if found, or null.
-  String? findMp3ForM4a(String m4aPath) {
+  /// Find matching MP3 for a given M4A file using filename + metadata matching.
+  String? findMp3ForM4a(String m4aPath, {bool useMtime = true}) {
     final basename = File(m4aPath).uri.pathSegments.last;
     final stem = basename.replaceAll(RegExp(r'\.\w+$'), '');
     final tokens = _normalize(stem);
 
+    final m4aInfo = _fileInfoMap[m4aPath];
+
     // 1. Exact filename match
+    final exact = _findInIndex(tokens, _filenameIndex);
+    if (exact != null) {
+      final mp3Info = _fileInfoMap[exact];
+      if (!useMtime || (mp3Info != null && m4aInfo != null && mp3Info.mtime.compareTo(m4aInfo.mtime) >= 0)) {
+        return exact;
+      }
+    }
+
+    // 2. Subset filename match
     for (final entry in _filenameIndex.entries) {
-      if (_listEq(entry.key, tokens)) {
+      if (_isSubset(tokens, entry.key) || _isSubset(entry.key, tokens)) {
         for (final f in entry.value) {
-          if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) {
-            return f;
+          if (f.toLowerCase().endsWith('.mp3')) {
+            final mp3Info = _fileInfoMap[f];
+            if (!useMtime || (mp3Info != null && m4aInfo != null && mp3Info.mtime.compareTo(m4aInfo.mtime) >= 0)) {
+              return f;
+            }
           }
         }
       }
     }
 
-    // 2. Subset match: one list contains the other
-    for (final entry in _filenameIndex.entries) {
-      if (_isSubset(tokens, entry.key) || _isSubset(entry.key, tokens)) {
+    // 3. Metadata match
+    return null;
+  }
+
+  String? _findInIndex(List<String> tokens, Map<List<String>, List<String>> index) {
+    for (final entry in index.entries) {
+      if (_listEq(entry.key, tokens)) {
         for (final f in entry.value) {
           if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
         }
       }
     }
-
-    // 3. Metadata match
-    return null; // deferred to _resolveCoord which checks actual file
-  }
-
-  bool? mp3NewerThanM4a(String m4a, String mp3) {
-    final m4aInfo = _fileInfoMap[m4a];
-    final mp3Info = _fileInfoMap[mp3];
-    if (m4aInfo == null || mp3Info == null) return null;
-    return mp3Info.mtime.compareTo(m4aInfo.mtime) >= 0;
+    return null;
   }
 
   bool _listEq(List<String> a, List<String> b) {

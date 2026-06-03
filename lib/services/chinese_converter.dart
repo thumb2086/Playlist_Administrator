@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/services.dart' show rootBundle;
 
 class ChineseConverter {
@@ -16,7 +17,18 @@ class ChineseConverter {
 
   Future<void> load() async {
     if (_s2t != null) return;
-    final data = await rootBundle.loadString('assets/zhcdict.json');
+    String data;
+    try {
+      data = await rootBundle.loadString('assets/zhcdict.json');
+    } catch (_) {
+      try {
+        final file = File('assets/zhcdict.json');
+        data = await file.readAsString();
+      } catch (_) {
+        final file = File('${Directory.current.path}\\assets\\zhcdict.json');
+        data = await file.readAsString();
+      }
+    }
     final map = jsonDecode(data) as Map<String, dynamic>;
 
     _s2t = {};

@@ -52,24 +52,16 @@ jobs:
         run: |
           flutter build windows --release
 
-      - name: Package
-        run: |
-          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "PlaylistAdministrator.zip"
-
       - uses: actions/upload-artifact@v4
         with:
           name: PlaylistAdministrator
-          path: |
-            build/windows/x64/runner/Release/PlaylistAdministrator.exe
-            PlaylistAdministrator.zip
+          path: build/windows/x64/runner/Release/PlaylistAdministrator.exe
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: "Playlist Administrator ${{ github.ref_name }}"
-          files: |
-            PlaylistAdministrator.zip
-            build/windows/x64/runner/Release/PlaylistAdministrator.exe
+          files: build/windows/x64/runner/Release/PlaylistAdministrator.exe
         env:
           GITHUB_TOKEN: ${{ github.token }}

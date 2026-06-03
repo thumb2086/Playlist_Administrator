@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
+import '../services/chinese_converter.dart';
 import '../pipeline/pipeline_orchestrator.dart';
 import '../models/pipeline_step.dart';
 import '../widgets/dark_theme.dart';
@@ -38,6 +39,14 @@ class _PipelinePageState extends State<PipelinePage> {
     if (_running) return;
     setState(() { _running = true; _progress = 0; _currentStep = fromStep; });
     _state = PipelineState();
+    _log('Pipeline 啟動中…');
+
+    // Ensure Chinese converter is loaded
+    try {
+      await ChineseConverter.instance.load();
+    } catch (e) {
+      _log('注意: 中文轉換器載入失敗: $e');
+    }
 
     final orch = PipelineOrchestrator(
       config: ConfigService.instance.config,

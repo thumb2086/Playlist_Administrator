@@ -100,13 +100,20 @@ class PipelineOrchestrator {
     final index = LibraryIndex();
     await index.build(config.libraryPath, onLog);
 
-    // Build task list
+    // Build task list using LibraryIndex for efficient matching
     final tasks = <_ConvertTask>[];
     int skipped = 0;
 
     for (final m4a in m4aFiles) {
       await state.waitIfPaused();
       if (state.isCancelled) return;
+
+      // Check if MP3 already exists (via index + mtime)
+      final existing = index.findMp3ForM4a(m4a, useMtime: true);
+      if (existing != null) {
+        skipped++;
+        continue;
+      }
 
       final stem = File(m4a).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
       final meta = await MetadataReader.read(m4a);
@@ -115,17 +122,6 @@ class PipelineOrchestrator {
               .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
           : '$stem.mp3';
       final dest = '${config.mp3Path}\\$mp3Name';
-
-      // Check if already exists
-      final existing = File(dest);
-      if (await existing.exists()) {
-        final m4aMtime = await File(m4a).lastModified();
-        final mp3Mtime = await existing.lastModified();
-        if (mp3Mtime.compareTo(m4aMtime) >= 0) {
-          skipped++;
-          continue;
-        }
-      }
 
       tasks.add(_ConvertTask(m4a, dest, stem));
     }
