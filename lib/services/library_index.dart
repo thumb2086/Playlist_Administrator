@@ -134,6 +134,15 @@ class LibraryIndex {
     }
 
     // 3. Metadata match
+    final meta = _metadataIndex.keys.firstWhere(
+      (k) => _isSubset(tokens, k) || _isSubset(k, tokens),
+      orElse: () => [],
+    );
+    if (meta.isNotEmpty) {
+      for (final f in _metadataIndex[meta]!) {
+        if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
+      }
+    }
     return null;
   }
 

@@ -20,8 +20,7 @@ jobs:
           architecture: x64
           cache: true
       - run: flutter pub get
-      - run: flutter analyze
-        continue-on-error: true
+      - run: flutter analyze || true
 
   build:
     needs: analyze
