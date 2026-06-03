@@ -1,62 +1,66 @@
-name: Flutter Build & Release
+name: Flutter CI
 
 permissions:
   contents: write
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
     tags:
       - 'v*'
 
 jobs:
+  analyze:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          architecture: x64
+      - run: flutter pub get
+      - run: flutter analyze
+        continue-on-error: true
+
   build:
+    needs: analyze
     runs-on: windows-latest
     defaults:
       run:
         shell: pwsh
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Setup Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        channel: 'stable'
-        architecture: x64
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          architecture: x64
 
-    - name: Install dependencies
-      run: flutter pub get
+      - run: flutter pub get
 
-    - name: Generate Windows platform files
-      run: flutter create --platforms=windows .
+      - name: Build Windows
+        run: |
+          flutter build windows --release
 
-    - name: Analyze
-      continue-on-error: true
-      run: flutter analyze
+      - name: Package
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "PlaylistAdministrator.zip"
 
-    - name: Build Windows
-      run: flutter build windows --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PlaylistAdministrator
+          path: |
+            build/windows/x64/runner/Release/PlaylistAdministrator.exe
+            PlaylistAdministrator.zip
 
-    - name: Create ZIP archive
-      run: |
-        Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "PlaylistAdministrator.zip"
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: PlaylistAdministrator
-        path: |
-          build/windows/x64/runner/Release/PlaylistAdministrator.exe
-          PlaylistAdministrator.zip
-
-    - name: Create Release (tags only)
-      if: startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v2
-      with:
-        name: "Playlist Administrator ${{ github.ref_name }}"
-        files: |
-          PlaylistAdministrator.zip
-          build/windows/x64/runner/Release/PlaylistAdministrator.exe
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Playlist Administrator ${{ github.ref_name }}"
+          files: |
+            PlaylistAdministrator.zip
+            build/windows/x64/runner/Release/PlaylistAdministrator.exe
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
