@@ -76,7 +76,7 @@ class PipelineOrchestrator {
     final mp3Dir = Directory(config.mp3Path);
     if (!await m4aDir.exists()) {
       onLog('M4A 資料夾不存在: ${config.m4aPath}');
-      return;
+      progress(100); return;
     }
     await mp3Dir.create(recursive: true);
 
@@ -99,7 +99,7 @@ class PipelineOrchestrator {
       }
       if (libM4a.isEmpty) {
         onLog('找不到任何 M4A 檔案');
-        return;
+        progress(100); return;
       }
       onLog('在音樂庫根目錄找到 ${libM4a.length} 個 M4A 檔案');
       m4aFiles.addAll(libM4a);
@@ -135,7 +135,7 @@ class PipelineOrchestrator {
     }
 
     onLog('待轉檔: ${tasks.length}, 跳過: $skipped');
-    if (tasks.isEmpty) return;
+    if (tasks.isEmpty) { progress(100); return; }
 
     const batchSize = 50;
     int converted = 0;
@@ -167,7 +167,7 @@ class PipelineOrchestrator {
     final urls = config.urlNames.keys.toList();
     if (urls.isEmpty) {
       onLog('沒有 Spotify URL');
-      return;
+      progress(100); return;
     }
     await Directory(config.playlistsPath).create(recursive: true);
 
@@ -209,7 +209,7 @@ class PipelineOrchestrator {
     final plDir = Directory(config.playlistsPath);
     if (!await plDir.exists()) {
       onLog('播放清單資料夾不存在');
-      return;
+      progress(100); return;
     }
 
     final files = <String>[];
@@ -238,7 +238,7 @@ class PipelineOrchestrator {
           } else {
             final trimmed = line.trim();
             // Track names without file extensions → keep as-is (playlist entry)
-            if (!trimmed.contains('.') || !trimmed.contains('\\')) {
+            if (!trimmed.contains('.') && !trimmed.contains('\\')) {
               newLines.add(line);
               continue;
             }
@@ -270,7 +270,7 @@ class PipelineOrchestrator {
 
   Future<void> _stepUnsorted(void Function(double) progress) async {
     final plDir = Directory(config.playlistsPath);
-    if (!await plDir.exists()) return;
+    if (!await plDir.exists()) { progress(100); return; }
 
     final playlists = <String>[];
     await for (final e in plDir.list()) {

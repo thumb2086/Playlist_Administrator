@@ -44,8 +44,13 @@ class LibraryPageState extends State<LibraryPage> {
             for (final line in lines) {
               if (!line.startsWith('#') && line.trim().isNotEmpty) {
                 total++;
-                final resolved = '${ConfigService.instance.config.libraryPath}\\${File(line).uri.pathSegments.last}';
-                if (await File(resolved).exists()) matched++;
+                final name = File(line).uri.pathSegments.last;
+                final lib = ConfigService.instance.config.libraryPath;
+                final resolved = '$lib\\$name';
+                if (await File(resolved).exists() ||
+                    await File('$resolved.mp3').exists() ||
+                    await File('$resolved.m4a').exists() ||
+                    await File('$resolved.flac').exists()) matched++;
               }
             }
             stats[File(e.path).uri.pathSegments.last.replaceAll('.m3u8', '')] = _PlStats(total, matched);

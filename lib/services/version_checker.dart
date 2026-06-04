@@ -22,7 +22,7 @@ class VersionChecker {
   static const _apiUrl = 'https://api.github.com/repos/$_owner/$_repo/releases/latest';
 
   static String get currentVersion {
-    return 'v2.0.2-beta.7';
+    return 'v2.0.2-beta.8';
   }
 
   static List<int> _parseVersion(String v) {

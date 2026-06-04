@@ -67,7 +67,11 @@ class AppConfig {
   List<PlaylistConfig> get playlists =>
       urlNames.entries.map((e) => PlaylistConfig(url: e.key, name: e.value)).toList();
 
-  String get libraryPath => '$basePath${Platform.pathSeparator}Music';
+  String get libraryPath {
+    final music = '$basePath${Platform.pathSeparator}Music';
+    if (Directory(music).existsSync()) return music;
+    return basePath;
+  }
   String get playlistsPath => '$basePath${Platform.pathSeparator}Playlists';
   String get exportPath => '$basePath${Platform.pathSeparator}USB_Output';
   String get m4aPath {

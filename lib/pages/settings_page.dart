@@ -12,6 +12,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController _basePathCtrl, _workersCtrl, _ffmpegCtrl,
       _spotubeExeCtrl, _spotubeDlCtrl, _lyricsFolderCtrl;
+  void _onConfigChanged() { if (mounted) setState(() {}); }
 
   @override
   void initState() {
@@ -23,11 +24,14 @@ class _SettingsPageState extends State<SettingsPage> {
     _spotubeExeCtrl = TextEditingController(text: c.spotubeExePath);
     _spotubeDlCtrl = TextEditingController(text: c.spotubeDownloadPath);
     _lyricsFolderCtrl = TextEditingController(text: c.lyricsFolderName);
-    I18N.instance.addListener(() { if (mounted) setState(() {}); });
+    I18N.instance.addListener(_onConfigChanged);
+    ConfigService.instance.addListener(_onConfigChanged);
   }
 
   @override
   void dispose() {
+    I18N.instance.removeListener(_onConfigChanged);
+    ConfigService.instance.removeListener(_onConfigChanged);
     _basePathCtrl.dispose(); _workersCtrl.dispose(); _ffmpegCtrl.dispose();
     _spotubeExeCtrl.dispose(); _spotubeDlCtrl.dispose(); _lyricsFolderCtrl.dispose();
     super.dispose();
@@ -71,22 +75,22 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (v) { c.theme = v; ConfigService.instance.save(); setState(() {}); },
           ),
           const SizedBox(height: 4),
-          _Toggle(t('settings.debug_mode'), c.debugMode, (v) { c.debugMode = v; _save(); }),
-          _Toggle(t('settings.metadata_enrich'), c.enableMetadataEnrichment, (v) { c.enableMetadataEnrichment = v; _save(); }),
-          _Toggle(t('settings.auto_update_check'), c.autoUpdateCheck, (v) { c.autoUpdateCheck = v; _save(); }),
+          _Toggle(t('settings.debug_mode'), c.debugMode, (v) { c.debugMode = v; _save(); setState(() {}); }),
+          _Toggle(t('settings.metadata_enrich'), c.enableMetadataEnrichment, (v) { c.enableMetadataEnrichment = v; _save(); setState(() {}); }),
+          _Toggle(t('settings.auto_update_check'), c.autoUpdateCheck, (v) { c.autoUpdateCheck = v; _save(); setState(() {}); }),
         ]),
         const SizedBox(height: 12),
         _Section(t('settings.spotube'), [
           _Field(t('settings.spotube_exe'), _spotubeExeCtrl, 'auto-detect'),
           _Field(t('settings.spotube_dl_path'), _spotubeDlCtrl, r'%USERPROFILE%\Downloads\Spotube'),
-          _Toggle(t('settings.exact_match'), c.spotubeExactMatch, (v) { c.spotubeExactMatch = v; _save(); }),
-          _Toggle(t('settings.convert_matched_only'), c.spotubeConvertMatchedOnly, (v) { c.spotubeConvertMatchedOnly = v; _save(); }),
-          _Toggle(t('settings.strict_matching'), c.spotubeStrictMatching, (v) { c.spotubeStrictMatching = v; _save(); }),
+          _Toggle(t('settings.exact_match'), c.spotubeExactMatch, (v) { c.spotubeExactMatch = v; _save(); setState(() {}); }),
+          _Toggle(t('settings.convert_matched_only'), c.spotubeConvertMatchedOnly, (v) { c.spotubeConvertMatchedOnly = v; _save(); setState(() {}); }),
+          _Toggle(t('settings.strict_matching'), c.spotubeStrictMatching, (v) { c.spotubeStrictMatching = v; _save(); setState(() {}); }),
         ]),
         const SizedBox(height: 12),
         _Section(t('settings.lyrics_section'), [
           _Field(t('settings.lyrics_folder'), _lyricsFolderCtrl, 'Lyrics'),
-          _Toggle(t('settings.retroactive_lyrics'), c.enableRetroactiveLyrics, (v) { c.enableRetroactiveLyrics = v; _save(); }),
+          _Toggle(t('settings.retroactive_lyrics'), c.enableRetroactiveLyrics, (v) { c.enableRetroactiveLyrics = v; _save(); setState(() {}); }),
         ]),
         const SizedBox(height: 12),
         _Section(t('settings.search_aliases'), [

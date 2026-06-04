@@ -112,7 +112,7 @@ class _PipelinePageState extends State<PipelinePage> {
           const SizedBox(height: 20),
           // Overall progress
           AnimatedSize(duration: const Duration(milliseconds: 300), curve: Curves.easeOut,
-            child: _progress > 0 ? Column(children: [
+            child: (_running || _progress > 0) ? Column(children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
@@ -130,7 +130,7 @@ class _PipelinePageState extends State<PipelinePage> {
               ]),
             ]) : const SizedBox.shrink(),
           ),
-          if (_progress > 0) const SizedBox(height: 16),
+          if (_running || _progress > 0) const SizedBox(height: 16),
           // Step indicators
           Row(
             children: List.generate(_stepLabels.length, (i) {
