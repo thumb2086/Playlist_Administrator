@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'metadata_reader.dart';
 
 class AudioConverter {
   static Future<bool> convert({
@@ -15,14 +16,35 @@ class AudioConverter {
       return true;
     }
 
-    final result = await Process.run(ffmpeg, [
+    final meta = await MetadataReader.read(inputPath);
+
+    final args = <String>[
       '-y',
       '-i', inputPath,
       '-map_metadata', '0',
+      '-id3v2_version', '3',
       '-codec:a', format == 'mp3' ? 'libmp3lame' : 'flac',
       '-q:a', '0',
-      outputPath,
-    ]);
-    return result.exitCode == 0;
+    ];
+
+    if (meta.title != null && meta.title!.isNotEmpty) {
+      args.addAll(['-metadata', 'title=${meta.title}']);
+    }
+    if (meta.artist != null && meta.artist!.isNotEmpty) {
+      args.addAll(['-metadata', 'artist=${meta.artist}']);
+    }
+    if (meta.album != null && meta.album!.isNotEmpty) {
+      args.addAll(['-metadata', 'album=${meta.album}']);
+    }
+
+    args.add(outputPath);
+
+    try {
+      final result = await Process.run(ffmpeg, args,
+          timeout: Duration(seconds: 300));
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
   }
 }

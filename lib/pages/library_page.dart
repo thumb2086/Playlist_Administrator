@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/config_service.dart';
 import '../services/i18n.dart';
 import '../services/usb_exporter.dart';
+import '../services/playlist_parser.dart';
 import '../models/playlist.dart';
 import '../widgets/dark_theme.dart';
 
@@ -72,6 +73,8 @@ class LibraryPageState extends State<LibraryPage> {
     if (await plDir.exists()) {
       await for (final e in plDir.list()) {
         if (e is File && e.path.toLowerCase().endsWith('.m3u8')) {
+          final baseName = File(e.path).uri.pathSegments.last;
+          if (PlaylistParser.isInternalPlaylist(baseName)) continue;
           try {
             final lines = await e.readAsLines();
             int total = 0, matched = 0;
