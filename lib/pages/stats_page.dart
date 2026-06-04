@@ -14,7 +14,7 @@ class StatsPage extends StatefulWidget {
 
 class _StatsPageState extends State<StatsPage> {
   int _mp3 = 0, _m4a = 0, _flac = 0, _playlists = 0, _entries = 0, _dual = 0, _duplicates = 0;
-  double _sizeGb = 0, _freeGb = 0;
+  double _sizeGb = 0, _savedGb = 0;
   bool _loading = false;
   List<Snapshot> _history = [];
 
@@ -32,37 +32,36 @@ class _StatsPageState extends State<StatsPage> {
       final lib = ConfigService.instance.config.libraryPath;
       final pl = ConfigService.instance.config.playlistsPath;
       int mp3 = 0, m4a = 0, flac = 0;
-      double size = 0;
-      double freeGb = 0;
+      double size = 0, savedGb = 0;
       final nameExts = <String, Set<String>>{};
       final nameCount = <String, int>{};  // stem -> total occurrences
+      final m4aSizeByStem = <String, double>{};  // stem -> total m4a size
 
       if (await Directory(lib).exists()) {
         await for (final e in Directory(lib).list(recursive: true, followLinks: false)) {
           if (e is File) {
             final low = e.path.toLowerCase();
-            size += await e.length() / (1024 * 1024 * 1024);
+            final lenGb = await e.length() / (1024 * 1024 * 1024);
+            size += lenGb;
             final stem = e.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
             nameExts.putIfAbsent(stem, () => {});
             nameCount[stem] = (nameCount[stem] ?? 0) + 1;
             if (low.endsWith('.mp3')) { mp3++; nameExts[stem]!.add('mp3'); }
-            else if (low.endsWith('.m4a')) { m4a++; nameExts[stem]!.add('m4a'); }
+            else if (low.endsWith('.m4a')) {
+              m4a++; nameExts[stem]!.add('m4a');
+              m4aSizeByStem[stem] = (m4aSizeByStem[stem] ?? 0) + lenGb;
+            }
             else if (low.endsWith('.flac')) { flac++; nameExts[stem]!.add('flac'); }
           }
         }
       }
 
-      // Get free disk space
-      final drive = lib.length >= 2 ? lib.substring(0, 2) : 'C:';
-      try {
-        final ps = await Process.run('powershell', [
-          '-NoProfile', '-NonInteractive', '-Command',
-          '(Get-PSDrive -Name ${drive.substring(0, 1)}).Free'
-        ]);
-        if (ps.exitCode == 0) {
-          freeGb = (double.tryParse(ps.stdout.toString().trim()) ?? 0) / (1024 * 1024 * 1024);
+      // Space saved = size of M4A files that also have an MP3 version
+      for (final entry in nameExts.entries) {
+        if (entry.value.contains('mp3') && entry.value.contains('m4a')) {
+          savedGb += m4aSizeByStem[entry.key] ?? 0;
         }
-      } catch (_) {}
+      }
 
       int dual = 0, duplicates = 0;
       for (final exts in nameExts.values) { if (exts.length > 1) dual++; }
@@ -78,7 +77,7 @@ class _StatsPageState extends State<StatsPage> {
           }
         }
       }
-      setState(() { _mp3 = mp3; _m4a = m4a; _flac = flac; _playlists = plCount; _entries = entries; _dual = dual; _sizeGb = size; _freeGb = freeGb; _duplicates = duplicates; _loading = false; });
+      setState(() { _mp3 = mp3; _m4a = m4a; _flac = flac; _playlists = plCount; _entries = entries; _dual = dual; _sizeGb = size; _savedGb = savedGb; _duplicates = duplicates; _loading = false; });
     } catch (_) { setState(() => _loading = false); }
   }
 
@@ -102,9 +101,9 @@ class _StatsPageState extends State<StatsPage> {
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _MetricCard(t('stats.used'), '${_sizeGb.toStringAsFixed(1)} GB', Icons.storage_rounded, const Color(0xFFFFB74D), _loading)),
+          Expanded(child: _MetricCard(t('stats.storage'), '${_sizeGb.toStringAsFixed(1)} GB', Icons.storage_rounded, AppColors.accent, _loading)),
           const SizedBox(width: 10),
-          Expanded(child: _MetricCard(t('stats.free'), '${_freeGb.toStringAsFixed(1)} GB', Icons.space_dashboard_rounded, AppColors.accent, _loading)),
+          Expanded(child: _MetricCard(t('stats.saved'), '${_savedGb.toStringAsFixed(1)} GB', Icons.save_alt_rounded, const Color(0xFF4FC3F7), _loading)),
           const SizedBox(width: 10),
           Expanded(child: _MetricCard(t('stats.dual_format'), '$_dual', Icons.compare_arrows_rounded, const Color(0xFF80CBC4), _loading)),
           const SizedBox(width: 10),
