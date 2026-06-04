@@ -287,35 +287,23 @@ class SpotubeController {
   Future<void> _stepPlaylist(String name) async {
     clickSidebarLibrary();
     await _wait(800);
-    bringFlutterToFront();
     if (_checkAborted()) return;
-    activate();
     filterPlaylists(name);
     await _wait(1500);
-    bringFlutterToFront();
     if (_checkAborted()) return;
-    activate();
     clickFirstPlaylist();
     await _wait(2000);
-    bringFlutterToFront();
     if (_checkAborted()) return;
-    activate();
     clickThreeDot();
     await _wait(800);
-    bringFlutterToFront();
     if (_checkAborted()) return;
-    activate();
     clickDownloadAll();
     await _wait(800);
-    bringFlutterToFront();
     if (_checkAborted()) return;
-    activate();
     clickConfirm();
     await _wait(2000);
-    bringFlutterToFront();
     if (_checkAborted()) return;
     if (hasSkipDialog()) {
-      activate();
       clickSkip();
       await _wait(300);
       clickSkipAll();
