@@ -5,7 +5,7 @@
 #endif
 #define MyAppPublisher "Playlist Administrator"
 #define MyAppURL "https://github.com/thumb2086/Playlist_Administrator"
-#define MyAppExeName "PlaylistAdministrator.exe"
+#define MyAppExeName "playlist_administrator.exe"
 
 [Setup]
 AppName={#MyAppName}
