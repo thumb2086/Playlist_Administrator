@@ -34,8 +34,10 @@ class ChineseConverter {
     _s2t = {};
     _t2s = {};
     for (final e in map.entries) {
+      if (e.value is! String) continue;
       _s2t![e.key] = e.value as String;
       _t2s![e.value as String] = e.key;
+    }
     }
 
     // Sort keys by length descending for longest-prefix-match

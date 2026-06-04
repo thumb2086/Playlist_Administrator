@@ -110,8 +110,16 @@ class _PipelinePageState extends State<PipelinePage> {
             _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1), _running),
             _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2), _running),
             if (_running) ...[
-              _PButton(t('pipeline.pause'), Icons.pause_rounded, () { _state.pause(); }, false, color: Colors.orange),
-              _PButton(t('pipeline.cancel'), Icons.stop_rounded, () { _state.cancel(); }, false, color: AppColors.error),
+              _PButton(t('pipeline.pause'), Icons.pause_rounded, () {
+                _state.pause();
+                _log('Pipeline 已暫停');
+                setState(() {});
+              }, false, color: Colors.orange),
+              _PButton(t('pipeline.cancel'), Icons.stop_rounded, () {
+                _state.cancel();
+                _log('正在取消 Pipeline…');
+                setState(() {});
+              }, false, color: AppColors.error),
             ],
           ]),
           const SizedBox(height: 20),
