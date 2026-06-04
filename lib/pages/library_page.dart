@@ -33,8 +33,42 @@ class LibraryPageState extends State<LibraryPage> {
 
   Future<void> _refresh() async {
     setState(() => _loading = true);
-    final plDir = Directory(ConfigService.instance.config.playlistsPath);
+    final cfg = ConfigService.instance.config;
+    final plDir = Directory(cfg.playlistsPath);
+    final libDir = Directory(cfg.libraryPath);
     final stats = <String, _PlStats>{};
+
+    // Build a set of all audio file stems from the library (recursive)
+    final libStems = <String>{};
+    if (await libDir.exists()) {
+      await for (final f in libDir.list(recursive: true, followLinks: false)) {
+        if (f is File) {
+          final low = f.path.toLowerCase();
+          if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac')) {
+            libStems.add(File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase());
+          }
+        }
+      }
+    }
+
+    // Also scan mp3/m4a/flac subdirectories of basePath if libraryPath doesn't contain them
+    final baseDir = Directory(cfg.basePath);
+    if (baseDir.path.toLowerCase() != libDir.path.toLowerCase() && await baseDir.exists()) {
+      for (final sub in ['mp3', 'm4a', 'flac']) {
+        final subDir = Directory('${cfg.basePath}\\$sub');
+        if (await subDir.exists()) {
+          await for (final f in subDir.list(recursive: true, followLinks: false)) {
+            if (f is File) {
+              final low = f.path.toLowerCase();
+              if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac')) {
+                libStems.add(File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase());
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (await plDir.exists()) {
       await for (final e in plDir.list()) {
         if (e is File && e.path.toLowerCase().endsWith('.m3u8')) {
@@ -45,12 +79,9 @@ class LibraryPageState extends State<LibraryPage> {
               if (!line.startsWith('#') && line.trim().isNotEmpty) {
                 total++;
                 final name = File(line).uri.pathSegments.last;
-                final lib = ConfigService.instance.config.libraryPath;
-                final resolved = '$lib\\$name';
-                if (await File(resolved).exists() ||
-                    await File('$resolved.mp3').exists() ||
-                    await File('$resolved.m4a').exists() ||
-                    await File('$resolved.flac').exists()) matched++;
+                // Remove extension if present, then match against library stems
+                final stem = name.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
+                if (libStems.contains(stem)) matched++;
               }
             }
             stats[File(e.path).uri.pathSegments.last.replaceAll('.m3u8', '')] = _PlStats(total, matched);

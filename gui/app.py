@@ -1406,25 +1406,18 @@ class PlaylistApp:
     def log(self, message, immediate=False):
         from utils.logger import log_to_file
 
-        # Filter log messages - only show errors and important messages
         msg_str = str(message)
-        msg_lower = msg_str.lower()
-        is_error = any(keyword in msg_lower for keyword in ['error', 'failed', 'critical', 'warning', 'missing'])
-        is_important = any(keyword in msg_str for keyword in ['---', '->'])
 
         # Always write to log file (if enabled)
-        level = 'ERROR' if is_error else 'INFO'
-        log_to_file(msg_str, level)
+        log_to_file(msg_str, 'INFO')
 
-        # Don't interfere with player panel - keep it for lyrics only
-
-        if is_error or is_important:
-            self.log_queue.append(msg_str)
-            # Only schedule update if log_text is initialized
-            if self.log_update_job is None and hasattr(self, 'log_text') and self.log_text is not None:
-                # For important progress messages, use shorter delay
-                delay = 50 if immediate and ("left" in msg_lower or "progress" in msg_lower) else 200
-                self.log_update_job = self.root.after(delay, self._process_log_queue)
+        # Schedule display regardless of content — user needs to see pipeline progress
+        self.log_queue.append(msg_str)
+        if self.log_update_job is None and hasattr(self, 'log_text') and self.log_text is not None:
+            if immediate:
+                self.log_update_job = self.root.after_idle(self._process_log_queue)
+            else:
+                self.log_update_job = self.root.after(80, self._process_log_queue)
 
     def update_song_status(self, song_index, status, song_name):
         """Update song status in the treeview"""
@@ -2330,8 +2323,10 @@ class PlaylistApp:
             self.log(msg, immediate=True)
 
         def gui_progress(step_name, current, total, msg):
-            self.root.after(0, lambda: self.update_progress(current, total))
-            self.root.after(0, lambda: self.speed_label.config(text=f"{step_name}: {msg}"))
+            def _update():
+                self.update_progress(current, total)
+                self.speed_label.config(text=f"{step_name}: {msg}")
+            self.root.after_idle(_update)
 
         try:
             from core.pipeline import PipelineOrchestrator, PipelineState

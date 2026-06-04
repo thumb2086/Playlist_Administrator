@@ -45,6 +45,11 @@ class ConfigService extends ChangeNotifier {
     final cfg = config;
     final basePath = cfg.basePath;
 
+    // Ensure spotify_urls is synchronized from urlNames keys
+    final urlList = cfg.urlNames.keys.toList();
+    final json = cfg.toJson();
+    json['spotify_urls'] = urlList;
+
     String savePath;
     if (_configPath != null) {
       savePath = _configPath!;
@@ -64,7 +69,7 @@ class ConfigService extends ChangeNotifier {
       return;
     }
 
-    await File(savePath).writeAsString(jsonEncode(cfg.toJson()));
+    await File(savePath).writeAsString(jsonEncode(json));
     notifyListeners();
   }
 }

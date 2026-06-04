@@ -112,6 +112,10 @@ def load_config():
     for key, value in defaults.items():
         config.setdefault(key, value)
 
+    # Fallback: derive spotify_urls from url_names keys when empty
+    if not config.get('spotify_urls') and config.get('url_names'):
+        config['spotify_urls'] = list(config['url_names'].keys())
+
     # If base_path is set, derive other paths from it
     if 'base_path' in config and config['base_path']:
         derive_paths(config)

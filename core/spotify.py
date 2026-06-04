@@ -122,6 +122,12 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
 
     target_urls = target_urls or config.get('spotify_urls', [])
     if not target_urls:
+        # Fallback: use url_names keys directly
+        url_names = config.get('url_names', {})
+        if url_names:
+            target_urls = list(url_names.keys())
+            log_func(f"從 url_names 衍生 {len(target_urls)} 個 URL")
+    if not target_urls:
         log_func(_('skip_no_urls'))
         return
 

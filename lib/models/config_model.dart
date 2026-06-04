@@ -68,8 +68,11 @@ class AppConfig {
       urlNames.entries.map((e) => PlaylistConfig(url: e.key, name: e.value)).toList();
 
   String get libraryPath {
-    final music = '$basePath${Platform.pathSeparator}Music';
-    if (Directory(music).existsSync()) return music;
+    // Check commonly used music subdirectories in order of preference
+    for (final sub in ['Music', 'mp3', 'm4a', 'flac']) {
+      final candidate = '$basePath${Platform.pathSeparator}$sub';
+      if (Directory(candidate).existsSync()) return candidate;
+    }
     return basePath;
   }
   String get playlistsPath => '$basePath${Platform.pathSeparator}Playlists';
