@@ -75,6 +75,8 @@ class LibraryPageState extends State<LibraryPage> {
         if (e is File && e.path.toLowerCase().endsWith('.m3u8')) {
           final baseName = File(e.path).uri.pathSegments.last;
           if (PlaylistParser.isInternalPlaylist(baseName)) continue;
+          final stat = await e.stat();
+          if (stat.size == 0) continue;
           try {
             final lines = await e.readAsLines();
             int total = 0, matched = 0;

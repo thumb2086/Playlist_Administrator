@@ -50,38 +50,10 @@ class SnapshotManager {
   }
 
   static int appendRemovedSongs(List<String> removedTracks) {
+    // Removed songs are tracked in snapshot_cache.json via updateSnapshot.
+    // No separate m3u8 file needed — it would duplicate _Unsorted.m3u8.
     if (removedTracks.isEmpty) return 0;
-    final plPath = ConfigService.instance.config.playlistsPath;
-    if (plPath.isEmpty) return 0;
-
-    final playlist = File('$plPath\\$_removedPlaylist');
-    final existing = <String>{};
-    if (playlist.existsSync()) {
-      final lines = playlist.readAsLinesSync();
-      for (final line in lines) {
-        if (line.startsWith('#EXTINF:')) {
-          final idx = line.indexOf(',');
-          if (idx > 0) existing.add(line.substring(idx + 1).trim());
-        }
-      }
-    }
-
-    final newTracks = removedTracks.where((t) => !existing.contains(t)).toList();
-    if (newTracks.isEmpty) return 0;
-
-    final sb = StringBuffer();
-    if (!playlist.existsSync()) sb.write('#EXTM3U\n');
-    for (final t in newTracks) {
-      sb.writeln('#EXTINF:-1,$t');
-      sb.writeln(t);
-    }
-
-    playlist.writeAsStringSync(
-      sb.toString(),
-      mode: playlist.existsSync() ? FileMode.append : FileMode.write,
-    );
-
-    return newTracks.length;
+    return removedTracks.length;
   }
 
   static int processPlaylist(String playlistName, List<String> currentTracks) {

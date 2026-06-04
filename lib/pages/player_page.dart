@@ -65,6 +65,11 @@ class _PlayerPageState extends State<PlayerPage> {
       setState(() => _statusText = '找不到播放清單: $name');
       return;
     }
+    final stat = await file.stat();
+    if (stat.size == 0) {
+      setState(() => _statusText = '播放清單是空的');
+      return;
+    }
 
     final lines = await file.readAsLines();
     final songs = <String>[];

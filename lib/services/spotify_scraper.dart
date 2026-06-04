@@ -144,6 +144,12 @@ class SpotifyScraper {
 
     if (plName == null || tracks.isEmpty) {
       log('  無法解析歌單');
+      // Clean up empty m3u8 file if one was created
+      final emptyFile = File('$playlistsPath\\$plName.m3u8');
+      if (await emptyFile.exists()) {
+        await emptyFile.delete();
+        log('  已刪除空的播放清單檔案');
+      }
       return null;
     }
 
