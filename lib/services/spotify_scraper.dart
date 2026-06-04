@@ -160,7 +160,7 @@ class SpotifyScraper {
         final data = jsonDecode(nextData.text) as Map<String, dynamic>;
         final entity = _getPath(data, ['props', 'pageProps', 'state', 'data', 'entity']);
         if (entity != null) {
-          plName = entity['name'] as String?;
+          plName = (entity['name'] as String?)?.trim();
           final trackList = (entity['trackList'] ?? entity['tracks']) as List<dynamic>?;
           if (trackList != null) {
             _ensureCacheDir();
@@ -194,7 +194,7 @@ class SpotifyScraper {
           if (state == null) continue;
           final playlist = state['playlist'] as Map<String, dynamic>?;
           if (playlist == null) continue;
-          plName = playlist['name'] as String?;
+          plName = (playlist['name'] as String?)?.trim();
           final items = playlist['items'] as List<dynamic>?;
           if (items == null) continue;
 

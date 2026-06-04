@@ -134,7 +134,7 @@ class LibraryPageState extends State<LibraryPage> {
     if (url.isEmpty) return;
     final cfg = ConfigService.instance.config;
     final id = url.split('/').last.split('?').first;
-    cfg.urlNames[url] = id.substring(0, 12);
+    cfg.urlNames[url] = id.substring(0, 12).trim();
     ConfigService.instance.save();
     _urlCtrl.clear();
     setState(() {});
