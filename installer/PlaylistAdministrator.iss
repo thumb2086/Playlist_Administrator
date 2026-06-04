@@ -15,7 +15,7 @@ AppPublisherURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputDir=.\installer
+OutputDir=..\installer
 OutputBaseFilename=PlaylistAdministrator-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
@@ -23,7 +23,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 PrivilegesRequired=admin
 
 [Files]
-Source: "build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
