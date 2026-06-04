@@ -5,14 +5,33 @@ import 'pages/pipeline_page.dart';
 import 'pages/stats_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/spotube_page.dart';
+import 'services/i18n.dart';
 
-class PlaylistAdminApp extends StatelessWidget {
+class PlaylistAdminApp extends StatefulWidget {
   const PlaylistAdminApp({super.key});
+  @override
+  State<PlaylistAdminApp> createState() => _PlaylistAdminAppState();
+}
+
+class _PlaylistAdminAppState extends State<PlaylistAdminApp> {
+  @override
+  void initState() {
+    super.initState();
+    I18N.instance.addListener(_onLangChange);
+  }
+
+  @override
+  void dispose() {
+    I18N.instance.removeListener(_onLangChange);
+    super.dispose();
+  }
+
+  void _onLangChange() => setState(() {});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Playlist Administrator',
+      title: t('app.title'),
       theme: buildDarkTheme(),
       darkTheme: buildDarkTheme(),
       themeMode: ThemeMode.dark,
@@ -32,13 +51,7 @@ class _MainShellState extends State<MainShell> with SingleTickerProviderStateMix
   int _selectedIndex = 0;
   late AnimationController _animCtrl;
 
-  final _navItems = [
-    _NavItemData(Icons.library_music_outlined, Icons.library_music, '歌單庫'),
-    _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, 'Pipeline'),
-    _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, '統計'),
-    _NavItemData(Icons.download_outlined, Icons.download, 'Spotube'),
-    _NavItemData(Icons.settings_outlined, Icons.settings, '設定'),
-  ];
+  late List<_NavItemData> _navItems;
 
   final _pages = const [
     LibraryPage(),
@@ -53,12 +66,27 @@ class _MainShellState extends State<MainShell> with SingleTickerProviderStateMix
     super.initState();
     _animCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
     _animCtrl.forward();
+    _rebuildNav();
+    I18N.instance.addListener(_rebuildNav);
   }
 
   @override
   void dispose() {
+    I18N.instance.removeListener(_rebuildNav);
     _animCtrl.dispose();
     super.dispose();
+  }
+
+  void _rebuildNav() {
+    setState(() {
+      _navItems = [
+        _NavItemData(Icons.library_music_outlined, Icons.library_music, t('app.sidebar.library')),
+        _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, t('app.sidebar.pipeline')),
+        _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, t('app.sidebar.stats')),
+        _NavItemData(Icons.download_outlined, Icons.download, t('app.sidebar.spotube')),
+        _NavItemData(Icons.settings_outlined, Icons.settings, t('app.sidebar.settings')),
+      ];
+    });
   }
 
   @override
@@ -137,11 +165,11 @@ class _Sidebar extends StatelessWidget {
                   child: const Icon(Icons.queue_music_rounded, color: Colors.black, size: 20),
                 ),
                 const SizedBox(width: 10),
-                const Column(
+                Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Playlist', style: TextStyle(color: AppColors.text, fontSize: 15, fontWeight: FontWeight.bold)),
-                    Text('Administrator', style: TextStyle(color: AppColors.textMuted, fontSize: 10, letterSpacing: 1.2)),
+                    Text(t('app.sidebar.playlist'), style: const TextStyle(color: AppColors.text, fontSize: 15, fontWeight: FontWeight.bold)),
+                    Text(t('app.sidebar.admin'), style: const TextStyle(color: AppColors.textMuted, fontSize: 10, letterSpacing: 1.2)),
                   ],
                 ),
               ],
@@ -209,7 +237,7 @@ class _Sidebar extends StatelessWidget {
               children: [
                 const Icon(Icons.info_outline, color: AppColors.accent, size: 14),
                 const SizedBox(width: 8),
-                Text('v2.0.0', style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w500)),
+                Text(t('app.version'), style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w500)),
                 const Spacer(),
                 Text('Flutter', style: TextStyle(color: AppColors.accent.withValues(alpha: 0.7), fontSize: 10)),
               ],
@@ -243,7 +271,7 @@ class _Header extends StatelessWidget {
               color: AppColors.accentDim,
               borderRadius: BorderRadius.circular(6),
             ),
-            child: const Text('PLAYLIST ADMIN', style: TextStyle(color: AppColors.accent, fontSize: 9, letterSpacing: 1.5)),
+              child: const Text('PLAYLIST ADMIN', style: TextStyle(color: AppColors.accent, fontSize: 9, letterSpacing: 1.5)),
           ),
         ],
       ),

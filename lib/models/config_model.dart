@@ -10,13 +10,25 @@ class AppConfig {
   bool enableMetadataEnrichment;
   bool spotubeExactMatch;
   bool spotubeConvertMatchedOnly;
+  bool spotubeStrictMatching;
   String ffmpegPath;
   String spotubeExePath;
   String spotubeDownloadPath;
+  String spotubeFolderName;
+  String lyricsFolderName;
+  bool autoUpdateCheck;
+  bool enableRetroactiveLyrics;
+  bool retryFailedLyrics;
+  bool retryFailedFlac;
+  bool autoSyncOnAdd;
+  String theme;
+  String skippedVersion;
+  bool setupCompleted;
   Map<String, String> urlNames;
   Map<String, String> searchNames;
   Map<String, List<int>> spotubeCoords;
   Map<String, String> lastUpdated;
+  Map<String, double> lyricsOffsets;
 
   AppConfig({
     this.basePath = '',
@@ -27,17 +39,30 @@ class AppConfig {
     this.enableMetadataEnrichment = false,
     this.spotubeExactMatch = true,
     this.spotubeConvertMatchedOnly = false,
+    this.spotubeStrictMatching = true,
     this.ffmpegPath = 'bin/ffmpeg.exe',
     this.spotubeExePath = '',
     this.spotubeDownloadPath = '',
+    this.spotubeFolderName = 'spotube',
+    this.lyricsFolderName = 'Lyrics',
+    this.autoUpdateCheck = true,
+    this.enableRetroactiveLyrics = false,
+    this.retryFailedLyrics = false,
+    this.retryFailedFlac = false,
+    this.autoSyncOnAdd = false,
+    this.theme = 'dark',
+    this.skippedVersion = '',
+    this.setupCompleted = false,
     Map<String, String>? urlNames,
     Map<String, String>? searchNames,
     Map<String, List<int>>? spotubeCoords,
     Map<String, String>? lastUpdated,
+    Map<String, double>? lyricsOffsets,
   })  : urlNames = urlNames ?? {},
         searchNames = searchNames ?? {},
         spotubeCoords = spotubeCoords ?? {},
-        lastUpdated = lastUpdated ?? {};
+        lastUpdated = lastUpdated ?? {},
+        lyricsOffsets = lyricsOffsets ?? {};
 
   List<PlaylistConfig> get playlists =>
       urlNames.entries.map((e) => PlaylistConfig(url: e.key, name: e.value)).toList();
@@ -47,7 +72,7 @@ class AppConfig {
   String get exportPath => '$basePath${Platform.pathSeparator}USB_Output';
   String get m4aPath => '$basePath${Platform.pathSeparator}m4a';
   String get mp3Path => '$basePath${Platform.pathSeparator}mp3';
-  String get lyricsPath => '$libraryPath${Platform.pathSeparator}Lyrics';
+  String get lyricsPath => '$libraryPath${Platform.pathSeparator}$lyricsFolderName';
 
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
         basePath: json['base_path'] as String? ?? '',
@@ -58,14 +83,26 @@ class AppConfig {
         enableMetadataEnrichment: json['enable_metadata_enrichment'] as bool? ?? false,
         spotubeExactMatch: json['spotube_exact_match'] as bool? ?? true,
         spotubeConvertMatchedOnly: json['spotube_convert_matched_only'] as bool? ?? false,
+        spotubeStrictMatching: json['spotube_strict_matching'] as bool? ?? true,
         ffmpegPath: json['ffmpeg_path'] as String? ?? 'bin/ffmpeg.exe',
         spotubeExePath: json['spotube_exe_path'] as String? ?? '',
         spotubeDownloadPath: json['spotube_download_path'] as String? ?? '',
+        spotubeFolderName: json['spotube_folder_name'] as String? ?? 'spotube',
+        lyricsFolderName: json['lyrics_folder_name'] as String? ?? 'Lyrics',
+        autoUpdateCheck: json['auto_update_check'] as bool? ?? true,
+        enableRetroactiveLyrics: json['enable_retroactive_lyrics'] as bool? ?? false,
+        retryFailedLyrics: json['retry_failed_lyrics'] as bool? ?? false,
+        retryFailedFlac: json['retry_failed_flac'] as bool? ?? false,
+        autoSyncOnAdd: json['auto_sync_on_add'] as bool? ?? false,
+        theme: json['theme'] as String? ?? 'dark',
+        skippedVersion: json['skipped_version'] as String? ?? '',
+        setupCompleted: json['setup_completed'] as bool? ?? false,
         urlNames: (json['url_names'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         searchNames: (json['search_names'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         spotubeCoords: (json['spotube_coords'] as Map<String, dynamic>?)?.map(
                 (k, v) => MapEntry(k, (v as List<dynamic>).cast<int>())) ?? {},
         lastUpdated: (json['last_updated'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
+        lyricsOffsets: (json['lyrics_offsets'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, (v as num).toDouble())) ?? {},
       );
 
   Map<String, dynamic> toJson() => {
@@ -77,12 +114,24 @@ class AppConfig {
         'enable_metadata_enrichment': enableMetadataEnrichment,
         'spotube_exact_match': spotubeExactMatch,
         'spotube_convert_matched_only': spotubeConvertMatchedOnly,
+        'spotube_strict_matching': spotubeStrictMatching,
         'ffmpeg_path': ffmpegPath,
         'spotube_exe_path': spotubeExePath,
         'spotube_download_path': spotubeDownloadPath,
+        'spotube_folder_name': spotubeFolderName,
+        'lyrics_folder_name': lyricsFolderName,
+        'auto_update_check': autoUpdateCheck,
+        'enable_retroactive_lyrics': enableRetroactiveLyrics,
+        'retry_failed_lyrics': retryFailedLyrics,
+        'retry_failed_flac': retryFailedFlac,
+        'auto_sync_on_add': autoSyncOnAdd,
+        'theme': theme,
+        'skipped_version': skippedVersion,
+        'setup_completed': setupCompleted,
         'url_names': urlNames,
         'search_names': searchNames,
         'spotube_coords': spotubeCoords.map((k, v) => MapEntry(k, v)),
         'last_updated': lastUpdated,
+        'lyrics_offsets': lyricsOffsets,
       };
 }

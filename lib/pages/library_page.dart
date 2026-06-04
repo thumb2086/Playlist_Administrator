@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
+import '../services/i18n.dart';
 import '../models/playlist.dart';
 import '../widgets/dark_theme.dart';
 
@@ -24,6 +25,7 @@ class LibraryPageState extends State<LibraryPage> {
   @override
   void initState() {
     super.initState();
+    I18N.instance.addListener(() { if (mounted) setState(() {}); });
     _refresh();
   }
 
@@ -84,24 +86,24 @@ class LibraryPageState extends State<LibraryPage> {
                 Expanded(
                   child: TextField(
                     controller: _urlCtrl,
-                    decoration: const InputDecoration(
-                      hintText: '貼上 Spotify 播放清單 URL…',
-                      prefixIcon: Icon(Icons.link, size: 18),
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      hintText: t('library.url_hint'),
+                      prefixIcon: const Icon(Icons.link, size: 18),
+                      border: const OutlineInputBorder(),
                     ),
                     style: const TextStyle(fontSize: 13),
                     onSubmitted: (_) => _addUrl(),
                   ),
                 ),
                 const SizedBox(width: 10),
-                _GradientBtn('加入', Icons.add, _addUrl),
+                _GradientBtn(t('library.add_btn'), Icons.add, _addUrl),
                 const SizedBox(width: 8),
                 IconButton(
                   onPressed: _refresh,
                   icon: _loading
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.refresh_rounded),
-                  tooltip: '重新整理',
+                  tooltip: t('library.refresh'),
                   style: IconButton.styleFrom(backgroundColor: AppColors.surfaceLight),
                 ),
               ],
@@ -120,9 +122,9 @@ class LibraryPageState extends State<LibraryPage> {
                       children: [
                         Icon(Icons.library_music_outlined, size: 64, color: AppColors.textMuted.withValues(alpha: 0.3)),
                         const SizedBox(height: 12),
-                        const Text('尚未加入歌單', style: TextStyle(color: AppColors.textMuted, fontSize: 15)),
+                        Text(t('library.empty_title'), style: const TextStyle(color: AppColors.textMuted, fontSize: 15)),
                         const SizedBox(height: 4),
-                        const Text('貼上 Spotify URL 開始', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                        Text(t('library.empty_subtitle'), style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
                       ],
                     ),
                   )
@@ -168,14 +170,14 @@ class LibraryPageState extends State<LibraryPage> {
         border: Border.all(color: AppColors.border),
       ),
       child: Row(children: [
-        _Chip(Icons.playlist_play, '${playlists.length}', '歌單'),
+        _Chip(Icons.playlist_play, '${playlists.length}', t('library.stats_playlists')),
         const SizedBox(width: 20),
-        _Chip(Icons.music_note, '$totalTracks', '歌曲'),
+        _Chip(Icons.music_note, '$totalTracks', t('library.stats_songs')),
         const SizedBox(width: 20),
-        _Chip(Icons.check_circle, '$totalMatched', '已匹配', color: AppColors.accent),
+        _Chip(Icons.check_circle, '$totalMatched', t('library.stats_matched'), color: AppColors.accent),
         if (totalTracks > 0) ...[
           const SizedBox(width: 20),
-          _Chip(Icons.trending_up, totalTracks > 0 ? '${(totalMatched / totalTracks * 100).toStringAsFixed(0)}%' : '0%', '完成率'),
+          _Chip(Icons.trending_up, totalTracks > 0 ? '${(totalMatched / totalTracks * 100).toStringAsFixed(0)}%' : '0%', t('library.stats_completion')),
         ],
       ]),
     );
@@ -256,7 +258,7 @@ class _PlaylistCard extends StatelessWidget {
                 if (total > 0) ...[
                   Row(
                     children: [
-                      Text('$matched/$total 首', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                      Text('$matched/$total ${t('library.stats_songs')}', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
                       const Spacer(),
                       Text('${(pct * 100).toStringAsFixed(0)}%',
                           style: TextStyle(color: full ? AppColors.accent : AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w600)),
@@ -289,7 +291,7 @@ class _PlaylistCard extends StatelessWidget {
 
 class _GradientBtn extends StatelessWidget {
   final String label; final IconData icon; final VoidCallback onPressed;
-  _GradientBtn(this.label, this.icon, this.onPressed);
+  const _GradientBtn(this.label, this.icon, this.onPressed);
 
   @override
   Widget build(BuildContext context) {

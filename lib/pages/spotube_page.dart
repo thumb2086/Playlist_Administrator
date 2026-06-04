@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
+import '../services/i18n.dart';
 import '../services/spotube_controller.dart';
 import '../widgets/dark_theme.dart';
 
@@ -14,7 +15,14 @@ class _SpotubePageState extends State<SpotubePage> {
   final _logs = <String>[];
   final _scrollCtrl = ScrollController();
   bool _running = false;
-  String _status = '就緒';
+  String _status = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _status = t('spotube.status_ready');
+    I18N.instance.addListener(() { if (mounted) setState(() {}); });
+  }
 
   @override
   void dispose() { _scrollCtrl.dispose(); super.dispose(); }
@@ -28,14 +36,18 @@ class _SpotubePageState extends State<SpotubePage> {
   }
 
   Future<void> _downloadAll() async {
-    if (_running) return;
-    setState(() { _running = true; _status = '下載中…'; });
+    if (_running) { return; }
+    setState(() { _running = true; _status = t('spotube.status_downloading'); });
     try {
       final ctrl = SpotubeController(
         libraryPath: ConfigService.instance.config.libraryPath,
         coords: ConfigService.instance.config.spotubeCoords,
       );
-      if (!ctrl.isRunning()) { _log('❌ Spotube 未執行'); setState(() { _running = false; _status = '錯誤'; }); return; }
+      if (!ctrl.isRunning()) {
+        _log('❌ ${t('spotube.not_running')}');
+        setState(() { _running = false; _status = t('common.error'); });
+        return;
+      }
 
       final names = ConfigService.instance.config.urlNames.values.toList();
       for (int i = 0; i < names.length; i++) {
@@ -48,18 +60,18 @@ class _SpotubePageState extends State<SpotubePage> {
           _log('  ✅ ${names[i]}');
         } catch (e) { _log('  ❌ ${names[i]}: $e'); }
       }
-      _log('下載完成'); setState(() => _status = '完成');
-    } catch (e) { _log('錯誤: $e'); setState(() => _status = '錯誤'); }
+      _log(t('spotube.download_complete')); setState(() => _status = t('common.done'));
+    } catch (e) { _log('${t('common.error')}: $e'); setState(() => _status = t('common.error')); }
     setState(() => _running = false);
   }
 
   Future<void> _moveFiles() async {
-    setState(() => _status = '搬移中…');
+    setState(() => _status = t('spotube.status_moving'));
     try {
       final ctrl = SpotubeController(libraryPath: ConfigService.instance.config.libraryPath);
       final moved = await ctrl.moveDownloads();
-      _log('搬移完成: $moved 個檔案'); setState(() => _status = '搬移完成: $moved');
-    } catch (e) { _log('搬移失敗: $e'); setState(() => _status = '錯誤'); }
+      _log(t('spotube.move_complete', [moved])); setState(() => _status = t('spotube.status_moved'));
+    } catch (e) { _log('${t('spotube.move_failed')}: $e'); setState(() => _status = t('common.error')); }
   }
 
   @override
@@ -68,7 +80,6 @@ class _SpotubePageState extends State<SpotubePage> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Status + controls
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
@@ -76,34 +87,33 @@ class _SpotubePageState extends State<SpotubePage> {
             Row(children: [
               Container(width: 10, height: 10,
                 decoration: BoxDecoration(shape: BoxShape.circle,
-                    color: _running ? Colors.orange : (_status == '完成' ? AppColors.accent : AppColors.textMuted)),
+                    color: _running ? Colors.orange : (_status == t('common.done') ? AppColors.accent : AppColors.textMuted)),
               ),
               const SizedBox(width: 8),
               Text(_status, style: TextStyle(color: _running ? Colors.orange : AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
               const Spacer(),
-              Text('${downloaded.length} 個已下載', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+              Text(t('spotube.count_downloaded', [downloaded.length]), style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
             ]),
             const SizedBox(height: 14),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              _SButton('下載全部', Icons.download_rounded, _downloadAll, _running, isPrimary: true),
-              _SButton('搬移 M4A', Icons.drive_file_move_rounded, _moveFiles, _running),
-              _SButton('取消', Icons.stop_rounded, () => setState(() => _running = false), !_running, color: AppColors.error),
-              _SButton('重設記錄', Icons.delete_outline_rounded, () {
+              _SButton(t('spotube.download_all'), Icons.download_rounded, _downloadAll, _running, isPrimary: true),
+              _SButton(t('spotube.move_m4a'), Icons.drive_file_move_rounded, _moveFiles, _running),
+              _SButton(t('spotube.cancel'), Icons.stop_rounded, () => setState(() => _running = false), !_running, color: AppColors.error),
+              _SButton(t('spotube.reset_records'), Icons.delete_outline_rounded, () {
                 ConfigService.instance.config.lastUpdated.clear();
-                ConfigService.instance.save(); setState(() {}); _log('已重設下載記錄');
+                ConfigService.instance.save(); setState(() {}); _log(t('spotube.records_reset'));
               }, false),
             ]),
           ]),
         ),
         const SizedBox(height: 14),
-        // Records
-        const Text('下載記錄', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        Text(t('spotube.download_records'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Expanded(flex: 2, child: Container(
           decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
           clipBehavior: Clip.antiAlias,
           child: downloaded.isEmpty
-              ? const Center(child: Text('尚無下載記錄', style: TextStyle(color: AppColors.textMuted)))
+              ? Center(child: Text(t('spotube.no_records'), style: const TextStyle(color: AppColors.textMuted)))
               : ListView.builder(itemCount: downloaded.length, itemBuilder: (ctx, i) {
                   final e = downloaded.entries.elementAt(i);
                   return ListTile(dense: true,
@@ -114,14 +124,13 @@ class _SpotubePageState extends State<SpotubePage> {
                 }),
         )),
         const SizedBox(height: 8),
-        // Log
-        const Text('日誌', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        Text(t('spotube.log'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Expanded(flex: 3, child: Container(
           decoration: BoxDecoration(color: const Color(0xFF080808), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
           clipBehavior: Clip.antiAlias,
           child: _logs.isEmpty
-              ? const Center(child: Text('日誌將顯示在這裡', style: TextStyle(color: AppColors.textMuted, fontSize: 12)))
+              ? Center(child: Text(t('spotube.log_placeholder'), style: const TextStyle(color: AppColors.textMuted, fontSize: 12)))
               : ListView.builder(controller: _scrollCtrl, padding: const EdgeInsets.all(10),
                   itemCount: _logs.length, itemBuilder: (ctx, i) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 1),

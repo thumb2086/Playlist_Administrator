@@ -8,7 +8,7 @@ class LibraryIndex {
   Map<String, FileInfo> _fileInfoMap = {};
   int _mp3Count = 0;
   int _m4aCount = 0;
-  bool _built = false;
+  final bool _built = false;
 
   int get mp3Count => _mp3Count;
   int get m4aCount => _m4aCount;
@@ -21,8 +21,8 @@ class LibraryIndex {
     final m4as = <String>[];
     for (final f in allFiles) {
       final low = f.toLowerCase();
-      if (low.endsWith('.mp3')) mp3s.add(f);
-      else if (low.endsWith('.m4a')) m4as.add(f);
+      if (low.endsWith('.mp3')) { mp3s.add(f); }
+      else if (low.endsWith('.m4a')) { m4as.add(f); }
     }
     _mp3Count = mp3s.length;
     _m4aCount = m4as.length;

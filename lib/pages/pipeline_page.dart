@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
+import '../services/i18n.dart';
 import '../services/chinese_converter.dart';
 import '../pipeline/pipeline_orchestrator.dart';
 import '../models/pipeline_step.dart';
@@ -19,10 +20,34 @@ class _PipelinePageState extends State<PipelinePage> {
   bool _running = false;
   double _progress = 0;
   int _currentStep = 0;
-  final _stepLabels = ['轉檔', '爬取', '清理', '分類', '元資料'];
+
+  late List<String> _stepLabels;
 
   @override
-  void dispose() { _scrollCtrl.dispose(); super.dispose(); }
+  void initState() {
+    super.initState();
+    _rebuildStepLabels();
+    I18N.instance.addListener(_rebuildStepLabels);
+  }
+
+  @override
+  void dispose() {
+    I18N.instance.removeListener(_rebuildStepLabels);
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _rebuildStepLabels() {
+    setState(() {
+      _stepLabels = [
+        t('pipeline.step_convert'),
+        t('pipeline.step_scrape'),
+        t('pipeline.step_prune'),
+        t('pipeline.step_unsorted'),
+        t('pipeline.step_metadata'),
+      ];
+    });
+  }
 
   void _log(String msg) { _logs.add(msg); if (mounted) setState(() {}); _autoScroll(); }
 
@@ -39,9 +64,8 @@ class _PipelinePageState extends State<PipelinePage> {
     if (_running) return;
     setState(() { _running = true; _progress = 0; _currentStep = fromStep; });
     _state = PipelineState();
-    _log('Pipeline 啟動中…');
+    _log(t('pipeline.starting'));
 
-    // Ensure Chinese converter is loaded
     try {
       await ChineseConverter.instance.load();
     } catch (e) {
@@ -73,14 +97,15 @@ class _PipelinePageState extends State<PipelinePage> {
         children: [
           // Controls
           Wrap(spacing: 8, runSpacing: 8, children: [
-            _PButton('完整流程', Icons.play_arrow_rounded, () => _run(), _running, isPrimary: true),
-            _PButton('只轉檔', Icons.transform, () => _run(fromStep: 0), _running),
-            _PButton('只爬取', Icons.cloud_download, () => _run(fromStep: 1), _running),
-            _PButton('只清理', Icons.cleaning_services, () => _run(fromStep: 2), _running),
+            _PButton(t('pipeline.run_all'), Icons.play_arrow_rounded, () => _run(), _running, isPrimary: true),
+            _PButton(t('pipeline.run_convert'), Icons.transform, () => _run(fromStep: 0), _running),
+            _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1), _running),
+            _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2), _running),
             const Spacer(),
+
             if (_running) ...[
-              _PButton('暫停', Icons.pause_rounded, () => _state.pause(), false, color: Colors.orange),
-              _PButton('取消', Icons.stop_rounded, () => _state.cancel(), false, color: AppColors.error),
+              _PButton(t('pipeline.pause'), Icons.pause_rounded, () { _state.pause(); }, false, color: Colors.orange),
+              _PButton(t('pipeline.cancel'), Icons.stop_rounded, () { _state.cancel(); }, false, color: AppColors.error),
             ],
           ]),
           const SizedBox(height: 20),
@@ -148,7 +173,7 @@ class _PipelinePageState extends State<PipelinePage> {
               ),
               clipBehavior: Clip.antiAlias,
               child: _logs.isEmpty
-                  ? const Center(child: Text('日誌將顯示在這裡', style: TextStyle(color: AppColors.textMuted, fontSize: 12)))
+                  ? Center(child: Text(t('pipeline.log_placeholder'), style: const TextStyle(color: AppColors.textMuted, fontSize: 12)))
                   : ListView.builder(
                       controller: _scrollCtrl,
                       padding: const EdgeInsets.all(10),
@@ -156,9 +181,9 @@ class _PipelinePageState extends State<PipelinePage> {
                       itemBuilder: (ctx, i) {
                         final line = _logs[i];
                         Color? color;
-                        if (line.contains('❌')) color = Colors.red[300];
-                        else if (line.contains('✅') || line.contains('完成')) color = AppColors.accent;
-                        else if (line.contains('---')) color = Colors.cyan[300];
+                        if (line.contains('❌')) { color = Colors.red[300]; }
+                        else if (line.contains('✅') || line.contains('完成')) { color = AppColors.accent; }
+                        else if (line.contains('---')) { color = Colors.cyan[300]; }
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 1),
                           child: Text(line, style: TextStyle(fontSize: 11, fontFamily: 'Consolas',

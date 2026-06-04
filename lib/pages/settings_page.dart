@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
+import '../services/i18n.dart';
 import '../widgets/dark_theme.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -9,7 +10,8 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  late TextEditingController _basePathCtrl, _workersCtrl, _ffmpegCtrl, _spotubeExeCtrl, _spotubeDlCtrl;
+  late TextEditingController _basePathCtrl, _workersCtrl, _ffmpegCtrl,
+      _spotubeExeCtrl, _spotubeDlCtrl, _lyricsFolderCtrl;
 
   @override
   void initState() {
@@ -20,21 +22,27 @@ class _SettingsPageState extends State<SettingsPage> {
     _ffmpegCtrl = TextEditingController(text: c.ffmpegPath);
     _spotubeExeCtrl = TextEditingController(text: c.spotubeExePath);
     _spotubeDlCtrl = TextEditingController(text: c.spotubeDownloadPath);
+    _lyricsFolderCtrl = TextEditingController(text: c.lyricsFolderName);
+    I18N.instance.addListener(() { if (mounted) setState(() {}); });
   }
 
   @override
   void dispose() {
     _basePathCtrl.dispose(); _workersCtrl.dispose(); _ffmpegCtrl.dispose();
-    _spotubeExeCtrl.dispose(); _spotubeDlCtrl.dispose();
+    _spotubeExeCtrl.dispose(); _spotubeDlCtrl.dispose(); _lyricsFolderCtrl.dispose();
     super.dispose();
   }
 
   void _save() {
     final c = ConfigService.instance.config;
-    c.basePath = _basePathCtrl.text; c.maxThreads = int.tryParse(_workersCtrl.text) ?? 4;
-    c.ffmpegPath = _ffmpegCtrl.text; c.spotubeExePath = _spotubeExeCtrl.text; c.spotubeDownloadPath = _spotubeDlCtrl.text;
+    c.basePath = _basePathCtrl.text;
+    c.maxThreads = int.tryParse(_workersCtrl.text) ?? 4;
+    c.ffmpegPath = _ffmpegCtrl.text;
+    c.spotubeExePath = _spotubeExeCtrl.text;
+    c.spotubeDownloadPath = _spotubeDlCtrl.text;
+    c.lyricsFolderName = _lyricsFolderCtrl.text.trim().isEmpty ? 'Lyrics' : _lyricsFolderCtrl.text.trim();
     ConfigService.instance.save();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('設定已儲存'), duration: Duration(seconds: 1)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('settings.saved')), duration: const Duration(seconds: 1)));
   }
 
   @override
@@ -43,25 +51,48 @@ class _SettingsPageState extends State<SettingsPage> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       child: ListView(children: [
-        _Section('一般設定', [
-          _Field('Library 路徑', _basePathCtrl, 'C:\\Users\\CPXru\\Music\\Spotube'),
-          _Field('轉換執行緒數', _workersCtrl, '4'),
-          _Field('FFmpeg 路徑', _ffmpegCtrl, 'bin/ffmpeg.exe'),
-          _Toggle('Debug 模式', c.debugMode, (v) { c.debugMode = v; _save(); }),
-          _Toggle('Metadata 強化', c.enableMetadataEnrichment, (v) { c.enableMetadataEnrichment = v; _save(); }),
+        _Section(t('settings.general'), [
+          _Field(t('settings.library_path'), _basePathCtrl, 'C:\\Users\\CPXru\\Music\\Spotube'),
+          _Field(t('settings.thread_count'), _workersCtrl, '4'),
+          _Field(t('settings.ffmpeg_path'), _ffmpegCtrl, 'bin/ffmpeg.exe'),
+          // Language
+          _DropdownLabel(t('settings.language')),
+          _Dropdown(
+            value: I18N.instance.currentLang,
+            items: const [DropdownMenuItem(value: 'zh-TW', child: Text('繁體中文')), DropdownMenuItem(value: 'en', child: Text('English'))],
+            onChanged: (v) { I18N.instance.setLanguage(v); c.language = v; ConfigService.instance.save(); },
+          ),
+          const SizedBox(height: 8),
+          // Theme
+          _DropdownLabel(t('settings.theme')),
+          _Dropdown(
+            value: c.theme,
+            items: const [DropdownMenuItem(value: 'dark', child: Text('深色 / Dark')), DropdownMenuItem(value: 'light', child: Text('淺色 / Light'))],
+            onChanged: (v) { c.theme = v; ConfigService.instance.save(); setState(() {}); },
+          ),
+          const SizedBox(height: 4),
+          _Toggle(t('settings.debug_mode'), c.debugMode, (v) { c.debugMode = v; _save(); }),
+          _Toggle(t('settings.metadata_enrich'), c.enableMetadataEnrichment, (v) { c.enableMetadataEnrichment = v; _save(); }),
+          _Toggle(t('settings.auto_update_check'), c.autoUpdateCheck, (v) { c.autoUpdateCheck = v; _save(); }),
         ]),
         const SizedBox(height: 12),
-        _Section('Spotube 自動化', [
-          _Field('執行檔路徑', _spotubeExeCtrl, 'auto-detect'),
-          _Field('下載路徑', _spotubeDlCtrl, r'%USERPROFILE%\Downloads\Spotube'),
-          _Toggle('檔名精確比對', c.spotubeExactMatch, (v) { c.spotubeExactMatch = v; _save(); }),
-          _Toggle('只轉換符合歌單的檔案', c.spotubeConvertMatchedOnly, (v) { c.spotubeConvertMatchedOnly = v; _save(); }),
+        _Section(t('settings.spotube'), [
+          _Field(t('settings.spotube_exe'), _spotubeExeCtrl, 'auto-detect'),
+          _Field(t('settings.spotube_dl_path'), _spotubeDlCtrl, r'%USERPROFILE%\Downloads\Spotube'),
+          _Toggle(t('settings.exact_match'), c.spotubeExactMatch, (v) { c.spotubeExactMatch = v; _save(); }),
+          _Toggle(t('settings.convert_matched_only'), c.spotubeConvertMatchedOnly, (v) { c.spotubeConvertMatchedOnly = v; _save(); }),
+          _Toggle(t('settings.strict_matching'), c.spotubeStrictMatching, (v) { c.spotubeStrictMatching = v; _save(); }),
         ]),
         const SizedBox(height: 12),
-        _Section('搜尋別名', [
+        _Section(t('settings.lyrics_section'), [
+          _Field(t('settings.lyrics_folder'), _lyricsFolderCtrl, 'Lyrics'),
+          _Toggle(t('settings.retroactive_lyrics'), c.enableRetroactiveLyrics, (v) { c.enableRetroactiveLyrics = v; _save(); }),
+        ]),
+        const SizedBox(height: 12),
+        _Section(t('settings.search_aliases'), [
           if (c.searchNames.isEmpty)
-            const Padding(padding: EdgeInsets.only(bottom: 8), child:
-              Text('無別名設定\n在 config.json 中加入 "search_names"', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+            Padding(padding: const EdgeInsets.only(bottom: 8), child:
+              Text(t('settings.no_aliases'), style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
             )
           else
             ...c.searchNames.entries.map((e) => Padding(padding: const EdgeInsets.only(bottom: 4), child:
@@ -85,12 +116,51 @@ class _SettingsPageState extends State<SettingsPage> {
                 backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
                 foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 14),
               ),
-              child: const Text('儲存設定', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: Text(t('settings.save'), style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
           ),
         ),
         const SizedBox(height: 24),
       ]),
+    );
+  }
+}
+
+class _DropdownLabel extends StatelessWidget {
+  final String text;
+  const _DropdownLabel(this.text);
+  @override
+  Widget build(BuildContext context) {
+    return Padding(padding: const EdgeInsets.only(bottom: 4), child:
+      Text(text, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)));
+  }
+}
+
+class _Dropdown extends StatelessWidget {
+  final String value;
+  final List<DropdownMenuItem<String>> items;
+  final ValueChanged<String> onChanged;
+  const _Dropdown({required this.value, required this.items, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          dropdownColor: AppColors.surfaceLight,
+          isExpanded: true,
+          items: items,
+          onChanged: (v) { if (v != null) { onChanged(v); } },
+        ),
+      ),
     );
   }
 }

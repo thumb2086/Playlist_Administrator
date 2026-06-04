@@ -43,17 +43,14 @@ class ConfigService {
     final cfg = config;
     final basePath = cfg.basePath;
 
-    // Determine where to save
     String savePath;
     if (_configPath != null) {
       savePath = _configPath!;
     } else if (basePath.isNotEmpty) {
-      // First save: create the main config at basePath
       await Directory(basePath).create(recursive: true);
       savePath = '$basePath\\config.json';
       _configPath = savePath;
 
-      // Also create the pointer file in LOCALAPPDATA
       final pointerDir = Directory(_appDataDir);
       await pointerDir.create(recursive: true);
       final pointerFile = File('${pointerDir.path}\\config.json');
@@ -62,7 +59,6 @@ class ConfigService {
         'language': cfg.language,
       }));
     } else {
-      // No basePath set yet - can't save
       return;
     }
 

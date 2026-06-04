@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/config_service.dart';
+import '../services/i18n.dart';
 import '../widgets/dark_theme.dart';
 
 class StatsPage extends StatefulWidget {
@@ -16,7 +17,7 @@ class _StatsPageState extends State<StatsPage> {
   bool _loading = false;
 
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() { super.initState(); I18N.instance.addListener(() { if (mounted) setState(() {}); }); _load(); }
 
   Future<void> _load() async {
     setState(() => _loading = true);
@@ -68,27 +69,27 @@ class _StatsPageState extends State<StatsPage> {
       child: ListView(children: [
         // Metric cards
         Row(children: [
-          Expanded(child: _MetricCard('總檔案', '$total', Icons.audio_file_rounded, Colors.white, _loading)),
+          Expanded(child: _MetricCard(t('stats.total_files'), '$total', Icons.audio_file_rounded, Colors.white, _loading)),
           const SizedBox(width: 10),
-          Expanded(child: _MetricCard('MP3', '$_mp3', Icons.music_note_rounded, const Color(0xFF4FC3F7), _loading)),
+          Expanded(child: _MetricCard(t('stats.mp3'), '$_mp3', Icons.music_note_rounded, const Color(0xFF4FC3F7), _loading)),
           const SizedBox(width: 10),
-          Expanded(child: _MetricCard('M4A', '$_m4a', Icons.music_video_rounded, const Color(0xFFFFB74D), _loading)),
+          Expanded(child: _MetricCard(t('stats.m4a'), '$_m4a', Icons.music_video_rounded, const Color(0xFFFFB74D), _loading)),
           const SizedBox(width: 10),
-          Expanded(child: _MetricCard('FLAC', '$_flac', Icons.library_music_rounded, const Color(0xFFCE93D8), _loading)),
+          Expanded(child: _MetricCard(t('stats.flac'), '$_flac', Icons.library_music_rounded, const Color(0xFFCE93D8), _loading)),
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _MetricCard('容量', '${_sizeGb.toStringAsFixed(1)} GB', Icons.storage_rounded, AppColors.accent, _loading)),
+          Expanded(child: _MetricCard(t('stats.storage'), '${_sizeGb.toStringAsFixed(1)} GB', Icons.storage_rounded, AppColors.accent, _loading)),
           const SizedBox(width: 10),
-          Expanded(child: _MetricCard('雙格式', '$_dual', Icons.compare_arrows_rounded, const Color(0xFF80CBC4), _loading)),
+          Expanded(child: _MetricCard(t('stats.dual_format'), '$_dual', Icons.compare_arrows_rounded, const Color(0xFF80CBC4), _loading)),
           const SizedBox(width: 10),
-          Expanded(child: _MetricCard('播放清單', '$_playlists', Icons.playlist_play_rounded, const Color(0xFF81D4FA), _loading)),
+          Expanded(child: _MetricCard(t('stats.playlists'), '$_playlists', Icons.playlist_play_rounded, const Color(0xFF81D4FA), _loading)),
           const SizedBox(width: 10),
-          Expanded(child: _MetricCard('歌曲條目', '$_entries', Icons.list_alt_rounded, const Color(0xFFFFF176), _loading)),
+          Expanded(child: _MetricCard(t('stats.entries'), '$_entries', Icons.list_alt_rounded, const Color(0xFFFFF176), _loading)),
         ]),
         const SizedBox(height: 24),
         if (total > 0) ...[
-          const Text('格式分布', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          Text(t('stats.format_distribution'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
           Container(
             height: 220,
@@ -125,7 +126,7 @@ class _StatsPageState extends State<StatsPage> {
           child: TextButton.icon(
             onPressed: _load,
             icon: const Icon(Icons.refresh_rounded, size: 16),
-            label: const Text('重新整理資料'),
+            label: Text(t('stats.refresh')),
           ),
         ),
         const SizedBox(height: 24),
