@@ -69,39 +69,31 @@ class HistoryRecorder {
     final libDir = Directory(cfg.libraryPath);
     int mp3 = 0, m4a = 0, flac = 0;
     double size = 0;
+    final libStems = <String>{};
 
-    if (await libDir.exists()) {
-      await for (final e in libDir.list(recursive: true, followLinks: false)) {
+    Future<void> scanDir(Directory dir) async {
+      if (!await dir.exists()) return;
+      await for (final e in dir.list(recursive: true, followLinks: false)) {
         if (e is File) {
           final low = e.path.toLowerCase();
           size += await e.length() / (1024 * 1024 * 1024);
-          if (low.endsWith('.mp3')) mp3++;
-          else if (low.endsWith('.m4a')) m4a++;
-          else if (low.endsWith('.flac')) flac++;
+          final stem = File(e.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
+          if (low.endsWith('.mp3')) { mp3++; libStems.add(stem); }
+          else if (low.endsWith('.m4a')) { m4a++; libStems.add(stem); }
+          else if (low.endsWith('.flac')) { flac++; libStems.add(stem); }
         }
       }
     }
 
-    // Also scan mp3/m4a/flac subdirs of basePath
+    await scanDir(libDir);
     final baseDir = Directory(cfg.basePath);
     if (baseDir.path.toLowerCase() != libDir.path.toLowerCase() && await baseDir.exists()) {
       for (final sub in ['mp3', 'm4a', 'flac']) {
-        final subDir = Directory('${cfg.basePath}\\$sub');
-        if (await subDir.exists()) {
-          await for (final e in subDir.list(recursive: true, followLinks: false)) {
-            if (e is File) {
-              final low = e.path.toLowerCase();
-              size += await e.length() / (1024 * 1024 * 1024);
-              if (low.endsWith('.mp3')) mp3++;
-              else if (low.endsWith('.m4a')) m4a++;
-              else if (low.endsWith('.flac')) flac++;
-            }
-          }
-        }
+        await scanDir(Directory('${cfg.basePath}\\$sub'));
       }
     }
 
-    // Playlist stats
+    // Playlist stats (use pre-built stem set for O(1) lookup)
     final plDir = Directory(cfg.playlistsPath);
     final playlistTotals = <String, int>{};
     final playlistMatched = <String, int>{};
@@ -114,19 +106,10 @@ class HistoryRecorder {
             final entries = PlaylistParser.parseTrackEntries(e.path);
             final plName = baseName.replaceAll('.m3u8', '');
             playlistTotals[plName] = entries.length;
-            // Count matched: check if file exists in library
             int matched = 0;
             for (final entry in entries) {
               final stem = File(entry).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
-              // Search in libDir recursively
-              bool found = false;
-              await for (final f in libDir.list(recursive: true, followLinks: false)) {
-                if (f is File) {
-                  final fStem = File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
-                  if (fStem == stem) { found = true; break; }
-                }
-              }
-              if (found) matched++;
+              if (libStems.contains(stem)) matched++;
             }
             playlistMatched[plName] = matched;
           } catch (_) {}
@@ -145,7 +128,6 @@ class HistoryRecorder {
   static Future<void> record() async {
     final history = load();
     final snap = await collect();
-    // Keep max 100 snapshots, remove oldest if over
     history.add(snap);
     if (history.length > 100) history.removeAt(0);
     save(history);

@@ -89,8 +89,8 @@ class _PipelinePageState extends State<PipelinePage> {
         state: _state,
       );
       await orch.run(fromStep: fromStep, toStep: toStep);
-      // Record history snapshot after pipeline completes
-      HistoryRecorder.record();
+      // Record history snapshot in background (don't block UI)
+      HistoryRecorder.record().ignore();
     } catch (e) {
       _log('  ❌ Pipeline 執行錯誤: $e');
     } finally {

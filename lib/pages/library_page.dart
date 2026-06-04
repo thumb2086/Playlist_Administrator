@@ -127,7 +127,7 @@ class LibraryPageState extends State<LibraryPage> {
       }
     }
     if (mounted) setState(() { _stats = stats; _loading = false; });
-    HistoryRecorder.record();
+    HistoryRecorder.record().ignore();
   }
 
   void _addUrl() {
