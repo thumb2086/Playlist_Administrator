@@ -40,20 +40,22 @@ jobs:
 
       - run: flutter pub get
 
-      - uses: actions/cache@v4
-        with:
-          path: build/
-          key: flutter-build-${{ runner.os }}-${{ hashFiles('pubspec.lock', 'windows/**') }}
-          restore-keys: |
-            flutter-build-${{ runner.os }}-
-
       - name: Build Windows
         run: |
           flutter build windows --release
 
-      - name: Copy executable to root
+      - name: Verify executable
         run: |
+          if (-not (Test-Path build/windows/x64/runner/Release/playlist_administrator.exe)) {
+            throw "Executable not found!"
+          }
+          $size = (Get-Item build/windows/x64/runner/Release/playlist_administrator.exe).Length
+          Write-Host "Executable size: $size bytes"
+          if ($size -lt 1000000) {
+            Write-Host "Warning: Executable is very small ($size bytes)"
+          }
           Copy-Item build/windows/x64/runner/Release/playlist_administrator.exe PlaylistAdministrator.exe
+          Write-Host "Copied to root successfully"
 
       - uses: actions/upload-artifact@v4
         with:
