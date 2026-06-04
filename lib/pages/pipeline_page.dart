@@ -185,7 +185,7 @@ class _PipelinePageState extends State<PipelinePage> {
               clipBehavior: Clip.antiAlias,
               child: _logs.isEmpty
                   ? Center(child: Text(t('pipeline.log_placeholder'), style: const TextStyle(color: AppColors.textMuted, fontSize: 12)))
-                  : ListView.builder(
+                  : SelectionArea(child: ListView.builder(
                       controller: _scrollCtrl,
                       padding: const EdgeInsets.all(10),
                       itemCount: _logs.length,
@@ -197,11 +197,11 @@ class _PipelinePageState extends State<PipelinePage> {
                         else if (line.contains('---')) { color = Colors.cyan[300]; }
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 1),
-                          child: SelectableText(line, style: TextStyle(fontSize: 11, fontFamily: 'Consolas',
+                          child: Text(line, style: TextStyle(fontSize: 11, fontFamily: 'Consolas',
                               color: color ?? AppColors.textMuted, height: 1.4)),
                         );
                       },
-                    ),
+                    )),
             ),
           ),
           const SizedBox(height: 16),

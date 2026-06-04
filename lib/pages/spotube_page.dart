@@ -150,11 +150,11 @@ class _SpotubePageState extends State<SpotubePage> {
           clipBehavior: Clip.antiAlias,
           child: _logs.isEmpty
               ? Center(child: Text(t('spotube.log_placeholder'), style: const TextStyle(color: AppColors.textMuted, fontSize: 12)))
-              : ListView.builder(controller: _scrollCtrl, padding: const EdgeInsets.all(10),
+              : SelectionArea(child: ListView.builder(controller: _scrollCtrl, padding: const EdgeInsets.all(10),
                   itemCount: _logs.length, itemBuilder: (ctx, i) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 1),
-                    child: SelectableText(_logs[i], style: const TextStyle(fontSize: 11, fontFamily: 'Consolas', color: AppColors.textMuted, height: 1.4)),
-                  )),
+                    child: Text(_logs[i], style: const TextStyle(fontSize: 11, fontFamily: 'Consolas', color: AppColors.textMuted, height: 1.4)),
+                  ))),
         )),
         const SizedBox(height: 16),
           ]),
