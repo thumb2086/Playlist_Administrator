@@ -153,7 +153,7 @@ class _SpotubePageState extends State<SpotubePage> {
               : ListView.builder(controller: _scrollCtrl, padding: const EdgeInsets.all(10),
                   itemCount: _logs.length, itemBuilder: (ctx, i) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 1),
-                    child: Text(_logs[i], style: const TextStyle(fontSize: 11, fontFamily: 'Consolas', color: AppColors.textMuted, height: 1.4)),
+                    child: SelectableText(_logs[i], style: const TextStyle(fontSize: 11, fontFamily: 'Consolas', color: AppColors.textMuted, height: 1.4)),
                   )),
         )),
         const SizedBox(height: 16),

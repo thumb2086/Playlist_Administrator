@@ -197,7 +197,7 @@ class _PipelinePageState extends State<PipelinePage> {
                         else if (line.contains('---')) { color = Colors.cyan[300]; }
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 1),
-                          child: Text(line, style: TextStyle(fontSize: 11, fontFamily: 'Consolas',
+                          child: SelectableText(line, style: TextStyle(fontSize: 11, fontFamily: 'Consolas',
                               color: color ?? AppColors.textMuted, height: 1.4)),
                         );
                       },
