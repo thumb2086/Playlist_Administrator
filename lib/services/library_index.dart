@@ -11,10 +11,17 @@ class LibraryIndex {
   int _m4aCount = 0;
   bool _built = false;
 
-  // Static cache: reuse across pipeline steps within the same process lifetime
+  static String _cacheDir() {
+    final base = Platform.environment['LOCALAPPDATA'] ?? '';
+    return '$base\\Playlist Administrator\\data';
+  }
+  static String _fingerprintFile(String libraryPath) =>
+      '${_cacheDir()}\\index_fingerprint.json';
+
+  // Static in-memory cache: reuse across pipeline steps within the same process
   static LibraryIndex? _cache;
   static String? _cacheKey;
-  // Disk cache fingerprint: set of "path|mtime" strings
+  // Disk-backed fingerprint: persists across app restarts
   static Set<String>? _cachedFingerprint;
   static String _fingerprintPath = '';
 
@@ -37,6 +44,27 @@ class LibraryIndex {
     return fp;
   }
 
+  static Set<String>? _loadDiskFingerprint(String libraryPath) {
+    try {
+      final f = File(_fingerprintFile(libraryPath));
+      if (!f.existsSync()) return null;
+      final data = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+      final list = data['fingerprint'] as List<dynamic>?;
+      if (list == null) return null;
+      return list.map((e) => e as String).toSet();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static void _saveDiskFingerprint(String libraryPath, Set<String> fp) {
+    try {
+      final file = File(_fingerprintFile(libraryPath));
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(jsonEncode({'fingerprint': fp.toList()}), flush: true);
+    } catch (_) {}
+  }
+
   Future<void> build(String libraryPath, void Function(String) log) async {
     // Check static in-memory cache first
     if (_cache != null && _cacheKey == _resolvePath(libraryPath)) {
@@ -55,15 +83,17 @@ class LibraryIndex {
       else if (low.endsWith('.m4a')) { m4as.add(f); }
     }
 
+    // Load disk fingerprint if not already in memory
+    _cachedFingerprint ??= _loadDiskFingerprint(libraryPath);
     final currentFp = _buildFingerprint(allFiles);
-    // Check disk cache: if fingerprint unchanged, skip the expensive metadata scan
-    if (_cachedFingerprint != null && _fingerprintPath == libraryPath &&
+    final fpMatch = _cachedFingerprint != null &&
         _cachedFingerprint!.length == currentFp.length &&
-        _cachedFingerprint!.containsAll(currentFp)) {
-      log('MP3: ${mp3s.length}, M4A: ${m4as.length} (磁碟快取)');
+        _cachedFingerprint!.containsAll(currentFp);
+
+    if (fpMatch) {
+      log('MP3: ${mp3s.length}, M4A: ${m4as.length} (磁碟快取，跳過 metadata 掃描)');
       _mp3Count = mp3s.length;
       _m4aCount = m4as.length;
-      // Rebuild file info and filename index (fast, no ffprobe)
       _fileInfoMap = {};
       for (final f in allFiles) {
         final file = File(f);
@@ -76,7 +106,8 @@ class LibraryIndex {
       }
       _filenameIndex = _buildFilenameIndex(mp3s);
       _metadataIndex = {};
-      _saveToCache(libraryPath);
+      _built = true;
+      _saveToMemoryCache(libraryPath);
       return;
     }
 
@@ -101,16 +132,15 @@ class LibraryIndex {
     _metadataIndex = await _buildMetadataIndex(mp3s, log);
     log('索引完成');
 
-    _saveToCache(libraryPath);
+    _saveToMemoryCache(libraryPath);
+    _saveDiskFingerprint(libraryPath, currentFp);
   }
 
-  void _saveToCache(String libraryPath) {
-    // Save in-memory static cache
+  void _saveToMemoryCache(String libraryPath) {
     _cache = LibraryIndex();
     _cache!._copyFrom(this);
     _cacheKey = _resolvePath(libraryPath);
-    // Save fingerprint for disk cache
-    _cachedFingerprint = _buildFingerprint(_fileInfoMap.keys.toList());
+    _cachedFingerprint = null; // Force disk reload on next build
     _fingerprintPath = libraryPath;
   }
 
