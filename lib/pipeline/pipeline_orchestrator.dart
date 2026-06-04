@@ -5,6 +5,7 @@ import '../services/library_index.dart';
 import '../services/audio_converter.dart';
 import '../services/spotify_scraper.dart';
 import '../services/metadata_reader.dart';
+import '../services/metadata_enricher.dart';
 
 class PipelineOrchestrator {
   final AppConfig config;
@@ -293,7 +294,14 @@ class PipelineOrchestrator {
       progress(100);
       return;
     }
-    onLog('Metadata enrichment 已啟用');
+    onLog('Metadata enrichment 已啟用，開始掃描…');
+    final enricher = MetadataEnricher(
+      log: onLog,
+      libraryPath: config.libraryPath,
+    );
+    await enricher.enrichAll(onProgress: (current, total) {
+      progress(total > 0 ? current / total * 100 : 0);
+    });
     progress(100);
   }
 }

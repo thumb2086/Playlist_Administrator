@@ -2,6 +2,30 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' show parse;
+import 'config_service.dart';
+
+class SpotifyTrackMeta {
+  final String title;
+  final String artist;
+  final String? album;
+  final String? releaseDate;
+  final String? coverUrl;
+  SpotifyTrackMeta({
+    required this.title,
+    required this.artist,
+    this.album,
+    this.releaseDate,
+    this.coverUrl,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'title': title,
+    'artist': artist,
+    if (album != null) 'album': album,
+    if (releaseDate != null) 'release_date': releaseDate,
+    if (coverUrl != null) 'cover_url': coverUrl,
+  };
+}
 
 class SpotifyScraper {
   final void Function(String) log;
@@ -29,6 +53,7 @@ class SpotifyScraper {
     log('  連線到 Spotify Embed…');
     final resp = await http.get(Uri.parse(embedUrl), headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
     });
 
     if (resp.statusCode != 200) {
@@ -53,16 +78,21 @@ class SpotifyScraper {
         plName = playlist['name'] as String?;
         final items = playlist['items'] as List<dynamic>?;
         if (items == null) continue;
+
+        _ensureCacheDir();
         for (final item in items) {
           final track = item['track'] as Map<String, dynamic>?;
           if (track == null) continue;
           final artists = (track['artists'] as List<dynamic>?)
                   ?.map((a) => (a as Map<String, dynamic>)['name'] as String?)
                   .where((a) => a != null)
-                  .join(', ') ??
-              '';
+                  .join(', ') ?? '';
           final title = track['name'] as String? ?? '';
-          tracks.add(artists.isNotEmpty ? '$title - $artists' : title);
+          final displayName = artists.isNotEmpty ? '$title - $artists' : title;
+          tracks.add(displayName);
+
+          // Save metadata cache
+          _saveTrackCache(displayName, title, artists, track);
         }
       } catch (_) {}
     }
@@ -84,5 +114,52 @@ class SpotifyScraper {
     }
     await File(m3uPath).writeAsString(buffer.toString(), flush: true);
     log('  已儲存: $plName.m3u8');
+  }
+
+  void _ensureCacheDir() {
+    final base = ConfigService.instance.config.basePath;
+    if (base.isEmpty) return;
+    final dir = Directory('$base\\spotify_cache');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+  }
+
+  String _cacheDir() =>
+      '${ConfigService.instance.config.basePath}\\spotify_cache';
+
+  void _saveTrackCache(String displayName, String title, String artists, Map<String, dynamic> track) {
+    try {
+      final album = track['album'] as Map<String, dynamic>?;
+      String? albumName;
+      String? releaseDate;
+      String? coverUrl;
+
+      if (album != null) {
+        albumName = album['name'] as String?;
+        releaseDate = (album['release_date'] ?? album['date']) as String?;
+        final images = album['images'] as List<dynamic>?;
+        if (images != null && images.isNotEmpty) {
+          final img = images[0] as Map<String, dynamic>?;
+          coverUrl = img?['url'] as String?;
+        }
+      }
+
+      final meta = SpotifyTrackMeta(
+        title: title,
+        artist: artists,
+        album: albumName,
+        releaseDate: releaseDate,
+        coverUrl: coverUrl,
+      );
+
+      final cleanName = _sanitize(displayName);
+      final file = File('${_cacheDir()}\\$cleanName.json');
+      file.writeAsStringSync(jsonEncode(meta.toJson()), flush: true);
+    } catch (_) {}
+  }
+
+  String _sanitize(String name) {
+    return name.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 }

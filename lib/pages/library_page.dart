@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
 import '../services/i18n.dart';
+import '../services/usb_exporter.dart';
 import '../models/playlist.dart';
 import '../widgets/dark_theme.dart';
 
@@ -12,6 +13,7 @@ class LibraryPage extends StatefulWidget {
 }
 
 class LibraryPageState extends State<LibraryPage> {
+  bool _exporting = false;
   final _urlCtrl = TextEditingController();
   Map<String, _PlStats> _stats = {};
   bool _loading = false;
@@ -65,6 +67,71 @@ class LibraryPageState extends State<LibraryPage> {
     setState(() {});
   }
 
+  Future<void> _export() async {
+    if (_exporting) return;
+    final plDir = Directory(ConfigService.instance.config.playlistsPath);
+    if (!await plDir.exists()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('播放清單資料夾不存在')));
+      }
+      return;
+    }
+
+    final files = <String>[];
+    await for (final e in plDir.list()) {
+      if (e is File && e.path.toLowerCase().endsWith('.m3u8')) {
+        files.add(e.path);
+      }
+    }
+
+    if (files.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有可匯出的播放清單')));
+      }
+      return;
+    }
+
+    setState(() => _exporting = true);
+    final exporter = UsbExporter(log: (msg) => debugPrint(msg));
+    final result = await exporter.exportPlaylists(files);
+    setState(() => _exporting = false);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('匯出完成: ${result.copied}/${result.total} 首 → ${result.targetPath}'),
+        duration: const Duration(seconds: 3),
+      ));
+    }
+      return;
+    }
+
+    final files = <String>[];
+    await for (final e in plDir.list()) {
+      if (e is File && e.path.toLowerCase().endsWith('.m3u8')) {
+        files.add(e.path);
+      }
+    }
+
+    if (files.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有可匯出的播放清單')));
+      }
+      return;
+    }
+
+    setState(() => _exporting = true);
+    final exporter = UsbExporter(log: (msg) => debugPrint(msg));
+    final result = await exporter.exportPlaylists(files);
+    setState(() => _exporting = false);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('匯出完成: ${result.copied}/${result.total} 首 → ${result.targetPath}'),
+        duration: const Duration(seconds: 3),
+      ));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final playlists = ConfigService.instance.config.playlists;
@@ -104,6 +171,13 @@ class LibraryPageState extends State<LibraryPage> {
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.refresh_rounded),
                   tooltip: t('library.refresh'),
+                  style: IconButton.styleFrom(backgroundColor: AppColors.surfaceLight),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: _export,
+                  icon: const Icon(Icons.usb_rounded),
+                  tooltip: '匯出到 USB',
                   style: IconButton.styleFrom(backgroundColor: AppColors.surfaceLight),
                 ),
               ],
