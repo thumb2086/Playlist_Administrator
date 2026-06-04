@@ -11,7 +11,7 @@ import '../services/snapshot_manager.dart';
 class PipelineOrchestrator {
   final AppConfig config;
   final void Function(String) onLog;
-  final void Function(int current, int total, String step) onProgress;
+  final void Function(int current, int total, int stepIndex) onProgress;
   final PipelineState state;
 
   PipelineOrchestrator({
@@ -38,12 +38,12 @@ class PipelineOrchestrator {
       if (state.isCancelled) break;
 
       onLog('--- Step ${i + 1}/${steps.length}: ${steps[i].$1} ---');
-      onProgress(0, 100, steps[i].$1);
+      onProgress(0, 100, i);
 
       try {
         await _runStep(i, (pct) {
           final global = doneWeight + (pct / 100.0 * steps[i].$2);
-          onProgress(global.toInt(), 100, steps[i].$1);
+          onProgress(global.toInt(), 100, i);
         });
       } catch (e) {
         onLog('  ❌ ${steps[i].$1} 失敗: $e');

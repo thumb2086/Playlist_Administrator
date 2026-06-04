@@ -65,6 +65,8 @@ class _PipelinePageState extends State<PipelinePage> {
     setState(() { _running = true; _progress = 0; _currentStep = fromStep; });
     _state = PipelineState();
     _log(t('pipeline.starting'));
+    // Yield to event loop so the running state renders before pipeline starts
+    await Future<void>.delayed(const Duration(milliseconds: 50));
 
     try {
       await ChineseConverter.instance.load();
@@ -75,17 +77,16 @@ class _PipelinePageState extends State<PipelinePage> {
     final orch = PipelineOrchestrator(
       config: ConfigService.instance.config,
       onLog: _log,
-      onProgress: (c, t, s) {
+      onProgress: (c, t, stepIdx) {
         if (mounted) setState(() {
           _progress = t > 0 ? c / t : 0.0;
-          final idx = _stepLabels.indexOf(s);
-          if (idx >= 0) _currentStep = idx;
+          _currentStep = stepIdx;
         });
       },
       state: _state,
     );
     await orch.run(fromStep: fromStep);
-    if (mounted) setState(() => _running = false);
+    if (mounted) setState(() { _running = false; _progress = 1.0; });
   }
 
   @override
@@ -110,31 +111,26 @@ class _PipelinePageState extends State<PipelinePage> {
           ]),
           const SizedBox(height: 20),
           // Overall progress
-          if (_running || _progress > 0) ...[
-            TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: _running ? _progress : 1.0),
-              duration: const Duration(milliseconds: 500),
-              curve: Curves.easeOutCubic,
-              builder: (ctx, v, _) => Column(children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: v, backgroundColor: AppColors.surfaceLight,
-                    valueColor: const AlwaysStoppedAnimation(AppColors.accent), minHeight: 7,
-                  ),
+          AnimatedSize(duration: const Duration(milliseconds: 300), curve: Curves.easeOut,
+            child: _progress > 0 ? Column(children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: _progress, backgroundColor: AppColors.surfaceLight,
+                  valueColor: const AlwaysStoppedAnimation(AppColors.accent), minHeight: 7,
                 ),
-                const SizedBox(height: 8),
-                Row(children: [
-                  Text('${_stepLabels[_currentStep]}  (${(_progress * 100).toStringAsFixed(0)}%)',
-                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-                  const Spacer(),
-                  if (_running)
-                    const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
-                ]),
+              ),
+              const SizedBox(height: 8),
+              Row(children: [
+                Text('${_stepLabels[_currentStep]}  (${(_progress * 100).toStringAsFixed(0)}%)',
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                const Spacer(),
+                if (_running)
+                  const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
               ]),
-            ),
-          ],
-          if (_running || _progress > 0) const SizedBox(height: 16),
+            ]) : const SizedBox.shrink(),
+          ),
+          if (_progress > 0) const SizedBox(height: 16),
           // Step indicators
           Row(
             children: List.generate(_stepLabels.length, (i) {
