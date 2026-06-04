@@ -38,7 +38,6 @@ class ChineseConverter {
       _s2t![e.key] = e.value as String;
       _t2s![e.value as String] = e.key;
     }
-    }
 
     // Sort keys by length descending for longest-prefix-match
     _sKeys = _s2t!.keys.toList()..sort((a, b) => b.length.compareTo(a.length));
