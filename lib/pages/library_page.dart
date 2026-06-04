@@ -22,6 +22,7 @@ class LibraryPageState extends State<LibraryPage> {
   @override
   void dispose() {
     _urlCtrl.dispose();
+    ConfigService.instance.removeListener(_onConfigChanged);
     super.dispose();
   }
 
@@ -29,7 +30,12 @@ class LibraryPageState extends State<LibraryPage> {
   void initState() {
     super.initState();
     I18N.instance.addListener(() { if (mounted) setState(() {}); });
+    ConfigService.instance.addListener(_onConfigChanged);
     _refresh();
+  }
+
+  void _onConfigChanged() {
+    if (mounted) _refresh();
   }
 
   Future<void> _refresh() async {
