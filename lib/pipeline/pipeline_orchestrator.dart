@@ -120,7 +120,7 @@ class PipelineOrchestrator {
       await state.waitIfPaused();
       if (state.isCancelled) return;
 
-      final existing = index.findMp3ForM4a(m4a, useMtime: true);
+      final existing = await index.findMp3ForM4a(m4a, useMtime: true);
       if (existing != null) {
         skipped++;
         continue;

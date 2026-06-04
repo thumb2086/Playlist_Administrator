@@ -348,7 +348,7 @@ class LibraryIndex {
     return parts.where((p) => p.isNotEmpty).toList();
   }
 
-  String? findMp3ForM4a(String m4aPath, {bool useMtime = true}) {
+  Future<String?> findMp3ForM4a(String m4aPath, {bool useMtime = true}) async {
     final basename = File(m4aPath).uri.pathSegments.last;
     final stem = basename.replaceAll(RegExp(r'\.\w+$'), '');
     final tokens = _normalize(stem);
@@ -380,7 +380,7 @@ class LibraryIndex {
 
     // 3. Try matching by M4A metadata (title/artist) against metadata index
     try {
-      final m4aMeta = MetadataReader.read(m4aPath);
+      final m4aMeta = await MetadataReader.read(m4aPath);
       if (m4aMeta.title != null && m4aMeta.title!.isNotEmpty) {
         final titleTokens = _normalize(m4aMeta.title!);
         final metaMatch = _metadataIndex.keys.firstWhere(
