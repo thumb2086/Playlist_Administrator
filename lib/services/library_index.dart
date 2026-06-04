@@ -8,7 +8,7 @@ class LibraryIndex {
   Map<String, FileInfo> _fileInfoMap = {};
   int _mp3Count = 0;
   int _m4aCount = 0;
-  final bool _built = false;
+  bool _built = false;
 
   int get mp3Count => _mp3Count;
   int get m4aCount => _m4aCount;
@@ -102,7 +102,6 @@ class LibraryIndex {
     return parts.where((p) => p.isNotEmpty).toList();
   }
 
-  /// Find matching MP3 for a given M4A file using filename + metadata matching.
   String? findMp3ForM4a(String m4aPath, {bool useMtime = true}) {
     final basename = File(m4aPath).uri.pathSegments.last;
     final stem = basename.replaceAll(RegExp(r'\.\w+$'), '');
@@ -110,7 +109,6 @@ class LibraryIndex {
 
     final m4aInfo = _fileInfoMap[m4aPath];
 
-    // 1. Exact filename match
     final exact = _findInIndex(tokens, _filenameIndex);
     if (exact != null) {
       final mp3Info = _fileInfoMap[exact];
@@ -119,7 +117,6 @@ class LibraryIndex {
       }
     }
 
-    // 2. Subset filename match
     for (final entry in _filenameIndex.entries) {
       if (_isSubset(tokens, entry.key) || _isSubset(entry.key, tokens)) {
         for (final f in entry.value) {
@@ -133,7 +130,6 @@ class LibraryIndex {
       }
     }
 
-    // 3. Metadata match
     final meta = _metadataIndex.keys.firstWhere(
       (k) => _isSubset(tokens, k) || _isSubset(k, tokens),
       orElse: () => [],
@@ -168,6 +164,17 @@ class LibraryIndex {
   bool _isSubset(List<String> small, List<String> big) {
     if (small.length > big.length) return false;
     return small.every((s) => big.any((b) => b.contains(s)));
+  }
+
+  bool isSongInPlaylists(String songName, List<String> playlistSongs) {
+    final tokens = _normalize(songName);
+    if (tokens.isEmpty) return false;
+    for (final ps in playlistSongs) {
+      final psTokens = _normalize(ps);
+      if (_listEq(tokens, psTokens)) return true;
+      if (_isSubset(tokens, psTokens) || _isSubset(psTokens, tokens)) return true;
+    }
+    return false;
   }
 }
 

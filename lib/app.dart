@@ -6,6 +6,9 @@ import 'pages/stats_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/spotube_page.dart';
 import 'services/i18n.dart';
+import 'services/config_service.dart';
+import 'services/version_checker.dart';
+import 'widgets/update_dialog.dart';
 
 class PlaylistAdminApp extends StatefulWidget {
   const PlaylistAdminApp({super.key});
@@ -17,24 +20,27 @@ class _PlaylistAdminAppState extends State<PlaylistAdminApp> {
   @override
   void initState() {
     super.initState();
-    I18N.instance.addListener(_onLangChange);
+    I18N.instance.addListener(_onChanged);
+    ConfigService.instance.addListener(_onChanged);
   }
 
   @override
   void dispose() {
-    I18N.instance.removeListener(_onLangChange);
+    I18N.instance.removeListener(_onChanged);
+    ConfigService.instance.removeListener(_onChanged);
     super.dispose();
   }
 
-  void _onLangChange() => setState(() {});
+  void _onChanged() => setState(() {});
 
   @override
   Widget build(BuildContext context) {
+    final isDark = ConfigService.instance.config.theme != 'light';
     return MaterialApp(
       title: t('app.title'),
-      theme: buildDarkTheme(),
+      theme: isDark ? buildDarkTheme() : buildLightTheme(),
       darkTheme: buildDarkTheme(),
-      themeMode: ThemeMode.dark,
+      themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
       home: const MainShell(),
       debugShowCheckedModeBanner: false,
     );
@@ -68,6 +74,18 @@ class _MainShellState extends State<MainShell> with SingleTickerProviderStateMix
     _animCtrl.forward();
     _rebuildNav();
     I18N.instance.addListener(_rebuildNav);
+    _checkForUpdates();
+  }
+
+  void _checkForUpdates() {
+    if (!VersionChecker.shouldCheck()) return;
+    Future.delayed(const Duration(seconds: 3), () async {
+      final info = await VersionChecker.checkForUpdate();
+      if (!info.hasUpdate) return;
+      if (mounted) {
+        showDialog(context: context, builder: (_) => UpdateDialog(info: info));
+      }
+    });
   }
 
   @override

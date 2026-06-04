@@ -61,21 +61,11 @@ class PipelineOrchestrator {
 
   Future<void> _runStep(int index, void Function(double) progress) async {
     switch (index) {
-      case 0:
-        await _stepConvert(progress);
-        break;
-      case 1:
-        await _stepScrape(progress);
-        break;
-      case 2:
-        await _stepPrune(progress);
-        break;
-      case 3:
-        await _stepUnsorted(progress);
-        break;
-      case 4:
-        await _stepMetadata(progress);
-        break;
+      case 0: await _stepConvert(progress); break;
+      case 1: await _stepScrape(progress); break;
+      case 2: await _stepPrune(progress); break;
+      case 3: await _stepUnsorted(progress); break;
+      case 4: await _stepMetadata(progress); break;
     }
   }
 
@@ -100,7 +90,6 @@ class PipelineOrchestrator {
     final index = LibraryIndex();
     await index.build(config.libraryPath, onLog);
 
-    // Build task list using LibraryIndex for efficient matching
     final tasks = <_ConvertTask>[];
     int skipped = 0;
 
@@ -108,7 +97,6 @@ class PipelineOrchestrator {
       await state.waitIfPaused();
       if (state.isCancelled) return;
 
-      // Check if MP3 already exists (via index + mtime)
       final existing = index.findMp3ForM4a(m4a, useMtime: true);
       if (existing != null) {
         skipped++;
@@ -129,7 +117,6 @@ class PipelineOrchestrator {
     onLog('待轉檔: ${tasks.length}, 跳過: $skipped');
     if (tasks.isEmpty) return;
 
-    // Convert in batches
     const batchSize = 50;
     int converted = 0;
     for (int i = 0; i < tasks.length; i += batchSize) {
@@ -191,31 +178,34 @@ class PipelineOrchestrator {
       await state.waitIfPaused();
 
       final f = files[i];
-      final content = await File(f).readAsLines();
-      final newLines = <String>[];
-      int removed = 0;
+      try {
+        final content = await File(f).readAsLines();
+        final newLines = <String>[];
+        int removed = 0;
 
-      for (final line in content) {
-        if (line.startsWith('#') || line.trim().isEmpty) {
-          newLines.add(line);
-        } else {
-          // Try to resolve the path
-          String resolved = line;
-          if (!File(line).existsSync()) {
-            resolved = '${config.libraryPath}\\${File(line).uri.pathSegments.last}';
-          }
-          if (await File(resolved).exists()) {
+        for (final line in content) {
+          if (line.startsWith('#') || line.trim().isEmpty) {
             newLines.add(line);
           } else {
-            removed++;
+            String resolved = line;
+            if (!File(line).existsSync()) {
+              resolved = '${config.libraryPath}\\${File(line).uri.pathSegments.last}';
+            }
+            if (await File(resolved).exists()) {
+              newLines.add(line);
+            } else {
+              removed++;
+            }
           }
         }
-      }
 
-      if (removed > 0) {
-        await File(f).writeAsString('${newLines.join('\n')}\n');
-        totalRemoved += removed;
-        onLog('  ${File(f).uri.pathSegments.last}: 移除 $removed 首');
+        if (removed > 0) {
+          await File(f).writeAsString('${newLines.join('\n')}\n');
+          totalRemoved += removed;
+          onLog('  ${File(f).uri.pathSegments.last}: 移除 $removed 首');
+        }
+      } catch (e) {
+        onLog('  ⚠️ 無法處理 ${File(f).uri.pathSegments.last}: $e');
       }
       progress((i + 1) / totalFiles * 100);
     }
@@ -233,28 +223,31 @@ class PipelineOrchestrator {
       }
     }
 
-    // Collect all songs already in playlists
     final allPlaylistSongs = <String>{};
     for (final pl in playlists) {
-      final lines = await File(pl).readAsLines();
-      for (final line in lines) {
-        if (!line.startsWith('#') && line.trim().isNotEmpty) {
-          allPlaylistSongs.add(File(line).uri.pathSegments.last);
+      try {
+        final lines = await File(pl).readAsLines();
+        for (final line in lines) {
+          if (!line.startsWith('#') && line.trim().isNotEmpty) {
+            allPlaylistSongs.add(File(line).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), ''));
+          }
         }
-      }
+      } catch (_) {}
     }
 
-    // Find unsorted files
     final unsorted = <String>[];
     final libDir = Directory(config.libraryPath);
     if (await libDir.exists()) {
+      final index = LibraryIndex();
+      await index.build(config.libraryPath, (_) {});
+
       await for (final e in libDir.list(recursive: true, followLinks: false)) {
         if (e is File) {
           final low = e.path.toLowerCase();
           if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac')) {
-            final name = e.uri.pathSegments.last;
-            if (!allPlaylistSongs.contains(name)) {
-              unsorted.add(name);
+            final stem = e.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+            if (!index.isSongInPlaylists(stem, allPlaylistSongs.toList())) {
+              unsorted.add(stem);
             }
           }
         }
@@ -262,13 +255,32 @@ class PipelineOrchestrator {
     }
 
     if (unsorted.isNotEmpty) {
-      final sb = StringBuffer('#EXTM3U\n');
-      for (final s in unsorted) {
-        sb.writeln('#EXTINF:-1,$s');
-        sb.writeln(s);
+      final existing = <String>{};
+      if (await File('${config.playlistsPath}\\Unsorted.m3u8').exists()) {
+        try {
+          final lines = await File('${config.playlistsPath}\\Unsorted.m3u8').readAsLines();
+          for (final line in lines) {
+            if (!line.startsWith('#') && line.trim().isNotEmpty) {
+              existing.add(File(line).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), ''));
+            }
+          }
+        } catch (_) {}
       }
-      await File('${config.playlistsPath}\\Unsorted.m3u8').writeAsString(sb.toString());
-      onLog('已為 ${unsorted.length} 首未分類歌曲建立清單');
+      final newUnsorted = unsorted.where((s) => !existing.contains(s)).toList();
+
+      if (newUnsorted.isNotEmpty) {
+        final sb = StringBuffer();
+        if (existing.isEmpty) sb.write('#EXTM3U\n');
+        for (final s in newUnsorted) {
+          sb.writeln('#EXTINF:-1,$s');
+          sb.writeln(s);
+        }
+        await File('${config.playlistsPath}\\Unsorted.m3u8')
+            .writeAsString(sb.toString(), mode: existing.isEmpty ? FileMode.write : FileMode.append);
+        onLog('已為 ${newUnsorted.length} 首新未分類歌曲更新清單 (共 ${unsorted.length} 首)');
+      } else {
+        onLog('未分類歌曲共 ${unsorted.length} 首，無新增');
+      }
     } else {
       onLog('沒有未分類歌曲');
     }

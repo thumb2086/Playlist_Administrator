@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import '../models/config_model.dart';
 
-class ConfigService {
+class ConfigService extends ChangeNotifier {
   ConfigService._();
   static final ConfigService instance = ConfigService._();
 
@@ -37,6 +38,7 @@ class ConfigService {
 
     config = AppConfig();
     _configPath = null;
+    notifyListeners();
   }
 
   Future<void> save() async {
@@ -63,5 +65,6 @@ class ConfigService {
     }
 
     await File(savePath).writeAsString(jsonEncode(cfg.toJson()));
+    notifyListeners();
   }
 }
