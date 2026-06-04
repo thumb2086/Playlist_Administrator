@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../version.dart';
 
 class I18N extends ChangeNotifier {
   I18N._();
@@ -36,7 +37,7 @@ class I18N extends ChangeNotifier {
     'app.sidebar.settings': '設定',
     'app.sidebar.playlist': 'Playlist',
     'app.sidebar.admin': 'Administrator',
-    'app.version': 'v2.0.2-beta.8',
+    'app.version': 'v$appVersion',
     'app.header.badge': 'PLAYLIST ADMIN',
 
     // Library
@@ -153,7 +154,7 @@ class I18N extends ChangeNotifier {
     'app.sidebar.settings': 'Settings',
     'app.sidebar.playlist': 'Playlist',
     'app.sidebar.admin': 'Administrator',
-    'app.version': 'v2.0.2-beta.8',
+    'app.version': 'v$appVersion',
     'app.header.badge': 'PLAYLIST ADMIN',
 
     'library.url_hint': 'Paste Spotify playlist URL…',

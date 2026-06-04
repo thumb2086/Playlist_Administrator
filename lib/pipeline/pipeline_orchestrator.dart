@@ -23,7 +23,7 @@ class PipelineOrchestrator {
     PipelineState? state,
   }) : state = state ?? PipelineState();
 
-  Future<void> run({int fromStep = 0}) async {
+  Future<void> run({int fromStep = 0, int? toStep}) async {
     final steps = [
       ('Convert M4A → MP3', 35.0),
       ('Scrape Spotify playlists', 30.0),
@@ -32,9 +32,10 @@ class PipelineOrchestrator {
       ('Enrich metadata', 10.0),
     ];
 
+    final end = toStep ?? steps.length;
     int doneWeight = 0;
 
-    for (int i = fromStep; i < steps.length; i++) {
+    for (int i = fromStep; i < end; i++) {
       if (state.isCancelled) break;
       await state.waitIfPaused();
       if (state.isCancelled) break;

@@ -60,12 +60,11 @@ class _PipelinePageState extends State<PipelinePage> {
     });
   }
 
-  Future<void> _run({int fromStep = 0}) async {
+  Future<void> _run({int fromStep = 0, int? toStep}) async {
     if (_running) return;
     setState(() { _running = true; _progress = 0; _currentStep = fromStep; });
     _state = PipelineState();
     _log(t('pipeline.starting'));
-    // Yield to event loop so the running state renders before pipeline starts
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
     try {
@@ -88,7 +87,7 @@ class _PipelinePageState extends State<PipelinePage> {
         },
         state: _state,
       );
-      await orch.run(fromStep: fromStep);
+      await orch.run(fromStep: fromStep, toStep: toStep);
     } catch (e) {
       _log('  ❌ Pipeline 執行錯誤: $e');
     } finally {
@@ -106,9 +105,9 @@ class _PipelinePageState extends State<PipelinePage> {
           // Controls
           Wrap(spacing: 8, runSpacing: 8, children: [
             _PButton(t('pipeline.run_all'), Icons.play_arrow_rounded, () => _run(), _running, isPrimary: true),
-            _PButton(t('pipeline.run_convert'), Icons.transform, () => _run(fromStep: 0), _running),
-            _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1), _running),
-            _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2), _running),
+            _PButton(t('pipeline.run_convert'), Icons.transform, () => _run(fromStep: 0, toStep: 1), _running),
+            _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1, toStep: 2), _running),
+            _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2, toStep: 3), _running),
             if (_running) ...[
               _PButton(t('pipeline.pause'), Icons.pause_rounded, () {
                 _state.pause();

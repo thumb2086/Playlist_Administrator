@@ -112,16 +112,21 @@ class LibraryIndex {
       List<String> files, void Function(String) log) async {
     final index = <List<String>, List<String>>{};
     int count = 0;
-    for (final f in files) {
-      final meta = await MetadataReader.read(f);
-      if (meta.title != null && meta.title!.isNotEmpty) {
-        final tokens = _normalize(meta.title!);
-        if (tokens.isNotEmpty) {
-          index.putIfAbsent(tokens, () => []).add(f);
+    const batchSize = 20;
+    for (int i = 0; i < files.length; i += batchSize) {
+      final batch = files.skip(i).take(batchSize).toList();
+      final metas = await Future.wait(batch.map((f) => MetadataReader.read(f)));
+      for (int j = 0; j < batch.length; j++) {
+        final meta = metas[j];
+        if (meta.title != null && meta.title!.isNotEmpty) {
+          final tokens = _normalize(meta.title!);
+          if (tokens.isNotEmpty) {
+            index.putIfAbsent(tokens, () => []).add(batch[j]);
+          }
         }
       }
-      count++;
-      if (count % 500 == 0) log('  metadata 索引: $count/${files.length}');
+      count += batch.length;
+      if (count % 500 == 0 || count >= files.length) log('  metadata 索引: $count/${files.length}');
     }
     return index;
   }
