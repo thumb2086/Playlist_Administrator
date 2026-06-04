@@ -4,6 +4,7 @@ import '../services/config_service.dart';
 import '../services/i18n.dart';
 import '../services/usb_exporter.dart';
 import '../services/playlist_parser.dart';
+import '../services/history_recorder.dart';
 import '../models/playlist.dart';
 import '../widgets/dark_theme.dart';
 
@@ -126,6 +127,7 @@ class LibraryPageState extends State<LibraryPage> {
       }
     }
     if (mounted) setState(() { _stats = stats; _loading = false; });
+    HistoryRecorder.record();
   }
 
   void _addUrl() {

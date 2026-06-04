@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/config_service.dart';
 import '../services/i18n.dart';
 import '../services/chinese_converter.dart';
+import '../services/history_recorder.dart';
 import '../pipeline/pipeline_orchestrator.dart';
 import '../models/pipeline_step.dart';
 import '../widgets/dark_theme.dart';
@@ -88,6 +89,8 @@ class _PipelinePageState extends State<PipelinePage> {
         state: _state,
       );
       await orch.run(fromStep: fromStep, toStep: toStep);
+      // Record history snapshot after pipeline completes
+      HistoryRecorder.record();
     } catch (e) {
       _log('  ❌ Pipeline 執行錯誤: $e');
     } finally {

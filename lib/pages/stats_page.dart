@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/config_service.dart';
 import '../services/i18n.dart';
+import '../services/history_recorder.dart';
 import '../widgets/dark_theme.dart';
 
 class StatsPage extends StatefulWidget {
@@ -15,9 +16,15 @@ class _StatsPageState extends State<StatsPage> {
   int _mp3 = 0, _m4a = 0, _flac = 0, _playlists = 0, _entries = 0, _dual = 0;
   double _sizeGb = 0;
   bool _loading = false;
+  List<Snapshot> _history = [];
 
   @override
-  void initState() { super.initState(); I18N.instance.addListener(() { if (mounted) setState(() {}); }); _load(); }
+  void initState() {
+    super.initState();
+    I18N.instance.addListener(() { if (mounted) setState(() {}); });
+    _history = HistoryRecorder.load();
+    _load();
+  }
 
   Future<void> _load() async {
     setState(() => _loading = true);
@@ -88,6 +95,13 @@ class _StatsPageState extends State<StatsPage> {
           Expanded(child: _MetricCard(t('stats.entries'), '$_entries', Icons.list_alt_rounded, const Color(0xFFFFF176), _loading)),
         ]),
         const SizedBox(height: 24),
+        // History charts
+        if (_history.length >= 2) ...[
+          _ChartCard('總檔案數變化', total, _buildFileChart()),
+          const SizedBox(height: 14),
+          _ChartCard('歌曲完成度變化', _entries, _buildPlaylistChart()),
+          const SizedBox(height: 14),
+        ],
         if (total > 0) ...[
           Text(t('stats.format_distribution'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
@@ -124,12 +138,91 @@ class _StatsPageState extends State<StatsPage> {
         const SizedBox(height: 16),
         Center(
           child: TextButton.icon(
-            onPressed: _load,
+            onPressed: () async {
+              await HistoryRecorder.record();
+              setState(() => _history = HistoryRecorder.load());
+              await _load();
+            },
             icon: const Icon(Icons.refresh_rounded, size: 16),
             label: Text(t('stats.refresh')),
           ),
         ),
         const SizedBox(height: 24),
+      ]),
+    );
+  }
+
+  Widget _buildFileChart() {
+    final spots = <FlSpot>[];
+    for (int i = 0; i < _history.length; i++) {
+      final s = _history[i];
+      spots.add(FlSpot(i.toDouble(), (s.mp3 + s.m4a + s.flac).toDouble()));
+    }
+    return LineChart(LineChartData(
+      gridData: const FlGridData(show: false),
+      titlesData: const FlTitlesData(show: false),
+      borderData: FlBorderData(show: false),
+      minY: spots.map((s) => s.y).reduce((a, b) => a < b ? a : b) - 50,
+      lineBarsData: [
+        LineChartBarData(spots: spots, isCurved: true,
+          color: AppColors.accent, barWidth: 2,
+          dotData: const FlDotData(show: false),
+          belowBarData: BarAreaData(show: true, color: AppColors.accent.withValues(alpha: 0.1))),
+      ],
+    ));
+  }
+
+  Widget _buildPlaylistChart() {
+    final colors = [AppColors.accent, const Color(0xFF4FC3F7), const Color(0xFFFFB74D),
+                    const Color(0xFFCE93D8), const Color(0xFF80CBC4)];
+    final plNames = <String>{};
+    for (final s in _history) {
+      plNames.addAll(s.playlistMatched.keys);
+    }
+    final plList = plNames.take(10).toList();
+
+    return LineChart(LineChartData(
+      gridData: const FlGridData(show: false),
+      titlesData: const FlTitlesData(show: false),
+      borderData: FlBorderData(show: false),
+      lineBarsData: plList.asMap().entries.map((entry) {
+        final pi = entry.key;
+        final name = entry.value;
+        final spots = <FlSpot>[];
+        for (int i = 0; i < _history.length; i++) {
+          final matched = _history[i].playlistMatched[name] ?? 0;
+          spots.add(FlSpot(i.toDouble(), matched.toDouble()));
+        }
+        return LineChartBarData(spots: spots, isCurved: true,
+          color: colors[pi % colors.length], barWidth: 1.5,
+          dotData: const FlDotData(show: false));
+      }).toList(),
+    ));
+  }
+}
+
+class _ChartCard extends StatelessWidget {
+  final String title;
+  final int currentValue;
+  final Widget chart;
+  const _ChartCard(this.title, this.currentValue, this.chart);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card, borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const Spacer(),
+          Text('目前 $currentValue', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+        ]),
+        const SizedBox(height: 12),
+        SizedBox(height: 140, child: chart),
       ]),
     );
   }
