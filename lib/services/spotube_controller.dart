@@ -379,6 +379,6 @@ Future<void> _wait(int ms) async {
       _spotubeAbortedGlobal = true;
       break;
     }
-    await Future.delayed(const Duration(milliseconds: step));
+    await Future.delayed(Duration(milliseconds: step));
   }
 }
