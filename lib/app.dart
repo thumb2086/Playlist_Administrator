@@ -5,6 +5,7 @@ import 'pages/pipeline_page.dart';
 import 'pages/stats_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/spotube_page.dart';
+import 'pages/player_page.dart';
 import 'services/i18n.dart';
 import 'services/config_service.dart';
 import 'services/version_checker.dart';
@@ -61,6 +62,7 @@ class _MainShellState extends State<MainShell> with SingleTickerProviderStateMix
 
   final _pages = const [
     LibraryPage(),
+    PlayerPage(),
     PipelinePage(),
     StatsPage(),
     SpotubePage(),
@@ -99,6 +101,7 @@ class _MainShellState extends State<MainShell> with SingleTickerProviderStateMix
     setState(() {
       _navItems = [
         _NavItemData(Icons.library_music_outlined, Icons.library_music, t('app.sidebar.library')),
+        _NavItemData(Icons.music_note_outlined, Icons.music_note, t('app.sidebar.player')),
         _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, t('app.sidebar.pipeline')),
         _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, t('app.sidebar.stats')),
         _NavItemData(Icons.download_outlined, Icons.download, t('app.sidebar.spotube')),

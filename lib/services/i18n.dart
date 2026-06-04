@@ -29,6 +29,7 @@ class I18N extends ChangeNotifier {
     // App
     'app.title': '播放清單管理',
     'app.sidebar.library': '歌單庫',
+    'app.sidebar.player': '播放器',
     'app.sidebar.pipeline': 'Pipeline',
     'app.sidebar.stats': '統計',
     'app.sidebar.spotube': 'Spotube',
@@ -125,6 +126,11 @@ class I18N extends ChangeNotifier {
     'settings.language': '語言 / Language',
     'settings.no_aliases': '無別名設定\n在 config.json 中加入 "search_names"',
 
+    // Player
+    'player.select_playlist': '請選擇播放清單',
+    'player.no_lyrics': '(無同步歌詞)',
+    'player.lyric_offset': '歌詞偏移',
+
     // Common
     'common.loading': '載入中…',
     'common.error': '錯誤',
@@ -138,6 +144,7 @@ class I18N extends ChangeNotifier {
   static final Map<String, String> _en = {
     'app.title': 'Playlist Administrator',
     'app.sidebar.library': 'Library',
+    'app.sidebar.player': 'Player',
     'app.sidebar.pipeline': 'Pipeline',
     'app.sidebar.stats': 'Stats',
     'app.sidebar.spotube': 'Spotube',
@@ -221,6 +228,11 @@ class I18N extends ChangeNotifier {
     'settings.exact_match': 'Exact Filename Match',
     'settings.convert_matched_only': 'Convert Matched Only',
     'settings.no_aliases': 'No aliases set\nAdd "search_names" in config.json',
+
+    // Player
+    'player.select_playlist': 'Select a playlist',
+    'player.no_lyrics': '(No synced lyrics)',
+    'player.lyric_offset': 'Lyric Offset',
 
     'common.loading': 'Loading…',
     'common.error': 'Error',
