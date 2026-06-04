@@ -42,24 +42,32 @@ jobs:
 
       - run: flutter pub get
 
+      - name: Analyze
+        if: github.ref_type != 'tag'
+        run: flutter analyze
+
       - name: Build Windows
+        if: github.ref_type == 'tag'
         run: flutter build windows --release --dart-define=APP_VERSION=$env:APP_VERSION
 
       - name: Install Inno Setup
+        if: github.ref_type == 'tag'
         run: choco install innosetup --no-progress -y
 
       - name: Build installer
+        if: github.ref_type == 'tag'
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:APP_VERSION" "installer\PlaylistAdministrator.iss"
 
       - name: Upload artifact
+        if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v4
         with:
           name: PlaylistAdministrator-Setup
           path: installer\PlaylistAdministrator-Setup-*.exe
 
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           name: "Playlist Administrator ${{ github.ref_name }}"
