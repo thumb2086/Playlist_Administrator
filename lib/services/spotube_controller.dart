@@ -18,6 +18,9 @@ int _enumFindSpotube(int hwnd, int param) {
 }
 
 int? _spotubeHwnd;
+bool _spotubeAbortedGlobal = false;
+
+bool _isKeyPressed(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
 class SpotubeController {
   int? _prevHwnd;
@@ -56,8 +59,8 @@ class SpotubeController {
   SpotubeController({required this.libraryPath, Map<String, List<int>>? coords, this.exePath})
       : _coords = coords ?? {};
 
-  void abort() { _aborted = true; }
-  bool get isAborted => _aborted;
+  void abort() { _aborted = true; _spotubeAbortedGlobal = true; }
+  bool get isAborted => _aborted || _spotubeAbortedGlobal;
 
   Future<bool> launch() async {
     if (isRunning()) return true;
@@ -184,7 +187,7 @@ class SpotubeController {
 
   void sendChars(String text) {
     for (final ch in text.runes) {
-      if (_aborted) return;
+      if (_aborted || _spotubeAbortedGlobal) return;
       _sendTypeChar(ch);
       _sendTypeCharUp(ch);
       _aWait(30);
@@ -193,7 +196,7 @@ class SpotubeController {
 
   void sendBackspaces(int count) {
     for (int i = 0; i < count; i++) {
-      if (_aborted) return;
+      if (_aborted || _spotubeAbortedGlobal) return;
       _sendKeyDown(VK_BACK);
       _sendKeyUp(VK_BACK);
       _aWait(20);
@@ -321,6 +324,8 @@ class SpotubeController {
   }
 
   Future<void> downloadAll(List<String> names) async {
+    _spotubeAbortedGlobal = false;
+    _aborted = false;
     if (!isRunning()) throw Exception('Spotube is not running');
     maximize();
     activate();
@@ -341,7 +346,7 @@ class SpotubeController {
     await Directory(dst).create(recursive: true);
     int moved = 0;
     await for (final entity in srcDir.list(recursive: true)) {
-      if (_aborted) break;
+      if (_aborted || _spotubeAbortedGlobal) break;
       if (entity is File && RegExp(r'\.(m4a|mp3|flac|wav|webm)$', caseSensitive: false).hasMatch(entity.path)) {
         final name = entity.uri.pathSegments.last;
         final target = File('$dst\\$name');
@@ -357,7 +362,23 @@ class SpotubeController {
 
 void _aWait(int ms) {
   final stopwatch = Stopwatch()..start();
-  while (stopwatch.elapsedMilliseconds < ms) {}
+  while (stopwatch.elapsedMilliseconds < ms) {
+    if (_spotubeAbortedGlobal) break;
+    if (_isKeyPressed(VK_ESCAPE)) {
+      _spotubeAbortedGlobal = true;
+      break;
+    }
+  }
 }
 
-Future<void> _wait(int ms) => Future.delayed(Duration(milliseconds: ms));
+Future<void> _wait(int ms) async {
+  final step = 50;
+  for (int elapsed = 0; elapsed < ms; elapsed += step) {
+    if (_spotubeAbortedGlobal) break;
+    if (_isKeyPressed(VK_ESCAPE)) {
+      _spotubeAbortedGlobal = true;
+      break;
+    }
+    await Future.delayed(const Duration(milliseconds: step));
+  }
+}
