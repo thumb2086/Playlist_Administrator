@@ -23,7 +23,6 @@ class LibraryIndex {
   static String? _cacheKey;
   // Disk-backed fingerprint: persists across app restarts
   static Set<String>? _cachedFingerprint;
-  static String _fingerprintPath = '';
 
   int get mp3Count => _mp3Count;
   int get m4aCount => _m4aCount;
@@ -212,7 +211,6 @@ class LibraryIndex {
     _cache!._copyFrom(this);
     _cacheKey = _resolvePath(libraryPath);
     _cachedFingerprint = null; // Force disk reload on next build
-    _fingerprintPath = libraryPath;
   }
 
   String _resolvePath(String p) {
