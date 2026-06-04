@@ -99,7 +99,20 @@ class LibraryPageState extends State<LibraryPage> {
                 total++;
                 final name = File(line).uri.pathSegments.last;
                 final stem = name.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
-                if (libStems.contains(stem)) matched++;
+                if (libStems.contains(stem)) {
+                  matched++;
+                  continue;
+                }
+                // Try reversed: "Artist - Title" vs "Title - Artist"
+                if (stem.contains(' - ')) {
+                  final parts = stem.split(' - ');
+                  if (parts.length >= 2) {
+                    final reversed = '${parts[1]} - ${parts[0]}';
+                    if (libStems.contains(reversed)) {
+                      matched++;
+                    }
+                  }
+                }
               }
             }
             stats[baseName.replaceAll('.m3u8', '')] = _PlStats(total, matched);
