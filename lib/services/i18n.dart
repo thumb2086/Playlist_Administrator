@@ -119,8 +119,8 @@ class I18N extends ChangeNotifier {
     'settings.spotube_exe': '執行檔路徑',
     'settings.spotube_dl_path': '下載路徑',
     'settings.exact_match': '檔名精確比對',
+
     'settings.convert_matched_only': '只轉換符合歌單的檔案',
-    'settings.strict_matching': '嚴格檔名匹配',
     'settings.auto_update_check': '自動檢查更新',
     'settings.lyrics_section': '歌詞 / Lyrics',
     'settings.lyrics_folder': '歌詞資料夾名稱',

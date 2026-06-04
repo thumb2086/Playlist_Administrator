@@ -10,7 +10,6 @@ class AppConfig {
   bool enableMetadataEnrichment;
   bool spotubeExactMatch;
   bool spotubeConvertMatchedOnly;
-  bool spotubeStrictMatching;
   String ffmpegPath;
   String spotubeExePath;
   String spotubeDownloadPath;
@@ -39,7 +38,6 @@ class AppConfig {
     this.enableMetadataEnrichment = false,
     this.spotubeExactMatch = true,
     this.spotubeConvertMatchedOnly = false,
-    this.spotubeStrictMatching = true,
     this.ffmpegPath = 'bin/ffmpeg.exe',
     this.spotubeExePath = '',
     this.spotubeDownloadPath = '',
@@ -99,7 +97,6 @@ class AppConfig {
         enableMetadataEnrichment: json['enable_metadata_enrichment'] as bool? ?? false,
         spotubeExactMatch: json['spotube_exact_match'] as bool? ?? true,
         spotubeConvertMatchedOnly: json['spotube_convert_matched_only'] as bool? ?? false,
-        spotubeStrictMatching: json['spotube_strict_matching'] as bool? ?? true,
         ffmpegPath: json['ffmpeg_path'] as String? ?? 'bin/ffmpeg.exe',
         spotubeExePath: json['spotube_exe_path'] as String? ?? '',
         spotubeDownloadPath: json['spotube_download_path'] as String? ?? '',
@@ -130,7 +127,6 @@ class AppConfig {
         'enable_metadata_enrichment': enableMetadataEnrichment,
         'spotube_exact_match': spotubeExactMatch,
         'spotube_convert_matched_only': spotubeConvertMatchedOnly,
-        'spotube_strict_matching': spotubeStrictMatching,
         'ffmpeg_path': ffmpegPath,
         'spotube_exe_path': spotubeExePath,
         'spotube_download_path': spotubeDownloadPath,

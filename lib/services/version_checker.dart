@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../version.dart';
 import 'config_service.dart';
 
 class VersionInfo {
@@ -21,9 +22,7 @@ class VersionChecker {
   static const _repo = 'Playlist_Administrator';
   static const _apiUrl = 'https://api.github.com/repos/$_owner/$_repo/releases/latest';
 
-  static String get currentVersion {
-    return 'v2.0.2-beta.8';
-  }
+  static String get currentVersion => appVersion.startsWith('v') ? appVersion : 'v$appVersion';
 
   static List<int> _parseVersion(String v) {
     final cleaned = v.replaceAll(RegExp(r'[^\d.]'), '');

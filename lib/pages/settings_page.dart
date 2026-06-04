@@ -85,7 +85,6 @@ class _SettingsPageState extends State<SettingsPage> {
           _Field(t('settings.spotube_dl_path'), _spotubeDlCtrl, r'%USERPROFILE%\Downloads\Spotube'),
           _Toggle(t('settings.exact_match'), c.spotubeExactMatch, (v) { c.spotubeExactMatch = v; _save(); setState(() {}); }),
           _Toggle(t('settings.convert_matched_only'), c.spotubeConvertMatchedOnly, (v) { c.spotubeConvertMatchedOnly = v; _save(); setState(() {}); }),
-          _Toggle(t('settings.strict_matching'), c.spotubeStrictMatching, (v) { c.spotubeStrictMatching = v; _save(); setState(() {}); }),
         ]),
         const SizedBox(height: 12),
         _Section(t('settings.lyrics_section'), [

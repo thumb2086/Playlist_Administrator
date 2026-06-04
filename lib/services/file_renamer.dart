@@ -27,7 +27,7 @@ class FileRenamer {
 
     String newName;
     if (artist.isNotEmpty && title.isNotEmpty) {
-      newName = '$artist - $title.$ext';
+      newName = '$title - $artist.$ext';
     } else if (title.isNotEmpty) {
       newName = '$title.$ext';
     } else {
