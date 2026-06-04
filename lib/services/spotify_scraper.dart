@@ -28,6 +28,27 @@ class SpotifyTrackMeta {
 }
 
 class SpotifyScraper {
+  static const _cn2en = {
+    '郭靜': 'Claire Kuo', '蔡依林': 'Jolin Tsai', '盧廣仲': 'Crowd Lu',
+    '曾沛慈': 'Pets Tseng', '王艷薇': 'Evangeline Wong', '胡恂舞': 'Sabrina Hu',
+    '周興哲': 'Eric Chou', '孫盛希': 'Shi Shi', '文慧如': 'Boon Hui Lu',
+    '陳忻玥': 'Vicky Chen', '邱鋒澤': 'Feng Ze', '艾薇': 'Ivy',
+    '幻藍小熊': 'GENBLUE', '利比': 'LBI', '連穎': 'Erin',
+    '李芷婷': 'Eleanor', '白安': 'Ann Bai', '王詩安': 'Diana Wang',
+    '陳威全': 'Ethan', '持修': 'Chih Siou', '羅志祥': 'Show Luo',
+    '陳零九': 'Nine Chen', '九澤CP': 'Nine Ze CP',
+    '告五人': 'Accusefive', '理想混蛋': 'Bestards',
+    '魏如萱': 'Waa Wei', '魏如昀': 'Queen Wei',
+  };
+
+  String _toEnglish(String name) => _cn2en[name] ?? name;
+
+  String _englishDisplayName(String raw) {
+    if (!raw.contains(' - ')) return raw;
+    final idx = raw.lastIndexOf(' - ');
+    return '${raw.substring(0, idx)} - ${_toEnglish(raw.substring(idx + 3).trim())}';
+  }
+
   final void Function(String) log;
   final String playlistsPath;
   final String libraryPath;
@@ -120,7 +141,7 @@ class SpotifyScraper {
     log('  連線到 Spotify Embed…');
     final resp = await http.get(Uri.parse(embedUrl), headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept-Language': 'en,zh-TW;q=0.5',
+      'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.5',
     });
 
     if (resp.statusCode != 200) {
@@ -154,8 +175,9 @@ class SpotifyScraper {
                       .join(', ') ??
                   (track['subtitle'] as String?);
               final displayName = (artists != null && artists.isNotEmpty) ? '$name - $artists' : name;
-              tracks.add(displayName);
-              _saveTrackCache(displayName, name, artists ?? '', track);
+              final engName = _englishDisplayName(displayName);
+              tracks.add(engName);
+              _saveTrackCache(engName, name, _toEnglish(artists?.trim() ?? ''), track);
             }
           }
         }
@@ -186,8 +208,9 @@ class SpotifyScraper {
                     .join(', ') ?? '';
             final title = track['name'] as String? ?? '';
             final displayName = artists.isNotEmpty ? '$title - $artists' : title;
-            tracks.add(displayName);
-            _saveTrackCache(displayName, title, artists, track);
+            final engName = _englishDisplayName(displayName);
+            tracks.add(engName);
+            _saveTrackCache(engName, title, _toEnglish(artists.trim()), track);
           }
           break;
         } catch (_) {}
