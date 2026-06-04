@@ -99,17 +99,19 @@ class LibraryPageState extends State<LibraryPage> {
                 total++;
                 final name = File(line).uri.pathSegments.last;
                 final stem = name.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
-                if (libStems.contains(stem)) {
-                  matched++;
-                  continue;
-                }
+                if (libStems.contains(stem)) { matched++; continue; }
                 // Try reversed: "Artist - Title" vs "Title - Artist"
                 if (stem.contains(' - ')) {
                   final parts = stem.split(' - ');
                   if (parts.length >= 2) {
+                    // Try exact reversed
                     final reversed = '${parts[1]} - ${parts[0]}';
-                    if (libStems.contains(reversed)) {
-                      matched++;
+                    if (libStems.contains(reversed)) { matched++; continue; }
+                    // Try title-only match (same song, different artist/version)
+                    final titlePart = parts[0].trim();
+                    if (titlePart.length >= 2 &&
+                        libStems.any((s) => s.startsWith(titlePart) || s.contains(' $titlePart '))) {
+                      matched++; continue;
                     }
                   }
                 }

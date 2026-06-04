@@ -73,6 +73,13 @@ class SpotifyScraper {
       if (parts.length >= 2) {
         final reversed = '${parts[1]} - ${parts[0]}';
         if (_audioIndex!.containsKey(reversed)) return _audioIndex![reversed];
+        // Title-only match (same song, different artist/version)
+        final titlePart = parts[0].trim();
+        if (titlePart.length >= 2) {
+          final matchedKey = _audioIndex!.keys.cast<String>().where((k) =>
+              k.startsWith(titlePart) || k.contains(' $titlePart ')).firstOrNull;
+          if (matchedKey != null) return _audioIndex![matchedKey];
+        }
       }
     }
     return null;

@@ -101,6 +101,22 @@ class _PlayerPageState extends State<PlayerPage> {
             if (await File('$lib\\mp3\\$rev$ext').exists()) { songs.add('$lib\\mp3\\$rev$ext'); break; }
           }
         }
+        // Title-only fallback (different artist version)
+        final titlePart = parts[0].trim().toLowerCase();
+        if (titlePart.length >= 2 && songs.isEmpty) {
+          // Search mp3 dir for any file containing the title
+          final mp3Dir = Directory('$lib\\mp3');
+          if (await mp3Dir.exists()) {
+            await for (final f in mp3Dir.list()) {
+              if (f is File) {
+                final fn = f.uri.pathSegments.last.toLowerCase();
+                if (fn.contains(titlePart) && fn.endsWith('.mp3')) {
+                  songs.add(f.path); break;
+                }
+              }
+            }
+          }
+        }
       }
     }
 

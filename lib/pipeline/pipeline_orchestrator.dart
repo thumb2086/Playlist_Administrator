@@ -294,8 +294,12 @@ class PipelineOrchestrator {
 
   bool _trackFileExists(String entry) {
     if (!entry.contains('.') && !entry.contains('\\')) return true;
+    // Resolve relative to playlists dir first
+    final relToPl = '${config.playlistsPath}\\$entry';
+    if (File(relToPl).existsSync()) return true;
+    // Try as absolute or CWD-relative
     if (File(entry).existsSync()) return true;
-
+    // Try basePath/libraryPath with just the filename
     for (final base in [config.basePath, config.libraryPath, config.playlistsPath]) {
       final resolved = '$base\\${File(entry).uri.pathSegments.last}';
       if (File(resolved).existsSync()) return true;
