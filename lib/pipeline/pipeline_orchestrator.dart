@@ -174,7 +174,7 @@ class PipelineOrchestrator {
     }
     await Directory(config.playlistsPath).create(recursive: true);
 
-    final scraper = SpotifyScraper(log: onLog, playlistsPath: config.playlistsPath);
+    final scraper = SpotifyScraper(log: onLog, playlistsPath: config.playlistsPath, libraryPath: config.libraryPath);
     final plNames = await scraper.scrapeAll(urls);
 
     // Snapshot: detect removed songs per playlist

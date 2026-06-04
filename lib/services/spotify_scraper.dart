@@ -30,8 +30,51 @@ class SpotifyTrackMeta {
 class SpotifyScraper {
   final void Function(String) log;
   final String playlistsPath;
+  final String libraryPath;
+  Map<String, String>? _audioIndex;
 
-  SpotifyScraper({required this.log, required this.playlistsPath});
+  SpotifyScraper({required this.log, required this.playlistsPath, this.libraryPath = ''});
+
+  Future<void> _buildAudioIndex() async {
+    if (_audioIndex != null || libraryPath.isEmpty) return;
+    final index = <String, String>{};
+
+    void scanDir(Directory dir) {
+      if (!dir.existsSync()) return;
+      for (final f in dir.listSync(recursive: true, followLinks: false)) {
+        if (f is File) {
+          final low = f.path.toLowerCase();
+          if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac')) {
+            final stem = File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
+            index[stem] = f.path;
+          }
+        }
+      }
+    }
+
+    scanDir(Directory(libraryPath));
+    // Also scan mp3/m4a/flac subdirs of basePath
+    for (final sub in ['mp3', 'm4a', 'flac']) {
+      scanDir(Directory('$libraryPath\\$sub'));
+    }
+    _audioIndex = index;
+  }
+
+  String? _findAudioFile(String trackName) {
+    if (_audioIndex == null) return null;
+    final stem = trackName.toLowerCase().trim();
+    // Try exact match
+    if (_audioIndex!.containsKey(stem)) return _audioIndex![stem];
+    // Try reversed: "Artist - Title" vs "Title - Artist"
+    if (stem.contains(' - ')) {
+      final parts = stem.split(' - ');
+      if (parts.length >= 2) {
+        final reversed = '${parts[1]} - ${parts[0]}';
+        if (_audioIndex!.containsKey(reversed)) return _audioIndex![reversed];
+      }
+    }
+    return null;
+  }
 
   Future<List<String>> scrapeAll(List<String> urls) async {
     final plNames = <String>[];
@@ -155,20 +198,52 @@ class SpotifyScraper {
 
     log('  歌單: $plName, ${tracks.length} 首');
 
+    // Build audio index to resolve track names to file paths
+    await _buildAudioIndex();
+
     final m3uPath = '$playlistsPath\\$plName.m3u8';
     await Directory(playlistsPath).create(recursive: true);
 
     final buffer = StringBuffer('#EXTM3U\n');
+    int resolved = 0;
     for (final t in tracks) {
       buffer.writeln('#EXTINF:-1,$t');
-      buffer.writeln(t);
+      final matched = _findAudioFile(t);
+      if (matched != null) {
+        // Write relative path from Playlists dir
+        final absPath = File(matched).absolute.path;
+        final absPl = File(m3uPath).parent.absolute.path;
+        String relPath;
+        try {
+          relPath = _relativePath(absPath, absPl);
+        } catch (_) {
+          relPath = matched;
+        }
+        buffer.writeln(relPath);
+        resolved++;
+      } else {
+        buffer.writeln(t);
+      }
     }
     await File(m3uPath).writeAsString(buffer.toString(), flush: true);
-    log('  已儲存: $plName.m3u8');
+    log('  已儲存: $plName.m3u8 (已解析路徑: $resolved/${tracks.length})');
     // Update config with the real playlist name
     ConfigService.instance.config.urlNames[url] = plName;
     ConfigService.instance.save();
     return plName;
+  }
+
+  String _relativePath(String absPath, String relativeTo) {
+    final absParts = absPath.replaceAll('\\', '/').split('/');
+    final relParts = relativeTo.replaceAll('\\', '/').split('/');
+    int common = 0;
+    while (common < absParts.length && common < relParts.length &&
+        absParts[common].toLowerCase() == relParts[common].toLowerCase()) {
+      common++;
+    }
+    final up = List.filled(relParts.length - common, '..');
+    final down = absParts.sublist(common);
+    return [...up, ...down].join('/');
   }
 
   void _ensureCacheDir() {

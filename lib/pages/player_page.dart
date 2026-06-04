@@ -73,14 +73,36 @@ class _PlayerPageState extends State<PlayerPage> {
 
     final lines = await file.readAsLines();
     final songs = <String>[];
+    final lib = ConfigService.instance.config.libraryPath;
+    final basePath = ConfigService.instance.config.basePath;
     for (final line in lines) {
       final trimmed = line.trim();
       if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
-      String resolved = trimmed;
-      if (!File(trimmed).existsSync()) {
-        resolved = '${ConfigService.instance.config.libraryPath}\\${File(trimmed).uri.pathSegments.last}';
+      // Try direct file path first
+      if (File(trimmed).existsSync()) { songs.add(trimmed); continue; }
+      // Try libraryPath + filename
+      final fname = File(trimmed).uri.pathSegments.last;
+      String resolved = '$lib\\$fname';
+      if (await File(resolved).exists()) { songs.add(resolved); continue; }
+      // Try with extensions
+      bool found = false;
+      for (final ext in ['.mp3', '.m4a', '.flac']) {
+        if (await File('$resolved$ext').exists()) { songs.add('$resolved$ext'); found = true; break; }
+        if (await File('$lib\\mp3\\$fname$ext').exists()) { songs.add('$lib\\mp3\\$fname$ext'); found = true; break; }
       }
-      if (await File(resolved).exists()) songs.add(resolved);
+      if (found) continue;
+      // Try reversed: "Artist - Title" vs "Title - Artist"
+      final stem = fname.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
+      if (stem.contains(' - ')) {
+        final parts = stem.split(' - ');
+        if (parts.length >= 2) {
+          final rev = '${parts[1]} - ${parts[0]}';
+          for (final ext in ['.mp3', '.m4a', '.flac']) {
+            if (await File('$lib\\$rev$ext').exists()) { songs.add('$lib\\$rev$ext'); break; }
+            if (await File('$lib\\mp3\\$rev$ext').exists()) { songs.add('$lib\\mp3\\$rev$ext'); break; }
+          }
+        }
+      }
     }
 
     if (songs.isEmpty) {
