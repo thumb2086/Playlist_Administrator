@@ -36,7 +36,7 @@ class I18N extends ChangeNotifier {
     'app.sidebar.settings': '設定',
     'app.sidebar.playlist': 'Playlist',
     'app.sidebar.admin': 'Administrator',
-    'app.version': 'v2.0.2-beta.6',
+    'app.version': 'v2.0.2-beta.7',
     'app.header.badge': 'PLAYLIST ADMIN',
 
     // Library
@@ -151,7 +151,7 @@ class I18N extends ChangeNotifier {
     'app.sidebar.settings': 'Settings',
     'app.sidebar.playlist': 'Playlist',
     'app.sidebar.admin': 'Administrator',
-    'app.version': 'v2.0.2-beta.6',
+    'app.version': 'v2.0.2-beta.7',
     'app.header.badge': 'PLAYLIST ADMIN',
 
     'library.url_hint': 'Paste Spotify playlist URL…',

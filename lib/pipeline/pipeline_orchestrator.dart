@@ -236,9 +236,16 @@ class PipelineOrchestrator {
           if (line.startsWith('#') || line.trim().isEmpty) {
             newLines.add(line);
           } else {
-            String resolved = line;
-            if (!File(line).existsSync()) {
-              resolved = '${config.libraryPath}\\${File(line).uri.pathSegments.last}';
+            final trimmed = line.trim();
+            // Track names without file extensions → keep as-is (playlist entry)
+            if (!trimmed.contains('.') || !trimmed.contains('\\')) {
+              newLines.add(line);
+              continue;
+            }
+            // File paths: check if file exists
+            String resolved = trimmed;
+            if (!File(trimmed).existsSync()) {
+              resolved = '${config.libraryPath}\\${File(trimmed).uri.pathSegments.last}';
             }
             if (await File(resolved).exists()) {
               newLines.add(line);

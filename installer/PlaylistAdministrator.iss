@@ -1,7 +1,7 @@
 ; Inno Setup script for Playlist Administrator (Flutter)
 #define MyAppName "Playlist Administrator"
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.2-beta.6"
+  #define MyAppVersion "2.0.2-beta.7"
 #endif
 #define MyAppPublisher "Playlist Administrator"
 #define MyAppURL "https://github.com/thumb2086/Playlist_Administrator"
