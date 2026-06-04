@@ -159,6 +159,9 @@ class SpotifyScraper {
     }
     await File(m3uPath).writeAsString(buffer.toString(), flush: true);
     log('  已儲存: $plName.m3u8');
+    // Update config with the real playlist name
+    ConfigService.instance.config.urlNames[url] = plName;
+    ConfigService.instance.save();
     return plName;
   }
 
