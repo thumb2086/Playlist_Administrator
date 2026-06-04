@@ -120,7 +120,7 @@ class SpotifyScraper {
     log('  連線到 Spotify Embed…');
     final resp = await http.get(Uri.parse(embedUrl), headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+      'Accept-Language': 'en,zh-TW;q=0.5',
     });
 
     if (resp.statusCode != 200) {
