@@ -94,10 +94,70 @@ class LibraryIndex {
     return index;
   }
 
+  static const Map<String, String> artistAliases = {
+    'claire kuo': '郭靜', 'jolin': '蔡依林', 'jolin tsai': '蔡依林',
+    'crowd lu': '盧廣仲', 'pets tseng': '曾沛慈', 'evangeline wong': '王艷薇',
+    'sabrina': '胡恂舞', 'sabrina hu': '胡恂舞', 'eric chou': '周興哲',
+    'shi shi': '孫盛希', 'boon hui lu': '文慧如', 'vicky chen': '陳忻玥',
+    'feng ze': '邱鋒澤', 'ivy': '艾薇', 'genblue': '幻藍小熊',
+    'lbi': '利比', 'erin': '連穎', 'eleanor': '李芷婷',
+    'ann bai': '白安', 'diana wang': '王詩安', 'ethan': '陳威全',
+    'chih siou': '持修', 'show luo': '羅志祥',
+  };
+
+  static const _noisePatterns = [
+    r'全新單曲', r'單曲', r'官方完整版', r'官方', r'完整版',
+    r'高清', r'動態歌詞版', r'歌詞版', r'官方版', r'全新',
+    r'music video', r'official video', r'official music video',
+    r'video', r'loop', r'lyrics',
+  ];
+
   List<String> _normalize(String text) {
-    final t = ChineseConverter.instance.isLoaded
-        ? ChineseConverter.instance.toSimplified(text.toLowerCase().trim())
-        : text.toLowerCase().trim();
+    var t = text.toLowerCase().trim();
+
+    // Remove spaces between CJK chars
+    t = t.replaceAllMapped(
+      RegExp(r'(?<=[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff])\s+(?=[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff])'),
+      (_) => '',
+    );
+
+    // Convert to Simplified Chinese
+    if (ChineseConverter.instance.isLoaded) {
+      t = ChineseConverter.instance.toSimplified(t);
+    }
+
+    // Apply artist aliases
+    for (final e in artistAliases.entries) {
+      t = t.replaceAllMapped(
+        RegExp('\\b${RegExp.escape(e.key)}\\b', caseSensitive: false),
+        (_) => ChineseConverter.instance.isLoaded
+            ? ChineseConverter.instance.toSimplified(e.value)
+            : e.value.toLowerCase(),
+      );
+    }
+
+    // Remove "E " prefix artifact (common in Spotify scrapes)
+    t = t.replaceAll(RegExp(r'(?:^|(?<=[^a-z0-9]))e(?=[a-z\u4e00-\u9fff\u3040-\u30ff])'), '');
+
+    // Remove noise phrases
+    for (final p in _noisePatterns) {
+      t = t.replaceAll(RegExp(p, caseSensitive: false), ' ');
+    }
+
+    // Standardize separators
+    t = t.replaceAll(RegExp(r'\s*(feat|ft|vs)\.?\s*|\s*[&,x]\s*'), ' ');
+
+    // Remove bracket content with keywords
+    t = t.replaceAll(
+      RegExp(r"[\(\[【（［][^\)\]】）］]*(?:live|remix|mv|official|lyrics?\s*video|music\s*video)[^\)\]】）］]*[\)\]】）］]",
+          caseSensitive: false),
+      ' ',
+    );
+
+    // Add space between Latin and CJK
+    t = t.replaceAllMapped(RegExp(r'([a-z])([\u4e00-\u9fff])'), (m) => '${m[1]} ${m[2]}');
+    t = t.replaceAllMapped(RegExp(r'([\u4e00-\u9fff])([a-z])'), (m) => '${m[1]} ${m[2]}');
+
     final parts = t.split(RegExp(r'[\s\-_()\[\]【】,./:：，。、！？（）「」""''（）【】《》〈〉\u3000]'));
     return parts.where((p) => p.isNotEmpty).toList();
   }

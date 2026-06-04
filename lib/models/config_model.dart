@@ -70,8 +70,20 @@ class AppConfig {
   String get libraryPath => '$basePath${Platform.pathSeparator}Music';
   String get playlistsPath => '$basePath${Platform.pathSeparator}Playlists';
   String get exportPath => '$basePath${Platform.pathSeparator}USB_Output';
-  String get m4aPath => '$basePath${Platform.pathSeparator}m4a';
-  String get mp3Path => '$basePath${Platform.pathSeparator}mp3';
+  String get m4aPath {
+    final p = '$libraryPath${Platform.pathSeparator}m4a';
+    if (!Directory(p).existsSync() && Directory('$basePath${Platform.pathSeparator}m4a').existsSync()) {
+      return '$basePath${Platform.pathSeparator}m4a';
+    }
+    return p;
+  }
+  String get mp3Path {
+    final p = '$libraryPath${Platform.pathSeparator}mp3';
+    if (!Directory(p).existsSync() && Directory('$basePath${Platform.pathSeparator}mp3').existsSync()) {
+      return '$basePath${Platform.pathSeparator}mp3';
+    }
+    return p;
+  }
   String get lyricsPath => '$libraryPath${Platform.pathSeparator}$lyricsFolderName';
 
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(

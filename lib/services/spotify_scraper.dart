@@ -33,20 +33,23 @@ class SpotifyScraper {
 
   SpotifyScraper({required this.log, required this.playlistsPath});
 
-  Future<void> scrapeAll(List<String> urls) async {
+  Future<List<String>> scrapeAll(List<String> urls) async {
+    final plNames = <String>[];
     int processed = 0;
     for (final url in urls) {
       processed++;
       log('[$processed/${urls.length}] 處理: $url');
       try {
-        await _scrapeOne(url);
+        final name = await _scrapeOne(url);
+        if (name != null) plNames.add(name);
       } catch (e) {
         log('  錯誤: $e');
       }
     }
+    return plNames;
   }
 
-  Future<void> _scrapeOne(String url) async {
+  Future<String?> _scrapeOne(String url) async {
     final spId = url.split('playlist/').last.split('?').first;
     final embedUrl = 'https://open.spotify.com/embed/playlist/$spId';
 
@@ -58,7 +61,7 @@ class SpotifyScraper {
 
     if (resp.statusCode != 200) {
       log('  HTTP ${resp.statusCode}');
-      return;
+      return null;
     }
 
     final doc = parse(resp.body);
@@ -99,7 +102,7 @@ class SpotifyScraper {
 
     if (plName == null || tracks.isEmpty) {
       log('  無法解析歌單');
-      return;
+      return null;
     }
 
     log('  歌單: $plName, ${tracks.length} 首');
@@ -114,6 +117,7 @@ class SpotifyScraper {
     }
     await File(m3uPath).writeAsString(buffer.toString(), flush: true);
     log('  已儲存: $plName.m3u8');
+    return plName;
   }
 
   void _ensureCacheDir() {

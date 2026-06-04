@@ -6,6 +6,7 @@ import '../services/audio_converter.dart';
 import '../services/spotify_scraper.dart';
 import '../services/metadata_reader.dart';
 import '../services/metadata_enricher.dart';
+import '../services/snapshot_manager.dart';
 
 class PipelineOrchestrator {
   final AppConfig config;
@@ -80,13 +81,31 @@ class PipelineOrchestrator {
     await mp3Dir.create(recursive: true);
 
     final m4aFiles = <String>[];
-    await for (final e in m4aDir.list()) {
+    await for (final e in m4aDir.list(recursive: true, followLinks: false)) {
       if (e is File && e.path.toLowerCase().endsWith('.m4a')) {
         m4aFiles.add(e.path);
       }
     }
-    onLog('找到 ${m4aFiles.length} 個 M4A 檔案');
-    if (m4aFiles.isEmpty) return;
+    if (m4aFiles.isEmpty) {
+      // Fallback: scan library root for M4A
+      final libM4a = <String>[];
+      final libDir = Directory(config.libraryPath);
+      if (await libDir.exists()) {
+        await for (final e in libDir.list(recursive: true, followLinks: false)) {
+          if (e is File && e.path.toLowerCase().endsWith('.m4a')) {
+            libM4a.add(e.path);
+          }
+        }
+      }
+      if (libM4a.isEmpty) {
+        onLog('找不到任何 M4A 檔案');
+        return;
+      }
+      onLog('在音樂庫根目錄找到 ${libM4a.length} 個 M4A 檔案');
+      m4aFiles.addAll(libM4a);
+    } else {
+      onLog('找到 ${m4aFiles.length} 個 M4A 檔案');
+    }
 
     final index = LibraryIndex();
     await index.build(config.libraryPath, onLog);
@@ -130,7 +149,7 @@ class PipelineOrchestrator {
         futures.add(AudioConverter.convert(
           inputPath: t.src,
           outputPath: t.dest,
-          ffmpegPath: 'ffmpeg',
+          ffmpegPath: config.ffmpegPath.isNotEmpty ? config.ffmpegPath : 'ffmpeg',
         ));
       }
       final results = await Future.wait(futures);
@@ -153,7 +172,36 @@ class PipelineOrchestrator {
     await Directory(config.playlistsPath).create(recursive: true);
 
     final scraper = SpotifyScraper(log: onLog, playlistsPath: config.playlistsPath);
-    await scraper.scrapeAll(urls);
+    final plNames = await scraper.scrapeAll(urls);
+
+    // Snapshot: detect removed songs per playlist
+    int totalRemoved = 0;
+    for (final plName in plNames) {
+      final plFile = File('${config.playlistsPath}\\$plName.m3u8');
+      if (!await plFile.exists()) continue;
+      try {
+        final lines = await plFile.readAsLines();
+        final tracks = lines
+            .where((l) => l.startsWith('#EXTINF:'))
+            .map((l) {
+              final idx = l.indexOf(',');
+              return idx > 0 ? l.substring(idx + 1).trim() : '';
+            })
+            .where((t) => t.isNotEmpty)
+            .toList();
+        if (tracks.isEmpty) continue;
+        final removed = SnapshotManager.processPlaylist(plName, tracks);
+        if (removed > 0) {
+          onLog('  📋 $plName: 偵測到 $removed 首已移除歌曲');
+          totalRemoved += removed;
+        }
+      } catch (e) {
+        onLog('  ⚠️ 無法處理 $plName 快照: $e');
+      }
+    }
+    if (totalRemoved > 0) {
+      onLog('  📋 共 $totalRemoved 首已移除歌曲被記錄');
+    }
     progress(100);
   }
 
