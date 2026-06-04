@@ -69,24 +69,31 @@ class _PipelinePageState extends State<PipelinePage> {
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
     try {
-      await ChineseConverter.instance.load();
-    } catch (e) {
-      _log('注意: 中文轉換器載入失敗: $e');
-    }
+      try {
+        await ChineseConverter.instance.load();
+      } catch (e) {
+        _log('注意: 中文轉換器載入失敗: $e');
+      }
 
-    final orch = PipelineOrchestrator(
-      config: ConfigService.instance.config,
-      onLog: _log,
-      onProgress: (c, t, stepIdx) {
-        if (mounted) setState(() {
-          _progress = t > 0 ? c / t : 0.0;
-          _currentStep = stepIdx;
-        });
-      },
-      state: _state,
-    );
-    await orch.run(fromStep: fromStep);
-    if (mounted) setState(() { _running = false; _progress = 1.0; });
+      final orch = PipelineOrchestrator(
+        config: ConfigService.instance.config,
+        onLog: _log,
+        onProgress: (c, t, stepIdx) {
+          try {
+            if (mounted) setState(() {
+              _progress = t > 0 ? c / t : 0.0;
+              _currentStep = stepIdx;
+            });
+          } catch (_) {}
+        },
+        state: _state,
+      );
+      await orch.run(fromStep: fromStep);
+    } catch (e) {
+      _log('  ❌ Pipeline 執行錯誤: $e');
+    } finally {
+      if (mounted) setState(() { _running = false; _progress = 0; });
+    }
   }
 
   @override
@@ -102,8 +109,6 @@ class _PipelinePageState extends State<PipelinePage> {
             _PButton(t('pipeline.run_convert'), Icons.transform, () => _run(fromStep: 0), _running),
             _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1), _running),
             _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2), _running),
-            const Spacer(),
-
             if (_running) ...[
               _PButton(t('pipeline.pause'), Icons.pause_rounded, () { _state.pause(); }, false, color: Colors.orange),
               _PButton(t('pipeline.cancel'), Icons.stop_rounded, () { _state.cancel(); }, false, color: AppColors.error),
