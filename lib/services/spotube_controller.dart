@@ -166,14 +166,45 @@ class SpotubeController {
     _aWait(300);
   }
 
+  void _sendInputKey(int vk, {bool keyUp = false, bool unicode = false}) {
+    final input = calloc<INPUT>(1);
+    input.ref.type = INPUT_KEYBOARD;
+    input.ref.ki.wVk = unicode ? 0 : vk;
+    input.ref.ki.wScan = unicode ? vk : 0;
+    input.ref.ki.dwFlags = (keyUp ? 0x0002 : 0) | (unicode ? 0x0004 : 0);
+    input.ref.ki.time = 0;
+    SendInput(1, input, sizeOf<INPUT>());
+    calloc.free(input);
+  }
+
+  void _sendKeyDown(int vk) => _sendInputKey(vk, keyUp: false);
+  void _sendKeyUp(int vk) => _sendInputKey(vk, keyUp: true);
+  void _sendTypeChar(int ch) => _sendInputKey(ch, keyUp: false, unicode: true);
+  void _sendTypeCharUp(int ch) => _sendInputKey(ch, keyUp: true, unicode: true);
+
   void sendChars(String text) {
-    for (final ch in text.codeUnits) {
+    for (final ch in text.runes) {
       if (_aborted) return;
-      final h = hwnd;
-      if (h != null) {
-        SendMessage(h, WM_CHAR, ch, 0);
-        SendMessage(h, WM_KEYUP, ch, 0);
-      }
+      _sendTypeChar(ch);
+      _sendTypeCharUp(ch);
+      _aWait(30);
+    }
+  }
+
+  void sendBackspaces(int count) {
+    for (int i = 0; i < count; i++) {
+      if (_aborted) return;
+      _sendKeyDown(VK_BACK);
+      _sendKeyUp(VK_BACK);
+      _aWait(20);
+    }
+  }
+
+  void sendEscape() {
+    _sendKeyDown(VK_ESCAPE);
+    _sendKeyUp(VK_ESCAPE);
+    _aWait(100);
+  }
       _aWait(30);
     }
   }
@@ -191,17 +222,6 @@ class SpotubeController {
     }
   }
 
-  void sendSelectAll() {
-    final h = hwnd;
-    if (h != null) {
-      SendMessage(h, WM_KEYDOWN, VK_LCONTROL, 0);
-      SendMessage(h, WM_KEYDOWN, 0x41, 0); // 'A'
-      SendMessage(h, WM_KEYUP, 0x41, 0);
-      SendMessage(h, WM_KEYUP, VK_LCONTROL, 0);
-    }
-    _aWait(100);
-  }
-
   void sendEscape() {
     final h = hwnd;
     if (h != null) {
@@ -209,6 +229,14 @@ class SpotubeController {
       SendMessage(h, WM_KEYUP, VK_ESCAPE, 0);
     }
     _aWait(100);
+  }
+
+  /// Bring Flutter window to foreground so user can access cancel button
+  void bringFlutterToFront() {
+    if (_prevHwnd != null && IsWindow(_prevHwnd!) != 0) {
+      if (IsIconic(_prevHwnd!) != 0) ShowWindow(_prevHwnd!, SW_RESTORE);
+      SetForegroundWindow(_prevHwnd!);
+    }
   }
 
   int pixelBrightness(int x, int y) {
@@ -230,8 +258,8 @@ class SpotubeController {
     final pos = _absolute('library_filter');
     click(pos[0], pos[1]);
     _aWait(200);
-    sendSelectAll();
-    _aWait(100);
+    sendBackspaces(80);
+    _aWait(50);
     sendChars(name);
   }
 
@@ -274,6 +302,8 @@ class SpotubeController {
   bool _checkAborted() {
     if (_aborted) {
       sendEscape();
+      minimize();
+      bringFlutterToFront();
       restorePrevious();
       return true;
     }
@@ -288,23 +318,35 @@ class SpotubeController {
     if (_checkAborted()) return;
     clickSidebarLibrary();
     await _wait(800);
+    bringFlutterToFront();
     if (_checkAborted()) return;
+    activate();
     filterPlaylists(name);
     await _wait(1500);
+    bringFlutterToFront();
     if (_checkAborted()) return;
+    activate();
     clickFirstPlaylist();
     await _wait(2000);
+    bringFlutterToFront();
     if (_checkAborted()) return;
+    activate();
     clickThreeDot();
     await _wait(800);
+    bringFlutterToFront();
     if (_checkAborted()) return;
+    activate();
     clickDownloadAll();
     await _wait(800);
+    bringFlutterToFront();
     if (_checkAborted()) return;
+    activate();
     clickConfirm();
     await _wait(2000);
+    bringFlutterToFront();
     if (_checkAborted()) return;
     if (hasSkipDialog()) {
+      activate();
       clickSkip();
       await _wait(300);
       clickSkipAll();
