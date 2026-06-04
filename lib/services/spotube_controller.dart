@@ -205,33 +205,7 @@ class SpotubeController {
     _sendKeyUp(VK_ESCAPE);
     _aWait(100);
   }
-      _aWait(30);
-    }
-  }
 
-  void sendBackspaces(int count) {
-    for (int i = 0; i < count; i++) {
-      if (_aborted) return;
-      final h = hwnd;
-      if (h != null) {
-        SendMessage(h, WM_KEYDOWN, VK_BACK, 0);
-        SendMessage(h, WM_CHAR, 0x08, 0);
-        SendMessage(h, WM_KEYUP, VK_BACK, 0);
-      }
-      _aWait(20);
-    }
-  }
-
-  void sendEscape() {
-    final h = hwnd;
-    if (h != null) {
-      SendMessage(h, WM_KEYDOWN, VK_ESCAPE, 0);
-      SendMessage(h, WM_KEYUP, VK_ESCAPE, 0);
-    }
-    _aWait(100);
-  }
-
-  /// Bring Flutter window to foreground so user can access cancel button
   void bringFlutterToFront() {
     if (_prevHwnd != null && IsWindow(_prevHwnd!) != 0) {
       if (IsIconic(_prevHwnd!) != 0) ShowWindow(_prevHwnd!, SW_RESTORE);
