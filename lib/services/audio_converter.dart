@@ -17,6 +17,9 @@ class AudioConverter {
     }
     if (!await File(inputPath).exists()) return false;
 
+    // Ensure output directory exists
+    await File(outputPath).parent.create(recursive: true);
+
     if (inputPath.toLowerCase().endsWith('.$format')) {
       await File(inputPath).copy(outputPath);
       return true;
@@ -25,25 +28,13 @@ class AudioConverter {
     meta ??= await MetadataReader.read(inputPath);
 
     final args = <String>[
-      '-y',
-      '-i', inputPath,
+      '-y', '-i', inputPath,
       '-map_metadata', '0',
       '-id3v2_version', '3',
       '-codec:a', format == 'mp3' ? 'libmp3lame' : 'flac',
       '-q:a', '0',
+      outputPath,
     ];
-
-    if (meta.title != null && meta.title!.isNotEmpty) {
-      args.addAll(['-metadata', 'title=${meta.title}']);
-    }
-    if (meta.artist != null && meta.artist!.isNotEmpty) {
-      args.addAll(['-metadata', 'artist=${meta.artist}']);
-    }
-    if (meta.album != null && meta.album!.isNotEmpty) {
-      args.addAll(['-metadata', 'album=${meta.album}']);
-    }
-
-    args.add(outputPath);
 
     try {
       final result = await Process.run(ffmpeg, args);

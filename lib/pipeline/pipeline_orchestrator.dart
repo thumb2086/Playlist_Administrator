@@ -116,34 +116,35 @@ class PipelineOrchestrator {
     final tasks = <_ConvertTask>[];
     int skipped = 0;
 
-    // Read metadata in batches (20 at a time) to minimize total ffprobe calls
-    for (int i = 0; i < m4aFiles.length; i += 20) {
+    for (final m4a in m4aFiles) {
       await state.waitIfPaused();
       if (state.isCancelled) return;
 
-      final batch = m4aFiles.skip(i).take(20).toList();
-      final metas = await Future.wait(batch.map((f) => MetadataReader.read(f).catchError((_) => TrackMetadata())));
-
-      for (int j = 0; j < batch.length; j++) {
-        final m4a = batch[j];
-        final meta = metas[j];
-
-        // Pass cached metadata to avoid another ffprobe inside findMp3ForM4a
-        final existing = await index.findMp3ForM4a(m4a, useMtime: true, cachedMeta: meta);
-        if (existing != null) {
-          skipped++;
-          continue;
-        }
-
-        final stem = File(m4a).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-        final mp3Name = (meta.title != null && meta.title!.isNotEmpty)
-            ? '${meta.title}${meta.artist != null ? ' - ${meta.artist}' : ''}.mp3'
-                .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
-            : '$stem.mp3';
-        final dest = '${config.mp3Path}\\$mp3Name';
-
-        tasks.add(_ConvertTask(m4a, dest, stem, meta));
+      // 1. Filename-based matching (fast, no ffprobe)
+      final existing = await index.findMp3ForM4a(m4a, useMtime: true);
+      if (existing != null) {
+        skipped++;
+        continue;
       }
+
+      // 2. Only read metadata for files that actually need conversion
+      final meta = await MetadataReader.read(m4a);
+
+      // 3. Metadata-based matching (tries to find MP3 by title/artist)
+      final metaMatch = await index.findMp3ForM4a(m4a, useMtime: true, cachedMeta: meta);
+      if (metaMatch != null) {
+        skipped++;
+        continue;
+      }
+
+      final stem = File(m4a).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+      final mp3Name = (meta.title != null && meta.title!.isNotEmpty)
+          ? '${meta.title}${meta.artist != null ? ' - ${meta.artist}' : ''}.mp3'
+              .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
+          : '$stem.mp3';
+      final dest = '${config.mp3Path}\\$mp3Name';
+
+      tasks.add(_ConvertTask(m4a, dest, stem, meta));
     }
 
     onLog('待轉檔: ${tasks.length}, 跳過: $skipped');
