@@ -10,11 +10,24 @@ class LibraryIndex {
   int _m4aCount = 0;
   bool _built = false;
 
+  // Static cache: reuse across pipeline steps within the same process lifetime
+  static LibraryIndex? _cache;
+  static String? _cacheKey;
+
   int get mp3Count => _mp3Count;
   int get m4aCount => _m4aCount;
   bool get isBuilt => _built;
 
+  static void invalidateCache() { _cache = null; _cacheKey = null; }
+
   Future<void> build(String libraryPath, void Function(String) log) async {
+    // Check if cache is valid for this library path
+    if (_cache != null && _cacheKey == _resolvePath(libraryPath)) {
+      _copyFrom(_cache!);
+      log('MP3: $_mp3Count, M4A: $_m4aCount (快取)');
+      return;
+    }
+
     log('掃描音檔…');
     final allFiles = await _walkDir(libraryPath);
     final mp3s = <String>[];
@@ -44,6 +57,25 @@ class LibraryIndex {
     log('讀取 metadata 索引…');
     _metadataIndex = await _buildMetadataIndex(mp3s, log);
     log('索引完成');
+
+    // Save to static cache
+    _cache = LibraryIndex();
+    _cache!._copyFrom(this);
+    _cacheKey = _resolvePath(libraryPath);
+  }
+
+  String _resolvePath(String p) {
+    try { return Directory(p).resolveSymbolicLinksSync(); }
+    catch (_) { return p; }
+  }
+
+  void _copyFrom(LibraryIndex other) {
+    _filenameIndex = other._filenameIndex;
+    _metadataIndex = other._metadataIndex;
+    _fileInfoMap = other._fileInfoMap;
+    _mp3Count = other._mp3Count;
+    _m4aCount = other._m4aCount;
+    _built = true;
   }
 
   Future<List<String>> _walkDir(String path) async {
