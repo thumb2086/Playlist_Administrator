@@ -74,7 +74,6 @@ class _PlayerPageState extends State<PlayerPage> {
     final lines = await file.readAsLines();
     final songs = <String>[];
     final lib = ConfigService.instance.config.libraryPath;
-    final basePath = ConfigService.instance.config.basePath;
     for (final line in lines) {
       final trimmed = line.trim();
       if (trimmed.isEmpty || trimmed.startsWith('#')) continue;

@@ -4,7 +4,6 @@ import 'config_service.dart';
 
 class SnapshotManager {
   static const _cacheFile = 'snapshot_cache.json';
-  static const _removedPlaylist = '_Removed Songs.m3u8';
 
   static String get _cachePath =>
       '${ConfigService.instance.config.basePath}\\$_cacheFile';
