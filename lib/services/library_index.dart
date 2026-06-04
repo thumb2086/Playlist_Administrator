@@ -355,6 +355,7 @@ class LibraryIndex {
 
     final m4aInfo = _fileInfoMap[m4aPath];
 
+    // 1. Try exact filename match
     final exact = _findInIndex(tokens, _filenameIndex);
     if (exact != null) {
       final mp3Info = _fileInfoMap[exact];
@@ -363,6 +364,7 @@ class LibraryIndex {
       }
     }
 
+    // 2. Try fuzzy filename match
     for (final entry in _filenameIndex.entries) {
       if (_isSubset(tokens, entry.key) || _isSubset(entry.key, tokens)) {
         for (final f in entry.value) {
@@ -376,15 +378,36 @@ class LibraryIndex {
       }
     }
 
-    final meta = _metadataIndex.keys.firstWhere(
-      (k) => _isSubset(tokens, k) || _isSubset(k, tokens),
-      orElse: () => [],
-    );
-    if (meta.isNotEmpty) {
-      for (final f in _metadataIndex[meta]!) {
-        if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
+    // 3. Try matching by M4A metadata (title/artist) against metadata index
+    try {
+      final m4aMeta = MetadataReader.read(m4aPath);
+      if (m4aMeta.title != null && m4aMeta.title!.isNotEmpty) {
+        final titleTokens = _normalize(m4aMeta.title!);
+        final metaMatch = _metadataIndex.keys.firstWhere(
+          (k) => _isSubset(titleTokens, k) || _isSubset(k, titleTokens),
+          orElse: () => [],
+        );
+        if (metaMatch.isNotEmpty) {
+          for (final f in _metadataIndex[metaMatch]!) {
+            if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
+          }
+        }
+        // Also check by title+artist combined
+        if (m4aMeta.artist != null && m4aMeta.artist!.isNotEmpty) {
+          final combined = _normalize('${m4aMeta.title} - ${m4aMeta.artist}');
+          final combinedMatch = _filenameIndex.keys.firstWhere(
+            (k) => _isSubset(combined, k) || _isSubset(k, combined),
+            orElse: () => [],
+          );
+          if (combinedMatch.isNotEmpty) {
+            for (final f in _filenameIndex[combinedMatch]!) {
+              if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
+            }
+          }
+        }
       }
-    }
+    } catch (_) {}
+
     return null;
   }
 

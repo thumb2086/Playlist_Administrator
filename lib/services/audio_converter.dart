@@ -8,7 +8,12 @@ class AudioConverter {
     String format = 'mp3',
     String? ffmpegPath,
   }) async {
-    final ffmpeg = ffmpegPath ?? 'ffmpeg';
+    String ffmpeg = ffmpegPath ?? 'ffmpeg';
+    if (!ffmpeg.contains('\\') && !ffmpeg.contains('/')) {
+      // Already a simple name like 'ffmpeg' — keep as-is
+    } else if (!await File(ffmpeg).exists()) {
+      ffmpeg = 'ffmpeg'; // Fallback to PATH if configured path doesn't exist
+    }
     if (!await File(inputPath).exists()) return false;
 
     if (inputPath.toLowerCase().endsWith('.$format')) {

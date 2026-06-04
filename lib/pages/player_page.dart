@@ -103,8 +103,7 @@ class _PlayerPageState extends State<PlayerPage> {
         }
         // Title-only fallback (different artist version)
         final titlePart = parts[0].trim().toLowerCase();
-        if (titlePart.length >= 2 && songs.isEmpty) {
-          // Search mp3 dir for any file containing the title
+        if (titlePart.length >= 2) {
           final mp3Dir = Directory('$lib\\mp3');
           if (await mp3Dir.exists()) {
             await for (final f in mp3Dir.list()) {
