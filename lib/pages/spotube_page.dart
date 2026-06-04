@@ -35,14 +35,26 @@ class _SpotubePageState extends State<SpotubePage> {
     });
   }
 
+  SpotubeController? _ctrl;
+
+  void _cancelDownload() {
+    if (_ctrl != null) {
+      _ctrl!.abort();
+      _ctrl = null;
+    }
+    setState(() { _running = false; _status = t('spotube.status_cancelled'); });
+    _log('⏹️ ${t('spotube.cancelled')}');
+  }
+
   Future<void> _downloadAll() async {
-    if (_running) { return; }
+    if (_running) return;
     setState(() { _running = true; _status = t('spotube.status_downloading'); });
     try {
       final ctrl = SpotubeController(
         libraryPath: ConfigService.instance.config.libraryPath,
         coords: ConfigService.instance.config.spotubeCoords,
       );
+      _ctrl = ctrl;
       if (!ctrl.isRunning()) {
         _log('❌ ${t('spotube.not_running')}');
         setState(() { _running = false; _status = t('common.error'); });
@@ -51,7 +63,7 @@ class _SpotubePageState extends State<SpotubePage> {
 
       final names = ConfigService.instance.config.urlNames.values.toList();
       for (int i = 0; i < names.length; i++) {
-        if (!_running) break;
+        if (ctrl.isAborted) break;
         _log('[$i/${names.length}] ${names[i]}');
         try {
           await ctrl.downloadPlaylist(names[i]);
@@ -60,8 +72,10 @@ class _SpotubePageState extends State<SpotubePage> {
           _log('  ✅ ${names[i]}');
         } catch (e) { _log('  ❌ ${names[i]}: $e'); }
       }
-      _log(t('spotube.download_complete')); setState(() => _status = t('common.done'));
+      _log(ctrl.isAborted ? t('spotube.cancelled') : t('spotube.download_complete'));
+      setState(() => _status = ctrl.isAborted ? t('spotube.status_cancelled') : t('common.done'));
     } catch (e) { _log('${t('common.error')}: $e'); setState(() => _status = t('common.error')); }
+    _ctrl = null;
     setState(() => _running = false);
   }
 
@@ -98,7 +112,7 @@ class _SpotubePageState extends State<SpotubePage> {
             Wrap(spacing: 8, runSpacing: 8, children: [
               _SButton(t('spotube.download_all'), Icons.download_rounded, _downloadAll, _running, isPrimary: true),
               _SButton(t('spotube.move_m4a'), Icons.drive_file_move_rounded, _moveFiles, _running),
-              _SButton(t('spotube.cancel'), Icons.stop_rounded, () => setState(() => _running = false), !_running, color: AppColors.error),
+              _SButton(t('spotube.cancel'), Icons.stop_rounded, _cancelDownload, !_running, color: AppColors.error),
               _SButton(t('spotube.reset_records'), Icons.delete_outline_rounded, () {
                 ConfigService.instance.config.lastUpdated.clear();
                 ConfigService.instance.save(); setState(() {}); _log(t('spotube.records_reset'));

@@ -24,6 +24,7 @@ class SpotubeController {
   final Map<String, List<int>> _coords;
   final String libraryPath;
   final String? exePath;
+  bool _aborted = false;
   static const _stateFile = 'spotube_download_state.json';
   static Map<String, String> _loadState() {
     try {
@@ -55,6 +56,9 @@ class SpotubeController {
   SpotubeController({required this.libraryPath, Map<String, List<int>>? coords, this.exePath})
       : _coords = coords ?? {};
 
+  void abort() { _aborted = true; }
+  bool get isAborted => _aborted;
+
   Future<bool> launch() async {
     if (isRunning()) return true;
     if (exePath == null || exePath!.isEmpty) return false;
@@ -63,7 +67,7 @@ class SpotubeController {
     try {
       Process.start(exe.path, [], runInShell: true);
       for (int i = 0; i < 30; i++) {
-        await Future<void>.delayed(const Duration(seconds: 1));
+        await Future.delayed(const Duration(seconds: 1));
         if (isRunning()) return true;
       }
     } catch (_) {}
@@ -118,7 +122,7 @@ class SpotubeController {
     if (h == null) throw Exception('Spotube not found');
     if (IsIconic(h) != 0) ShowWindow(h, SW_RESTORE);
     SetForegroundWindow(h);
-    _wait(300);
+    _aWait(300);
   }
 
   void restorePrevious() {
@@ -140,9 +144,9 @@ class SpotubeController {
 
   void click(int x, int y) {
     SetCursorPos(x, y);
-    _wait(50);
+    _aWait(50);
     _sendClick(x, y);
-    _wait(200);
+    _aWait(200);
   }
 
   void _sendClick(int x, int y) {
@@ -157,47 +161,54 @@ class SpotubeController {
 
   void doubleClick(int x, int y) {
     click(x, y);
-    _wait(100);
+    _aWait(100);
     click(x, y);
-    _wait(300);
+    _aWait(300);
   }
 
   void sendChars(String text) {
     for (final ch in text.codeUnits) {
+      if (_aborted) return;
       final h = hwnd;
-      if (h != null) SendMessage(h, WM_CHAR, ch, 0);
-      _wait(30);
+      if (h != null) {
+        SendMessage(h, WM_CHAR, ch, 0);
+        SendMessage(h, WM_KEYUP, ch, 0);
+      }
+      _aWait(30);
     }
   }
 
   void sendBackspaces(int count) {
     for (int i = 0; i < count; i++) {
+      if (_aborted) return;
       final h = hwnd;
       if (h != null) {
         SendMessage(h, WM_KEYDOWN, VK_BACK, 0);
         SendMessage(h, WM_CHAR, 0x08, 0);
         SendMessage(h, WM_KEYUP, VK_BACK, 0);
       }
-      _wait(20);
+      _aWait(20);
     }
   }
 
-  void sendEnd() {
-    final h = hwnd;
-    if (h != null) {
-      SendMessage(h, WM_KEYDOWN, VK_END, 0);
-      SendMessage(h, WM_KEYUP, VK_END, 0);
-    }
-  }
-
-  void hotkey(int vk) {
+  void sendSelectAll() {
     final h = hwnd;
     if (h != null) {
       SendMessage(h, WM_KEYDOWN, VK_LCONTROL, 0);
-      SendMessage(h, WM_KEYDOWN, vk, 0);
-      SendMessage(h, WM_KEYUP, vk, 0);
+      SendMessage(h, WM_KEYDOWN, 0x41, 0); // 'A'
+      SendMessage(h, WM_KEYUP, 0x41, 0);
       SendMessage(h, WM_KEYUP, VK_LCONTROL, 0);
     }
+    _aWait(100);
+  }
+
+  void sendEscape() {
+    final h = hwnd;
+    if (h != null) {
+      SendMessage(h, WM_KEYDOWN, VK_ESCAPE, 0);
+      SendMessage(h, WM_KEYUP, VK_ESCAPE, 0);
+    }
+    _aWait(100);
   }
 
   int pixelBrightness(int x, int y) {
@@ -218,8 +229,9 @@ class SpotubeController {
   void filterPlaylists(String name) {
     final pos = _absolute('library_filter');
     click(pos[0], pos[1]);
-    sendEnd();
-    sendBackspaces(80);
+    _aWait(200);
+    sendSelectAll();
+    _aWait(100);
     sendChars(name);
   }
 
@@ -259,25 +271,42 @@ class SpotubeController {
     return pixelBrightness(pos[0], pos[1]) > 200;
   }
 
+  bool _checkAborted() {
+    if (_aborted) {
+      sendEscape();
+      restorePrevious();
+      return true;
+    }
+    return false;
+  }
+
   Future<void> downloadPlaylist(String name) async {
+    if (_checkAborted()) return;
     if (!isRunning()) throw Exception('Spotube is not running');
     maximize();
     activate();
+    if (_checkAborted()) return;
     clickSidebarLibrary();
-    _wait(800);
+    await _wait(800);
+    if (_checkAborted()) return;
     filterPlaylists(name);
-    _wait(1500);
+    await _wait(1500);
+    if (_checkAborted()) return;
     clickFirstPlaylist();
-    _wait(2000);
+    await _wait(2000);
+    if (_checkAborted()) return;
     clickThreeDot();
-    _wait(800);
+    await _wait(800);
+    if (_checkAborted()) return;
     clickDownloadAll();
-    _wait(800);
+    await _wait(800);
+    if (_checkAborted()) return;
     clickConfirm();
-    _wait(2000);
+    await _wait(2000);
+    if (_checkAborted()) return;
     if (hasSkipDialog()) {
       clickSkip();
-      _wait(300);
+      await _wait(300);
       clickSkipAll();
     }
     minimize();
@@ -293,6 +322,7 @@ class SpotubeController {
     await Directory(dst).create(recursive: true);
     int moved = 0;
     await for (final entity in srcDir.list(recursive: true)) {
+      if (_aborted) break;
       if (entity is File && RegExp(r'\.(m4a|mp3|flac|wav|webm)$', caseSensitive: false).hasMatch(entity.path)) {
         final name = entity.uri.pathSegments.last;
         final target = File('$dst\\$name');
@@ -306,7 +336,9 @@ class SpotubeController {
   }
 }
 
-void _wait(int ms) {
+void _aWait(int ms) {
   final stopwatch = Stopwatch()..start();
   while (stopwatch.elapsedMilliseconds < ms) {}
 }
+
+Future<void> _wait(int ms) => Future.delayed(Duration(milliseconds: ms));
