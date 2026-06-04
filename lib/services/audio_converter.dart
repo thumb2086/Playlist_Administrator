@@ -40,8 +40,7 @@ class AudioConverter {
     args.add(outputPath);
 
     try {
-      final result = await Process.run(ffmpeg, args,
-          timeout: Duration(seconds: 300));
+      final result = await Process.run(ffmpeg, args);
       return result.exitCode == 0;
     } catch (_) {
       return false;
