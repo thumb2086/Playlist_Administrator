@@ -154,19 +154,37 @@ class _StatsPageState extends State<StatsPage> {
 
   Widget _buildFileChart() {
     final spots = <FlSpot>[];
+    double minY = double.infinity, maxY = 0;
     for (int i = 0; i < _history.length; i++) {
-      final s = _history[i];
-      spots.add(FlSpot(i.toDouble(), (s.mp3 + s.m4a + s.flac).toDouble()));
+      final v = (_history[i].mp3 + _history[i].m4a + _history[i].flac).toDouble();
+      spots.add(FlSpot(i.toDouble(), v));
+      if (v < minY) minY = v; if (v > maxY) maxY = v;
     }
+    final yRange = (maxY - minY).clamp(50, double.infinity);
     return LineChart(LineChartData(
-      gridData: const FlGridData(show: false),
-      titlesData: const FlTitlesData(show: false),
+      gridData: FlGridData(show: true, drawVerticalLine: false,
+        getDrawingHorizontalLine: (_) => FlLine(color: AppColors.border.withValues(alpha: 0.2), strokeWidth: 1)),
+      titlesData: FlTitlesData(
+        leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 50,
+          getTitlesWidget: (v, _) => Text('${v.toInt()}', style: const TextStyle(color: AppColors.textMuted, fontSize: 9)))),
+        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 20,
+          getTitlesWidget: (v, _) {
+            final idx = v.toInt();
+            if (idx < 0 || idx >= _history.length) return const SizedBox();
+            return Text('${_history[idx].time.month}/${_history[idx].time.day}',
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 9));
+          })),
+      ),
       borderData: FlBorderData(show: false),
-      minY: spots.map((s) => s.y).reduce((a, b) => a < b ? a : b) - 50,
+      minY: (minY - yRange * 0.05).clamp(0, double.infinity),
+      maxY: maxY + yRange * 0.05,
       lineBarsData: [
         LineChartBarData(spots: spots, isCurved: true,
           color: AppColors.accent, barWidth: 2,
-          dotData: const FlDotData(show: false),
+          dotData: FlDotData(show: _history.length < 20,
+            getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(radius: 2, color: AppColors.accent)),
           belowBarData: BarAreaData(show: true, color: AppColors.accent.withValues(alpha: 0.1))),
       ],
     ));
@@ -174,30 +192,55 @@ class _StatsPageState extends State<StatsPage> {
 
   Widget _buildPlaylistChart() {
     final colors = [AppColors.accent, const Color(0xFF4FC3F7), const Color(0xFFFFB74D),
-                    const Color(0xFFCE93D8), const Color(0xFF80CBC4)];
+                    const Color(0xFFCE93D8), const Color(0xFF80CBC4), const Color(0xFFF06292)];
     final plNames = <String>{};
     for (final s in _history) {
       plNames.addAll(s.playlistMatched.keys);
     }
-    final plList = plNames.take(10).toList();
+    final plList = plNames.take(8).toList();
 
-    return LineChart(LineChartData(
-      gridData: const FlGridData(show: false),
-      titlesData: const FlTitlesData(show: false),
-      borderData: FlBorderData(show: false),
-      lineBarsData: plList.asMap().entries.map((entry) {
-        final pi = entry.key;
-        final name = entry.value;
-        final spots = <FlSpot>[];
-        for (int i = 0; i < _history.length; i++) {
-          final matched = _history[i].playlistMatched[name] ?? 0;
-          spots.add(FlSpot(i.toDouble(), matched.toDouble()));
-        }
-        return LineChartBarData(spots: spots, isCurved: true,
-          color: colors[pi % colors.length], barWidth: 1.5,
-          dotData: const FlDotData(show: false));
-      }).toList(),
-    ));
+    return Row(children: [
+      Expanded(flex: 3, child: LineChart(LineChartData(
+        gridData: FlGridData(show: true, drawVerticalLine: false,
+          getDrawingHorizontalLine: (_) => FlLine(color: AppColors.border.withValues(alpha: 0.2), strokeWidth: 1)),
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 35,
+            getTitlesWidget: (v, _) => Text('${v.toInt()}', style: const TextStyle(color: AppColors.textMuted, fontSize: 9)))),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 20,
+            getTitlesWidget: (v, _) {
+              final idx = v.toInt();
+              if (idx < 0 || idx >= _history.length) return const SizedBox();
+              return Text('${_history[idx].time.month}/${_history[idx].time.day}',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 9));
+            })),
+        ),
+        borderData: FlBorderData(show: false),
+        lineBarsData: plList.asMap().entries.map((entry) {
+          final pi = entry.key;
+          final name = entry.value;
+          final spots = <FlSpot>[];
+          for (int i = 0; i < _history.length; i++) {
+            final matched = _history[i].playlistMatched[name] ?? 0;
+            spots.add(FlSpot(i.toDouble(), matched.toDouble()));
+          }
+          return LineChartBarData(spots: spots, isCurved: true,
+            color: colors[pi % colors.length], barWidth: 1.5,
+            dotData: const FlDotData(show: false));
+        }).toList(),
+      ))),
+      const SizedBox(width: 12),
+      Expanded(flex: 2, child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start,
+        children: plList.asMap().entries.map((e) => Padding(padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(children: [
+            Container(width: 8, height: 8, decoration: BoxDecoration(color: colors[e.key % colors.length], shape: BoxShape.circle)),
+            const SizedBox(width: 6),
+            Expanded(child: Text(e.value, style: const TextStyle(color: AppColors.textSecondary, fontSize: 9), overflow: TextOverflow.ellipsis)),
+          ]),
+        )).toList(),
+      )),
+    ]);
   }
 }
 
