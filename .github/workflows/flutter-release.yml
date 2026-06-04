@@ -25,14 +25,6 @@ jobs:
           architecture: x64
           cache: true
 
-      - run: flutter pub get
-
-      - name: Build Windows
-        run: flutter build windows --release
-
-      - name: Install Inno Setup
-        run: choco install innosetup --no-progress -y
-
       - name: Get version from tag
         id: version
         run: |
@@ -40,6 +32,22 @@ jobs:
           $version = $tag -replace '^v', ''
           if (-not $version) { $version = '2.0.0' }
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Sync version to pubspec.yaml
+        run: |
+          (Get-Content pubspec.yaml) -replace '^version: .+', "version: $env:APP_VERSION" | Set-Content pubspec.yaml
+
+      - name: Sync version to utils/version.py
+        run: |
+          (Get-Content utils/version.py) -replace "(?<=__version__ = \").+(?=\")", "$env:APP_VERSION" | Set-Content utils/version.py
+
+      - run: flutter pub get
+
+      - name: Build Windows
+        run: flutter build windows --release
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
 
       - name: Build installer
         run: |
