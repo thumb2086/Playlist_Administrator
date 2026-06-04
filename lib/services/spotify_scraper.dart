@@ -49,6 +49,18 @@ class SpotifyScraper {
     return plNames;
   }
 
+  Map<String, dynamic>? _getPath(Map<String, dynamic> obj, List<String> keys) {
+    var current = obj;
+    for (final k in keys) {
+      if (current.containsKey(k) && current[k] is Map<String, dynamic>) {
+        current = current[k] as Map<String, dynamic>;
+      } else {
+        return null;
+      }
+    }
+    return current;
+  }
+
   Future<String?> _scrapeOne(String url) async {
     final spId = url.split('playlist/').last.split('?').first;
     final embedUrl = 'https://open.spotify.com/embed/playlist/$spId';
@@ -65,39 +77,69 @@ class SpotifyScraper {
     }
 
     final doc = parse(resp.body);
-    final scripts = doc.querySelectorAll('script[type="application/json"]');
     String? plName;
     final tracks = <String>[];
 
-    for (final script in scripts) {
-      final json = jsonDecode(script.text) as Map<String, dynamic>?;
-      if (json == null) continue;
-
+    // Try __NEXT_DATA__ first (newer Spotify embed format)
+    final nextData = doc.querySelector('script#__NEXT_DATA__');
+    if (nextData != null) {
       try {
-        final state = json['state'] as Map<String, dynamic>?;
-        if (state == null) continue;
-        final playlist = state['playlist'] as Map<String, dynamic>?;
-        if (playlist == null) continue;
-        plName = playlist['name'] as String?;
-        final items = playlist['items'] as List<dynamic>?;
-        if (items == null) continue;
-
-        _ensureCacheDir();
-        for (final item in items) {
-          final track = item['track'] as Map<String, dynamic>?;
-          if (track == null) continue;
-          final artists = (track['artists'] as List<dynamic>?)
-                  ?.map((a) => (a as Map<String, dynamic>)['name'] as String?)
-                  .where((a) => a != null)
-                  .join(', ') ?? '';
-          final title = track['name'] as String? ?? '';
-          final displayName = artists.isNotEmpty ? '$title - $artists' : title;
-          tracks.add(displayName);
-
-          // Save metadata cache
-          _saveTrackCache(displayName, title, artists, track);
+        final data = jsonDecode(nextData.text) as Map<String, dynamic>;
+        final entity = _getPath(data, ['props', 'pageProps', 'state', 'data', 'entity']);
+        if (entity != null) {
+          plName = entity['name'] as String?;
+          final trackList = (entity['trackList'] ?? entity['tracks']) as List<dynamic>?;
+          if (trackList != null) {
+            _ensureCacheDir();
+            for (final item in trackList) {
+              final track = (item is Map<String, dynamic>) ? (item['track'] as Map<String, dynamic>? ?? item) : null;
+              if (track == null) continue;
+              final name = track['name'] as String? ?? track['title'] as String?;
+              if (name == null) continue;
+              final artists = (track['artists'] as List<dynamic>?)
+                      ?.map((a) => (a as Map<String, dynamic>)['name'] as String?)
+                      .where((a) => a != null)
+                      .join(', ') ??
+                  (track['subtitle'] as String?);
+              final displayName = (artists != null && artists.isNotEmpty) ? '$name - $artists' : name;
+              tracks.add(displayName);
+              _saveTrackCache(displayName, name, artists ?? '', track);
+            }
+          }
         }
       } catch (_) {}
+    }
+
+    // Fallback: try old script[type="application/json"] format
+    if (plName == null || tracks.isEmpty) {
+      final scripts = doc.querySelectorAll('script[type="application/json"]');
+      for (final script in scripts) {
+        try {
+          final json = jsonDecode(script.text) as Map<String, dynamic>;
+          final state = json['state'] as Map<String, dynamic>?;
+          if (state == null) continue;
+          final playlist = state['playlist'] as Map<String, dynamic>?;
+          if (playlist == null) continue;
+          plName = playlist['name'] as String?;
+          final items = playlist['items'] as List<dynamic>?;
+          if (items == null) continue;
+
+          _ensureCacheDir();
+          for (final item in items) {
+            final track = item['track'] as Map<String, dynamic>?;
+            if (track == null) continue;
+            final artists = (track['artists'] as List<dynamic>?)
+                    ?.map((a) => (a as Map<String, dynamic>)['name'] as String?)
+                    .where((a) => a != null)
+                    .join(', ') ?? '';
+            final title = track['name'] as String? ?? '';
+            final displayName = artists.isNotEmpty ? '$title - $artists' : title;
+            tracks.add(displayName);
+            _saveTrackCache(displayName, title, artists, track);
+          }
+          break;
+        } catch (_) {}
+      }
     }
 
     if (plName == null || tracks.isEmpty) {
