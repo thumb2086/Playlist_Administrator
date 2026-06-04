@@ -70,11 +70,19 @@ class LibraryPageState extends State<LibraryPage> {
       }
     }
 
+    final knownNames = cfg.urlNames.values.map((n) => n.toLowerCase()).toSet();
     if (await plDir.exists()) {
+      final toDelete = <String>[];
       await for (final e in plDir.list()) {
         if (e is File && e.path.toLowerCase().endsWith('.m3u8')) {
           final baseName = File(e.path).uri.pathSegments.last;
           if (PlaylistParser.isInternalPlaylist(baseName)) continue;
+          final nameNoExt = baseName.replaceAll('.m3u8', '').toLowerCase();
+          // Delete orphan m3u8 (not in urlNames, not internal)
+          if (!knownNames.contains(nameNoExt)) {
+            toDelete.add(e.path);
+            continue;
+          }
           final stat = await e.stat();
           if (stat.size == 0) continue;
           try {
@@ -84,14 +92,16 @@ class LibraryPageState extends State<LibraryPage> {
               if (!line.startsWith('#') && line.trim().isNotEmpty) {
                 total++;
                 final name = File(line).uri.pathSegments.last;
-                // Remove extension if present, then match against library stems
                 final stem = name.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
                 if (libStems.contains(stem)) matched++;
               }
             }
-            stats[File(e.path).uri.pathSegments.last.replaceAll('.m3u8', '')] = _PlStats(total, matched);
+            stats[baseName.replaceAll('.m3u8', '')] = _PlStats(total, matched);
           } catch (_) {}
         }
+      }
+      for (final path in toDelete) {
+        try { await File(path).delete(); } catch (_) {}
       }
     }
     if (mounted) setState(() { _stats = stats; _loading = false; });
