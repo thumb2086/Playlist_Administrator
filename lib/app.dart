@@ -54,9 +54,8 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> with SingleTickerProviderStateMixin {
+class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
-  late AnimationController _animCtrl;
 
   late List<_NavItemData> _navItems;
 
@@ -72,8 +71,6 @@ class _MainShellState extends State<MainShell> with SingleTickerProviderStateMix
   @override
   void initState() {
     super.initState();
-    _animCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
-    _animCtrl.forward();
     _rebuildNav();
     I18N.instance.addListener(_rebuildNav);
     _checkForUpdates();
@@ -93,7 +90,6 @@ class _MainShellState extends State<MainShell> with SingleTickerProviderStateMix
   @override
   void dispose() {
     I18N.instance.removeListener(_rebuildNav);
-    _animCtrl.dispose();
     super.dispose();
   }
 
@@ -120,27 +116,20 @@ class _MainShellState extends State<MainShell> with SingleTickerProviderStateMix
             selectedIndex: _selectedIndex,
             onSelected: (i) {
               setState(() => _selectedIndex = i);
-              _animCtrl.forward(from: 0);
             },
           ),
           Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 250),
-              switchInCurve: Curves.easeOut,
-              switchOutCurve: Curves.easeIn,
-              transitionBuilder: (child, animation) {
-                return FadeTransition(opacity: animation, child: child);
-              },
-              child: KeyedSubtree(
-                key: ValueKey(_selectedIndex),
-                child: Column(
-                  children: [
-                    _Header(title: _navItems[_selectedIndex].label),
-                    Expanded(child: _pages[_selectedIndex]),
-                  ],
+            child: Column(
+            children: [
+              _Header(title: _navItems[_selectedIndex].label),
+              Expanded(
+                child: IndexedStack(
+                  index: _selectedIndex,
+                  children: _pages,
                 ),
               ),
-            ),
+            ],
+          ),
           ),
         ],
       ),

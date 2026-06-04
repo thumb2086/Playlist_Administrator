@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/config_service.dart';
 import '../services/i18n.dart';
 import '../services/spotube_controller.dart';
@@ -62,16 +63,13 @@ class _SpotubePageState extends State<SpotubePage> {
       }
 
       final names = ConfigService.instance.config.urlNames.values.toList();
-      for (int i = 0; i < names.length; i++) {
+      await ctrl.downloadAll(names);
+      for (final name in names) {
         if (ctrl.isAborted) break;
-        _log('[$i/${names.length}] ${names[i]}');
-        try {
-          await ctrl.downloadPlaylist(names[i]);
-          ConfigService.instance.config.lastUpdated[names[i]] = DateTime.now().toIso8601String().substring(0, 10);
-          await ConfigService.instance.save();
-          _log('  ✅ ${names[i]}');
-        } catch (e) { _log('  ❌ ${names[i]}: $e'); }
+        ConfigService.instance.config.lastUpdated[name] = DateTime.now().toIso8601String().substring(0, 10);
       }
+      await ConfigService.instance.save();
+
       _log(ctrl.isAborted ? t('spotube.cancelled') : t('spotube.download_complete'));
       setState(() => _status = ctrl.isAborted ? t('spotube.status_cancelled') : t('common.done'));
     } catch (e) { _log('${t('common.error')}: $e'); setState(() => _status = t('common.error')); }
@@ -91,9 +89,16 @@ class _SpotubePageState extends State<SpotubePage> {
   @override
   Widget build(BuildContext context) {
     final downloaded = ConfigService.instance.config.lastUpdated;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    return CallbackShortcuts(
+      bindings: {
+        if (_running)
+          const SingleActivator(LogicalKeyboardKey.escape): _cancelDownload,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
@@ -152,7 +157,9 @@ class _SpotubePageState extends State<SpotubePage> {
                   )),
         )),
         const SizedBox(height: 16),
-      ]),
+          ]),
+        ),
+      ),
     );
   }
 }

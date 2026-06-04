@@ -284,12 +284,7 @@ class SpotubeController {
     return false;
   }
 
-  Future<void> downloadPlaylist(String name) async {
-    if (_checkAborted()) return;
-    if (!isRunning()) throw Exception('Spotube is not running');
-    maximize();
-    activate();
-    if (_checkAborted()) return;
+  Future<void> _stepPlaylist(String name) async {
     clickSidebarLibrary();
     await _wait(800);
     bringFlutterToFront();
@@ -324,6 +319,26 @@ class SpotubeController {
       clickSkip();
       await _wait(300);
       clickSkipAll();
+    }
+  }
+
+  Future<void> downloadPlaylist(String name) async {
+    if (_checkAborted()) return;
+    if (!isRunning()) throw Exception('Spotube is not running');
+    maximize();
+    activate();
+    await _stepPlaylist(name);
+    minimize();
+    restorePrevious();
+  }
+
+  Future<void> downloadAll(List<String> names) async {
+    if (!isRunning()) throw Exception('Spotube is not running');
+    maximize();
+    activate();
+    for (final name in names) {
+      if (_aborted) break;
+      await _stepPlaylist(name);
     }
     minimize();
     restorePrevious();
