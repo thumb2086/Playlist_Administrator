@@ -364,6 +364,15 @@ class _PlaylistCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                ] else ...[
+                  const Spacer(),
+                  Row(
+                    children: [
+                      Icon(Icons.cloud_download_outlined, size: 12, color: AppColors.textMuted.withValues(alpha: 0.5)),
+                      const SizedBox(width: 4),
+                      Text('尚未同步', style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.5), fontSize: 11)),
+                    ],
+                  ),
                 ],
               ],
             ),
