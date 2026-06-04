@@ -35,7 +35,7 @@ class _StatsPageState extends State<StatsPage> {
       double size = 0, savedGb = 0;
       final nameExts = <String, Set<String>>{};
       final nameCount = <String, int>{};  // stem -> total occurrences
-      final m4aSizeByStem = <String, double>{};  // stem -> total m4a size
+      final firstSize = <String, double>{};  // stem -> size of first occurrence
 
       if (await Directory(lib).exists()) {
         await for (final e in Directory(lib).list(recursive: true, followLinks: false)) {
@@ -45,21 +45,18 @@ class _StatsPageState extends State<StatsPage> {
             size += lenGb;
             final stem = e.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
             nameExts.putIfAbsent(stem, () => {});
-            nameCount[stem] = (nameCount[stem] ?? 0) + 1;
-            if (low.endsWith('.mp3')) { mp3++; nameExts[stem]!.add('mp3'); }
-            else if (low.endsWith('.m4a')) {
-              m4a++; nameExts[stem]!.add('m4a');
-              m4aSizeByStem[stem] = (m4aSizeByStem[stem] ?? 0) + lenGb;
+            final cnt = nameCount[stem] ?? 0;
+            nameCount[stem] = cnt + 1;
+            // First occurrence: record size; subsequent: add to saved
+            if (cnt == 0) {
+              firstSize[stem] = lenGb;
+            } else {
+              savedGb += lenGb;
             }
+            if (low.endsWith('.mp3')) { mp3++; nameExts[stem]!.add('mp3'); }
+            else if (low.endsWith('.m4a')) { m4a++; nameExts[stem]!.add('m4a'); }
             else if (low.endsWith('.flac')) { flac++; nameExts[stem]!.add('flac'); }
           }
-        }
-      }
-
-      // Space saved = size of M4A files that also have an MP3 version
-      for (final entry in nameExts.entries) {
-        if (entry.value.contains('mp3') && entry.value.contains('m4a')) {
-          savedGb += m4aSizeByStem[entry.key] ?? 0;
         }
       }
 
