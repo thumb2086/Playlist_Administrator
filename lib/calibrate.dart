@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'package:ffi/ffi.dart';
@@ -80,12 +81,27 @@ void main() {
   calloc.free(pos);
 
   print('\n=== Results ===');
-  print('Add to config.json under "spotube_coords":');
   print('{');
   for (final e in results.entries) {
     print("  '${e.key}': [${e.value[0]}, ${e.value[1]}],");
   }
   print('}');
+
+  // Auto-save to config
+  try {
+    // Write directly to config.json
+    final localAppData = Platform.environment['LOCALAPPDATA'] ?? '';
+    final pointerFile = File('$localAppData\\Playlist Administrator\\data\\config.json');
+    if (pointerFile.existsSync()) {
+      final data = jsonDecode(pointerFile.readAsStringSync()) as Map<String, dynamic>;
+      data['spotube_coords'] = results.map((k, v) => MapEntry(k, v));
+      pointerFile.writeAsStringSync(jsonEncode(data), flush: true);
+      print('\n✅ Auto-saved to config.json');
+    }
+  } catch (e) {
+    print('\n⚠️ Could not auto-save: $e');
+    print('Manually copy the results above into config.json under "spotube_coords".');
+  }
 }
 
 List<int> _clientOrigin(int hwnd) {

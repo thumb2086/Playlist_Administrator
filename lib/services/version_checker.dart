@@ -22,8 +22,7 @@ class VersionChecker {
   static const _apiUrl = 'https://api.github.com/repos/$_owner/$_repo/releases/latest';
 
   static String get currentVersion {
-    final v = ConfigService.instance.config.basePath.isEmpty ? '2.0.2-beta.1' : '2.0.2-beta.1';
-    return 'v$v';
+    return 'v2.0.2-beta.6';
   }
 
   static List<int> _parseVersion(String v) {

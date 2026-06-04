@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io' hide sleep;
 import 'package:ffi/ffi.dart';
@@ -22,6 +23,22 @@ class SpotubeController {
   int? _prevHwnd;
   final Map<String, List<int>> _coords;
   final String libraryPath;
+  final String? exePath;
+  static const _stateFile = 'spotube_download_state.json';
+  static Map<String, String> _loadState() {
+    try {
+      final f = File('${Platform.environment['LOCALAPPDATA'] ?? ''}\\Playlist Administrator\\data\\$_stateFile');
+      if (f.existsSync()) return Map<String, String>.from(jsonDecode(f.readAsStringSync()) as Map);
+    } catch (_) {}
+    return {};
+  }
+  static void _saveState(Map<String, String> state) {
+    try {
+      final f = File('${Platform.environment['LOCALAPPDATA'] ?? ''}\\Playlist Administrator\\data\\$_stateFile');
+      f.parent.createSync(recursive: true);
+      f.writeAsStringSync(jsonEncode(state), flush: true);
+    } catch (_) {}
+  }
 
   static const _defaultCoords = {
     'sidebar_library': [30, 280],
@@ -35,8 +52,38 @@ class SpotubeController {
     'skip_all': [960, 600],
   };
 
-  SpotubeController({required this.libraryPath, Map<String, List<int>>? coords})
+  SpotubeController({required this.libraryPath, Map<String, List<int>>? coords, this.exePath})
       : _coords = coords ?? {};
+
+  Future<bool> launch() async {
+    if (isRunning()) return true;
+    if (exePath == null || exePath!.isEmpty) return false;
+    final exe = File(exePath!);
+    if (!await exe.exists()) return false;
+    try {
+      Process.start(exe.path, [], runInShell: true);
+      for (int i = 0; i < 30; i++) {
+        await Future<void>.delayed(const Duration(seconds: 1));
+        if (isRunning()) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  static bool isDownloaded(String name) {
+    final state = _loadState();
+    return state.containsKey(name);
+  }
+
+  static void markDownloaded(String name) {
+    final state = _loadState();
+    state[name] = DateTime.now().toIso8601String();
+    _saveState(state);
+  }
+
+  static void resetAllDownloads() {
+    _saveState({});
+  }
 
   List<int> _coord(String key) => _coords[key] ?? (_defaultCoords[key] ?? [0, 0]);
 
@@ -246,7 +293,7 @@ class SpotubeController {
     await Directory(dst).create(recursive: true);
     int moved = 0;
     await for (final entity in srcDir.list(recursive: true)) {
-      if (entity is File && entity.path.toLowerCase().endsWith('.m4a')) {
+      if (entity is File && RegExp(r'\.(m4a|mp3|flac|wav|webm)$', caseSensitive: false).hasMatch(entity.path)) {
         final name = entity.uri.pathSegments.last;
         final target = File('$dst\\$name');
         if (!await target.exists()) {
