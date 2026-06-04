@@ -348,7 +348,7 @@ class LibraryIndex {
     return parts.where((p) => p.isNotEmpty).toList();
   }
 
-  Future<String?> findMp3ForM4a(String m4aPath, {bool useMtime = true}) async {
+  Future<String?> findMp3ForM4a(String m4aPath, {bool useMtime = true, TrackMetadata? cachedMeta}) async {
     final basename = File(m4aPath).uri.pathSegments.last;
     final stem = basename.replaceAll(RegExp(r'\.\w+$'), '');
     final tokens = _normalize(stem);
@@ -379,34 +379,34 @@ class LibraryIndex {
     }
 
     // 3. Try matching by M4A metadata (title/artist) against metadata index
-    try {
-      final m4aMeta = await MetadataReader.read(m4aPath);
-      if (m4aMeta.title != null && m4aMeta.title!.isNotEmpty) {
-        final titleTokens = _normalize(m4aMeta.title!);
-        final metaMatch = _metadataIndex.keys.firstWhere(
-          (k) => _isSubset(titleTokens, k) || _isSubset(k, titleTokens),
-          orElse: () => [],
-        );
-        if (metaMatch.isNotEmpty) {
-          for (final f in _metadataIndex[metaMatch]!) {
-            if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
-          }
-        }
-        // Also check by title+artist combined
-        if (m4aMeta.artist != null && m4aMeta.artist!.isNotEmpty) {
-          final combined = _normalize('${m4aMeta.title} - ${m4aMeta.artist}');
-          final combinedMatch = _filenameIndex.keys.firstWhere(
-            (k) => _isSubset(combined, k) || _isSubset(k, combined),
+    if (cachedMeta != null) {
+      try {
+        if (cachedMeta.title != null && cachedMeta.title!.isNotEmpty) {
+          final titleTokens = _normalize(cachedMeta.title!);
+          final metaMatch = _metadataIndex.keys.firstWhere(
+            (k) => _isSubset(titleTokens, k) || _isSubset(k, titleTokens),
             orElse: () => [],
           );
-          if (combinedMatch.isNotEmpty) {
-            for (final f in _filenameIndex[combinedMatch]!) {
+          if (metaMatch.isNotEmpty) {
+            for (final f in _metadataIndex[metaMatch]!) {
               if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
             }
           }
+          if (cachedMeta.artist != null && cachedMeta.artist!.isNotEmpty) {
+            final combined = _normalize('${cachedMeta.title} - ${cachedMeta.artist}');
+            final combinedMatch = _filenameIndex.keys.firstWhere(
+              (k) => _isSubset(combined, k) || _isSubset(k, combined),
+              orElse: () => [],
+            );
+            if (combinedMatch.isNotEmpty) {
+              for (final f in _filenameIndex[combinedMatch]!) {
+                if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
+              }
+            }
+          }
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
 
     return null;
   }

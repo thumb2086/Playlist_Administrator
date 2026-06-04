@@ -116,25 +116,34 @@ class PipelineOrchestrator {
     final tasks = <_ConvertTask>[];
     int skipped = 0;
 
-    for (final m4a in m4aFiles) {
+    // Read metadata in batches (20 at a time) to minimize total ffprobe calls
+    for (int i = 0; i < m4aFiles.length; i += 20) {
       await state.waitIfPaused();
       if (state.isCancelled) return;
 
-      final existing = await index.findMp3ForM4a(m4a, useMtime: true);
-      if (existing != null) {
-        skipped++;
-        continue;
+      final batch = m4aFiles.skip(i).take(20).toList();
+      final metas = await Future.wait(batch.map((f) => MetadataReader.read(f).catchError((_) => TrackMetadata())));
+
+      for (int j = 0; j < batch.length; j++) {
+        final m4a = batch[j];
+        final meta = metas[j];
+
+        // Pass cached metadata to avoid another ffprobe inside findMp3ForM4a
+        final existing = await index.findMp3ForM4a(m4a, useMtime: true, cachedMeta: meta);
+        if (existing != null) {
+          skipped++;
+          continue;
+        }
+
+        final stem = File(m4a).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+        final mp3Name = (meta.title != null && meta.title!.isNotEmpty)
+            ? '${meta.title}${meta.artist != null ? ' - ${meta.artist}' : ''}.mp3'
+                .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
+            : '$stem.mp3';
+        final dest = '${config.mp3Path}\\$mp3Name';
+
+        tasks.add(_ConvertTask(m4a, dest, stem, meta));
       }
-
-      final stem = File(m4a).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-      final meta = await MetadataReader.read(m4a);
-      final mp3Name = (meta.title != null && meta.title!.isNotEmpty)
-          ? '${meta.title}${meta.artist != null ? ' - ${meta.artist}' : ''}.mp3'
-              .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
-          : '$stem.mp3';
-      final dest = '${config.mp3Path}\\$mp3Name';
-
-      tasks.add(_ConvertTask(m4a, dest, stem));
     }
 
     onLog('待轉檔: ${tasks.length}, 跳過: $skipped');
@@ -153,6 +162,7 @@ class PipelineOrchestrator {
           inputPath: t.src,
           outputPath: t.dest,
           ffmpegPath: config.ffmpegPath.isNotEmpty ? config.ffmpegPath : 'ffmpeg',
+          meta: t.meta,
         ));
       }
       final results = await Future.wait(futures);
@@ -432,5 +442,6 @@ class _ConvertTask {
   final String src;
   final String dest;
   final String stem;
-  _ConvertTask(this.src, this.dest, this.stem);
+  final TrackMetadata meta;
+  _ConvertTask(this.src, this.dest, this.stem, this.meta);
 }

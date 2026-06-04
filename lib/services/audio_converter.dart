@@ -7,6 +7,7 @@ class AudioConverter {
     required String outputPath,
     String format = 'mp3',
     String? ffmpegPath,
+    TrackMetadata? meta,
   }) async {
     String ffmpeg = ffmpegPath ?? 'ffmpeg';
     if (!ffmpeg.contains('\\') && !ffmpeg.contains('/')) {
@@ -21,7 +22,7 @@ class AudioConverter {
       return true;
     }
 
-    final meta = await MetadataReader.read(inputPath);
+    meta ??= await MetadataReader.read(inputPath);
 
     final args = <String>[
       '-y',
