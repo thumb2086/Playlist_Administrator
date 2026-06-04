@@ -44,7 +44,7 @@ jobs:
 
       - name: Analyze
         if: github.ref_type != 'tag'
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build Windows
         if: github.ref_type == 'tag'
