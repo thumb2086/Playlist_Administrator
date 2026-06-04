@@ -37,11 +37,12 @@ class SpotifyScraper {
 
   Future<void> _buildAudioIndex() async {
     if (_audioIndex != null || libraryPath.isEmpty) return;
+    log('  掃描音樂庫建立檔案索引…');
     final index = <String, String>{};
 
-    void scanDir(Directory dir) {
-      if (!dir.existsSync()) return;
-      for (final f in dir.listSync(recursive: true, followLinks: false)) {
+    Future<void> scanDir(Directory dir) async {
+      if (!await dir.exists()) return;
+      await for (final f in dir.list(recursive: true, followLinks: false)) {
         if (f is File) {
           final low = f.path.toLowerCase();
           if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac')) {
@@ -52,12 +53,13 @@ class SpotifyScraper {
       }
     }
 
-    scanDir(Directory(libraryPath));
+    await scanDir(Directory(libraryPath));
     // Also scan mp3/m4a/flac subdirs of basePath
     for (final sub in ['mp3', 'm4a', 'flac']) {
-      scanDir(Directory('$libraryPath\\$sub'));
+      await scanDir(Directory('$libraryPath\\$sub'));
     }
     _audioIndex = index;
+    log('  音檔索引完成: ${index.length} 個檔案');
   }
 
   String? _findAudioFile(String trackName) {

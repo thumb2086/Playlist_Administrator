@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'metadata_reader.dart';
 import 'chinese_converter.dart';
@@ -13,18 +14,34 @@ class LibraryIndex {
   // Static cache: reuse across pipeline steps within the same process lifetime
   static LibraryIndex? _cache;
   static String? _cacheKey;
+  // Disk cache fingerprint: set of "path|mtime" strings
+  static Set<String>? _cachedFingerprint;
+  static String _fingerprintPath = '';
 
   int get mp3Count => _mp3Count;
   int get m4aCount => _m4aCount;
   bool get isBuilt => _built;
 
-  static void invalidateCache() { _cache = null; _cacheKey = null; }
+  static void invalidateCache() { _cache = null; _cacheKey = null; _cachedFingerprint = null; }
+
+  static Set<String> _buildFingerprint(List<String> files) {
+    final fp = <String>{};
+    for (final f in files) {
+      final file = File(f);
+      try {
+        fp.add('$f|${file.lastModifiedSync().millisecondsSinceEpoch}');
+      } catch (_) {
+        fp.add('$f|0');
+      }
+    }
+    return fp;
+  }
 
   Future<void> build(String libraryPath, void Function(String) log) async {
-    // Check if cache is valid for this library path
+    // Check static in-memory cache first
     if (_cache != null && _cacheKey == _resolvePath(libraryPath)) {
       _copyFrom(_cache!);
-      log('MP3: $_mp3Count, M4A: $_m4aCount (快取)');
+      log('MP3: $_mp3Count, M4A: $_m4aCount (記憶體快取)');
       return;
     }
 
@@ -37,6 +54,32 @@ class LibraryIndex {
       if (low.endsWith('.mp3')) { mp3s.add(f); }
       else if (low.endsWith('.m4a')) { m4as.add(f); }
     }
+
+    final currentFp = _buildFingerprint(allFiles);
+    // Check disk cache: if fingerprint unchanged, skip the expensive metadata scan
+    if (_cachedFingerprint != null && _fingerprintPath == libraryPath &&
+        _cachedFingerprint!.length == currentFp.length &&
+        _cachedFingerprint!.containsAll(currentFp)) {
+      log('MP3: ${mp3s.length}, M4A: ${m4as.length} (磁碟快取)');
+      _mp3Count = mp3s.length;
+      _m4aCount = m4as.length;
+      // Rebuild file info and filename index (fast, no ffprobe)
+      _fileInfoMap = {};
+      for (final f in allFiles) {
+        final file = File(f);
+        if (await file.exists()) {
+          _fileInfoMap[f] = FileInfo(
+            size: await file.length(),
+            mtime: await file.lastModified(),
+          );
+        }
+      }
+      _filenameIndex = _buildFilenameIndex(mp3s);
+      _metadataIndex = {};
+      _saveToCache(libraryPath);
+      return;
+    }
+
     _mp3Count = mp3s.length;
     _m4aCount = m4as.length;
     _fileInfoMap = {};
@@ -58,10 +101,17 @@ class LibraryIndex {
     _metadataIndex = await _buildMetadataIndex(mp3s, log);
     log('索引完成');
 
-    // Save to static cache
+    _saveToCache(libraryPath);
+  }
+
+  void _saveToCache(String libraryPath) {
+    // Save in-memory static cache
     _cache = LibraryIndex();
     _cache!._copyFrom(this);
     _cacheKey = _resolvePath(libraryPath);
+    // Save fingerprint for disk cache
+    _cachedFingerprint = _buildFingerprint(_fileInfoMap.keys.toList());
+    _fingerprintPath = libraryPath;
   }
 
   String _resolvePath(String p) {
