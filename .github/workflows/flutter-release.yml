@@ -39,7 +39,7 @@ jobs:
 
       - name: Sync version to utils/version.py
         run: |
-          (Get-Content utils/version.py) -replace "(?<=__version__ = \").+(?=\")", "$env:APP_VERSION" | Set-Content utils/version.py
+          (Get-Content utils/version.py) -replace '(?<=__version__ = ").+(?=")', "$env:APP_VERSION" | Set-Content utils/version.py
 
       - run: flutter pub get
 
