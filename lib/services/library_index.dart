@@ -44,6 +44,9 @@ class LibraryIndex {
     return fp;
   }
 
+  static String _metaIndexFile(String libraryPath) =>
+      '${_cacheDir()}\\index_metadata.json';
+
   static Set<String>? _loadDiskFingerprint(String libraryPath) {
     try {
       final f = File(_fingerprintFile(libraryPath));
@@ -65,6 +68,25 @@ class LibraryIndex {
     } catch (_) {}
   }
 
+  static Map<String, List<String>>? _loadMetaIndex(String libraryPath) {
+    try {
+      final f = File(_metaIndexFile(libraryPath));
+      if (!f.existsSync()) return null;
+      return (jsonDecode(f.readAsStringSync()) as Map<String, dynamic>)
+          .map((k, v) => MapEntry(k, (v as List<dynamic>).cast<String>()));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static void _saveMetaIndex(String libraryPath, Map<String, List<String>> index) {
+    try {
+      final file = File(_metaIndexFile(libraryPath));
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(jsonEncode(index), flush: true);
+    } catch (_) {}
+  }
+
   Future<void> build(String libraryPath, void Function(String) log) async {
     // Check static in-memory cache first
     if (_cache != null && _cacheKey == _resolvePath(libraryPath)) {
@@ -83,34 +105,6 @@ class LibraryIndex {
       else if (low.endsWith('.m4a')) { m4as.add(f); }
     }
 
-    // Load disk fingerprint if not already in memory
-    _cachedFingerprint ??= _loadDiskFingerprint(libraryPath);
-    final currentFp = _buildFingerprint(allFiles);
-    final fpMatch = _cachedFingerprint != null &&
-        _cachedFingerprint!.length == currentFp.length &&
-        _cachedFingerprint!.containsAll(currentFp);
-
-    if (fpMatch) {
-      log('MP3: ${mp3s.length}, M4A: ${m4as.length} (磁碟快取，跳過 metadata 掃描)');
-      _mp3Count = mp3s.length;
-      _m4aCount = m4as.length;
-      _fileInfoMap = {};
-      for (final f in allFiles) {
-        final file = File(f);
-        if (await file.exists()) {
-          _fileInfoMap[f] = FileInfo(
-            size: await file.length(),
-            mtime: await file.lastModified(),
-          );
-        }
-      }
-      _filenameIndex = _buildFilenameIndex(mp3s);
-      _metadataIndex = {};
-      _built = true;
-      _saveToMemoryCache(libraryPath);
-      return;
-    }
-
     _mp3Count = mp3s.length;
     _m4aCount = m4as.length;
     _fileInfoMap = {};
@@ -123,14 +117,91 @@ class LibraryIndex {
         );
       }
     }
-    log('MP3: $_mp3Count, M4A: $_m4aCount');
-
-    log('建立檔名索引…');
     _filenameIndex = _buildFilenameIndex(mp3s);
 
-    log('讀取 metadata 索引…');
-    _metadataIndex = await _buildMetadataIndex(mp3s, log);
-    log('索引完成');
+    // Determine which mp3s need metadata re-index
+    _cachedFingerprint ??= _loadDiskFingerprint(libraryPath);
+    final currentFp = _buildFingerprint(allFiles);
+    final changedStems = <String>{};
+    if (_cachedFingerprint != null) {
+      // Find files that changed or were added
+      for (final entry in currentFp) {
+        if (!_cachedFingerprint!.contains(entry)) {
+          // Extract file path from the fingerprint entry "path|mtime"
+          final pipeIdx = entry.indexOf('|');
+          if (pipeIdx > 0) {
+            final path = entry.substring(0, pipeIdx);
+            changedStems.add(File(path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase());
+          }
+        }
+      }
+    }
+
+    if (changedStems.isEmpty && _cachedFingerprint != null) {
+      log('MP3: $_mp3Count, M4A: $_m4aCount (無變動，載入快取索引)');
+      final cached = _loadMetaIndex(libraryPath);
+      if (cached != null) {
+        _metadataIndex = <List<String>, List<String>>{};
+        for (final e in cached.entries) {
+          final tokens = (jsonDecode(e.key) as List<dynamic>).cast<String>();
+          _metadataIndex[tokens] = e.value;
+        }
+        log('  metadata 索引載入完成: ${_metadataIndex.length} 首');
+        _built = true;
+        _saveToMemoryCache(libraryPath);
+        return;
+      }
+    }
+
+    // Build metadata index (only for new/changed mp3s, plus unchanged from cache)
+    log('MP3: $_mp3Count, M4A: $_m4aCount');
+    log('建立檔名索引…');
+
+    if (changedStems.isNotEmpty) {
+      log('metadata 新增/變更: ${changedStems.length} 個檔案');
+    }
+
+    _metadataIndex = <List<String>, List<String>>{};
+
+    // Load cached metadata for unchanged files first
+    final cached = _loadMetaIndex(libraryPath);
+    final cachedPaths = <String>{};
+    if (cached != null) {
+      for (final e in cached.entries) {
+        final tokens = (jsonDecode(e.key) as List<dynamic>).cast<String>();
+        for (final path in e.value) {
+          final stem = File(path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
+          if (!changedStems.contains(stem)) {
+            _metadataIndex[tokens] = e.value;
+            cachedPaths.add(path);
+          }
+        }
+      }
+    }
+
+    // Only ffprobe files not in cache or that changed
+    final toIndex = mp3s.where((f) {
+      if (changedStems.isEmpty) return true; // full rebuild
+      final stem = File(f).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
+      return changedStems.contains(stem);
+    }).toList();
+
+    log('讀取 metadata 索引 (${toIndex.length}/${mp3s.length} 個檔案)…');
+    final newEntries = await _buildMetadataIndex(toIndex, log);
+    _metadataIndex.addAll(newEntries);
+
+    if (changedStems.isNotEmpty) {
+      log('索引完成 (新增 ${newEntries.length}，快取 ${_metadataIndex.length - newEntries.length})');
+    } else {
+      log('索引完成');
+    }
+
+    // Save metadata index to disk
+    final serializable = <String, List<String>>{};
+    for (final e in _metadataIndex.entries) {
+      serializable[jsonEncode(e.key)] = e.value;
+    }
+    _saveMetaIndex(libraryPath, serializable);
 
     _saveToMemoryCache(libraryPath);
     _saveDiskFingerprint(libraryPath, currentFp);
