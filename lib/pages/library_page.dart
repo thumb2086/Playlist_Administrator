@@ -39,7 +39,7 @@ class LibraryPageState extends State<LibraryPage> {
     if (mounted) _refresh();
   }
 
-  Future<void> _refresh() async {
+  Future<void> _refresh({bool cleanOrphans = false}) async {
     setState(() => _loading = true);
     final cfg = ConfigService.instance.config;
     final plDir = Directory(cfg.playlistsPath);
@@ -85,11 +85,13 @@ class LibraryPageState extends State<LibraryPage> {
           final baseName = File(e.path).uri.pathSegments.last;
           if (PlaylistParser.isInternalPlaylist(baseName)) continue;
           final nameNoExt = baseName.replaceAll('.m3u8', '').toLowerCase();
-          // Delete orphan m3u8 (not in urlNames, not internal)
-          if (!knownNames.contains(nameNoExt)) {
+
+          // Orphan deletion only on explicit manual refresh
+          if (cleanOrphans && !knownNames.contains(nameNoExt)) {
             toDelete.add(e.path);
             continue;
           }
+
           final stat = await e.stat();
           if (stat.size == 0) continue;
           try {
@@ -101,14 +103,11 @@ class LibraryPageState extends State<LibraryPage> {
                 final name = File(line).uri.pathSegments.last;
                 final stem = name.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
                 if (libStems.contains(stem)) { matched++; continue; }
-                // Try reversed: "Artist - Title" vs "Title - Artist"
                 if (stem.contains(' - ')) {
                   final parts = stem.split(' - ');
                   if (parts.length >= 2) {
-                    // Try exact reversed
                     final reversed = '${parts[1]} - ${parts[0]}';
                     if (libStems.contains(reversed)) { matched++; continue; }
-                    // Try title-only match (same song, different artist/version)
                     final titlePart = parts[0].trim();
                     if (titlePart.length >= 2 &&
                         libStems.any((s) => s.startsWith(titlePart) || s.contains(' $titlePart '))) {
@@ -212,7 +211,7 @@ class LibraryPageState extends State<LibraryPage> {
                 _GradientBtn(t('library.add_btn'), Icons.add, _addUrl),
                 const SizedBox(width: 8),
                 IconButton(
-                  onPressed: _refresh,
+                  onPressed: () => _refresh(cleanOrphans: true),
                   icon: _loading
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.refresh_rounded),
@@ -249,7 +248,7 @@ class LibraryPageState extends State<LibraryPage> {
                     ),
                   )
                 : RefreshIndicator(
-                    onRefresh: _refresh,
+                    onRefresh: () => _refresh(cleanOrphans: true),
                     child: GridView.builder(
                       padding: const EdgeInsets.only(bottom: 24),
                       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(

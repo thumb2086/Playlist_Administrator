@@ -12,6 +12,29 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController _basePathCtrl, _workersCtrl, _ffmpegCtrl,
       _spotubeExeCtrl, _spotubeDlCtrl, _lyricsFolderCtrl;
+  // Alias editing: track controllers per entry
+  final _aliasKeys = <TextEditingController>[];
+  final _aliasVals = <TextEditingController>[];
+
+  void _rebuildAliases() {
+    final names = ConfigService.instance.config.searchNames;
+    // Sync controller count with data
+    while (_aliasKeys.length < names.length) {
+      _aliasKeys.add(TextEditingController());
+      _aliasVals.add(TextEditingController());
+    }
+    while (_aliasKeys.length > names.length) {
+      _aliasKeys.last.dispose(); _aliasKeys.removeLast();
+      _aliasVals.last.dispose(); _aliasVals.removeLast();
+    }
+    int i = 0;
+    for (final e in names.entries) {
+      _aliasKeys[i].text = e.key;
+      _aliasVals[i].text = e.value;
+      i++;
+    }
+  }
+
   void _onConfigChanged() { if (mounted) setState(() {}); }
 
   @override
@@ -24,6 +47,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _spotubeExeCtrl = TextEditingController(text: c.spotubeExePath);
     _spotubeDlCtrl = TextEditingController(text: c.spotubeDownloadPath);
     _lyricsFolderCtrl = TextEditingController(text: c.lyricsFolderName);
+    _rebuildAliases();
     I18N.instance.addListener(_onConfigChanged);
     ConfigService.instance.addListener(_onConfigChanged);
   }
@@ -34,6 +58,8 @@ class _SettingsPageState extends State<SettingsPage> {
     ConfigService.instance.removeListener(_onConfigChanged);
     _basePathCtrl.dispose(); _workersCtrl.dispose(); _ffmpegCtrl.dispose();
     _spotubeExeCtrl.dispose(); _spotubeDlCtrl.dispose(); _lyricsFolderCtrl.dispose();
+    for (final c in _aliasKeys) c.dispose();
+    for (final c in _aliasVals) c.dispose();
     super.dispose();
   }
 
@@ -45,8 +71,29 @@ class _SettingsPageState extends State<SettingsPage> {
     c.spotubeExePath = _spotubeExeCtrl.text;
     c.spotubeDownloadPath = _spotubeDlCtrl.text;
     c.lyricsFolderName = _lyricsFolderCtrl.text.trim().isEmpty ? 'Lyrics' : _lyricsFolderCtrl.text.trim();
+    // Save aliases
+    c.searchNames.clear();
+    for (int i = 0; i < _aliasKeys.length; i++) {
+      final k = _aliasKeys[i].text.trim();
+      final v = _aliasVals[i].text.trim();
+      if (k.isNotEmpty && v.isNotEmpty) c.searchNames[k] = v;
+    }
     ConfigService.instance.save();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('settings.saved')), duration: const Duration(seconds: 1)));
+  }
+
+  void _addAlias() {
+    setState(() {
+      _aliasKeys.add(TextEditingController());
+      _aliasVals.add(TextEditingController());
+    });
+  }
+
+  void _removeAlias(int idx) {
+    setState(() {
+      _aliasKeys[idx].dispose(); _aliasKeys.removeAt(idx);
+      _aliasVals[idx].dispose(); _aliasVals.removeAt(idx);
+    });
   }
 
   @override
@@ -93,18 +140,37 @@ class _SettingsPageState extends State<SettingsPage> {
         ]),
         const SizedBox(height: 12),
         _Section(t('settings.search_aliases'), [
-          if (c.searchNames.isEmpty)
+          if (_aliasKeys.isEmpty)
             Padding(padding: const EdgeInsets.only(bottom: 8), child:
               Text(t('settings.no_aliases'), style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
             )
           else
-            ...c.searchNames.entries.map((e) => Padding(padding: const EdgeInsets.only(bottom: 4), child:
+            ...List.generate(_aliasKeys.length, (i) => Padding(padding: const EdgeInsets.only(bottom: 6), child:
               Row(children: [
-                Expanded(flex: 2, child: Text(e.key, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary))),
-                const Icon(Icons.arrow_forward, size: 14, color: AppColors.textMuted),
-                Expanded(flex: 2, child: Text(e.value, style: const TextStyle(fontSize: 12))),
+                Expanded(child: TextField(
+                  controller: _aliasKeys[i],
+                  style: const TextStyle(fontSize: 12),
+                  decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6), border: OutlineInputBorder()),
+                )),
+                const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: Icon(Icons.arrow_forward, size: 14, color: AppColors.textMuted)),
+                Expanded(child: TextField(
+                  controller: _aliasVals[i],
+                  style: const TextStyle(fontSize: 12),
+                  decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6), border: OutlineInputBorder()),
+                )),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 16),
+                  onPressed: () => _removeAlias(i),
+                  padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                ),
               ]),
             )),
+          const SizedBox(height: 6),
+          TextButton.icon(
+            onPressed: _addAlias,
+            icon: const Icon(Icons.add, size: 16),
+            label: Text(t('settings.add_alias'), style: const TextStyle(fontSize: 12)),
+          ),
         ]),
         const SizedBox(height: 20),
         Center(
