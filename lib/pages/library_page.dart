@@ -102,34 +102,6 @@ class LibraryPageState extends State<LibraryPage> {
         duration: const Duration(seconds: 3),
       ));
     }
-      return;
-    }
-
-    final files = <String>[];
-    await for (final e in plDir.list()) {
-      if (e is File && e.path.toLowerCase().endsWith('.m3u8')) {
-        files.add(e.path);
-      }
-    }
-
-    if (files.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有可匯出的播放清單')));
-      }
-      return;
-    }
-
-    setState(() => _exporting = true);
-    final exporter = UsbExporter(log: (msg) => debugPrint(msg));
-    final result = await exporter.exportPlaylists(files);
-    setState(() => _exporting = false);
-
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('匯出完成: ${result.copied}/${result.total} 首 → ${result.targetPath}'),
-        duration: const Duration(seconds: 3),
-      ));
-    }
   }
 
   @override
