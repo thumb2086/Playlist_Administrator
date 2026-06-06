@@ -19,6 +19,7 @@ class LibraryPageState extends State<LibraryPage> {
   final _urlCtrl = TextEditingController();
   Map<String, _PlStats> _stats = {};
   bool _loading = false;
+  int _refreshVersion = 0;
 
   @override
   void dispose() {
@@ -40,6 +41,7 @@ class LibraryPageState extends State<LibraryPage> {
   }
 
   Future<void> _refresh({bool cleanOrphans = false}) async {
+    final version = ++_refreshVersion;
     setState(() => _loading = true);
     final cfg = ConfigService.instance.config;
     final plDir = Directory(cfg.playlistsPath);
@@ -82,25 +84,27 @@ class LibraryPageState extends State<LibraryPage> {
       final toDelete = <String>[];
       await for (final e in plDir.list()) {
         if (e is File && e.path.toLowerCase().endsWith('.m3u8')) {
-          final baseName = File(e.path).uri.pathSegments.last;
-          if (PlaylistParser.isInternalPlaylist(baseName)) continue;
-          final nameNoExt = baseName.replaceAll('.m3u8', '').toLowerCase();
-
-          // Orphan deletion only on explicit manual refresh
-          if (cleanOrphans && !knownNames.contains(nameNoExt)) {
-            toDelete.add(e.path);
-            continue;
-          }
-
-          final stat = await e.stat();
-          if (stat.size == 0) continue;
           try {
+            final baseName = File(e.path).uri.pathSegments.last;
+            if (PlaylistParser.isInternalPlaylist(baseName)) continue;
+            final nameNoExt = baseName.replaceAll('.m3u8', '').toLowerCase();
+
+            // Orphan deletion only on explicit manual refresh
+            if (cleanOrphans && !knownNames.contains(nameNoExt)) {
+              toDelete.add(e.path);
+              continue;
+            }
+
+            final stat = await e.stat();
+            if (stat.size == 0) continue;
+
             final lines = await e.readAsLines();
             int total = 0, matched = 0;
             for (final line in lines) {
               if (!line.startsWith('#') && line.trim().isNotEmpty) {
                 total++;
-                final name = File(line).uri.pathSegments.last;
+                final sep = line.contains('\\') || line.contains('/');
+                final name = sep ? line.split(RegExp(r'[\\/]')).last : line;
                 final stem = name.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
                 if (libStems.contains(stem)) { matched++; continue; }
                 if (stem.contains(' - ')) {
@@ -125,6 +129,7 @@ class LibraryPageState extends State<LibraryPage> {
         try { await File(path).delete(); } catch (_) {}
       }
     }
+    if (version != _refreshVersion) return;
     if (mounted) setState(() { _stats = stats; _loading = false; });
     HistoryRecorder.record().ignore();
   }
@@ -134,7 +139,7 @@ class LibraryPageState extends State<LibraryPage> {
     if (url.isEmpty) return;
     final cfg = ConfigService.instance.config;
     final id = url.split('/').last.split('?').first;
-    cfg.urlNames[url] = id.substring(0, 12).trim();
+    cfg.urlNames[url] = id.substring(0, 12).replaceAll(RegExp(r'[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]'), '').trim();
     ConfigService.instance.save();
     _urlCtrl.clear();
     setState(() {});

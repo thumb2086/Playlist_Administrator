@@ -160,7 +160,7 @@ class SpotifyScraper {
         final data = jsonDecode(nextData.text) as Map<String, dynamic>;
         final entity = _getPath(data, ['props', 'pageProps', 'state', 'data', 'entity']);
         if (entity != null) {
-          plName = (entity['name'] as String?)?.trim();
+          plName = (entity['name'] as String?)?.replaceAll(RegExp(r'[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]'), '').trim();
           final trackList = (entity['trackList'] ?? entity['tracks']) as List<dynamic>?;
           if (trackList != null) {
             _ensureCacheDir();
@@ -194,7 +194,7 @@ class SpotifyScraper {
           if (state == null) continue;
           final playlist = state['playlist'] as Map<String, dynamic>?;
           if (playlist == null) continue;
-          plName = (playlist['name'] as String?)?.trim();
+          plName = (playlist['name'] as String?)?.replaceAll(RegExp(r'[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]'), '').trim();
           final items = playlist['items'] as List<dynamic>?;
           if (items == null) continue;
 
@@ -235,6 +235,16 @@ class SpotifyScraper {
 
     final m3uPath = '$playlistsPath\\$plName.m3u8';
     await Directory(playlistsPath).create(recursive: true);
+
+    // Clean up old M3U8 file if playlist was renamed
+    final oldName = ConfigService.instance.config.urlNames[url];
+    if (oldName != null && oldName != plName) {
+      final oldFile = File('$playlistsPath\\$oldName.m3u8');
+      if (await oldFile.exists()) {
+        await oldFile.delete();
+        log('  已清理舊歌單檔: $oldName.m3u8');
+      }
+    }
 
     final buffer = StringBuffer('#EXTM3U\n');
     int resolved = 0;
