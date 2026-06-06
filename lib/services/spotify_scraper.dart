@@ -181,8 +181,7 @@ class SpotifyScraper {
             }
           }
         }
-      } catch (e) {
-        debugPrint('[SpotifyScraper] __NEXT_DATA__ 解析失敗: $e');
+      } catch (_) {
       }
     }
 
@@ -251,9 +250,9 @@ class SpotifyScraper {
     final buffer = StringBuffer('#EXTM3U\n');
     int resolved = 0;
     for (final t in tracks) {
-      buffer.writeln('#EXTINF:-1,$t');
       final matched = _findAudioFile(t);
       if (matched != null) {
+        buffer.writeln('#EXTINF:-1,$t');
         // Write relative path from Playlists dir
         final absPath = File(matched).absolute.path;
         final absPl = File(m3uPath).parent.absolute.path;
@@ -265,9 +264,8 @@ class SpotifyScraper {
         }
         buffer.writeln(relPath);
         resolved++;
-      } else {
-        buffer.writeln(t);
       }
+      // skip unmatched — consistent with Python pipeline behavior
     }
     await File(m3uPath).writeAsString(buffer.toString(), flush: true);
     log('  已儲存: $plName.m3u8 (已解析路徑: $resolved/${tracks.length})');
