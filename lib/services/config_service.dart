@@ -33,7 +33,9 @@ class ConfigService extends ChangeNotifier {
             return;
           }
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[ConfigService] 載入設定失敗: $e');
+      }
     }
 
     config = AppConfig();

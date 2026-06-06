@@ -181,7 +181,9 @@ class SpotifyScraper {
             }
           }
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[SpotifyScraper] __NEXT_DATA__ 解析失敗: $e');
+      }
     }
 
     // Fallback: try old script[type="application/json"] format

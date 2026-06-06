@@ -122,11 +122,15 @@ class LibraryPageState extends State<LibraryPage> {
               }
             }
             stats[baseName.replaceAll('.m3u8', '')] = _PlStats(total, matched);
-          } catch (_) {}
+          } catch (e) {
+            debugPrint('[LibraryPage] 處理檔案失敗: $e');
+          }
         }
       }
       for (final path in toDelete) {
-        try { await File(path).delete(); } catch (_) {}
+        try { await File(path).delete(); } catch (e) {
+          debugPrint('[LibraryPage] 刪除 $path 失敗: $e');
+        }
       }
     }
     if (version != _refreshVersion) return;
