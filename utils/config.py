@@ -217,9 +217,24 @@ def save_config(config):
     if not os.path.exists(CONFIG_DIR):
         os.makedirs(CONFIG_DIR, exist_ok=True)
     
-    # 1. 儲存到主資料目錄（包含所有詳細內容）
-    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=4, ensure_ascii=False)
+    # File lock to prevent concurrent writes from Flutter app
+    lock_path = CONFIG_FILE + '.lock'
+    for _ in range(100):  # wait up to ~10s
+        if not os.path.exists(lock_path):
+            break
+        time.sleep(0.1)
+    if os.path.exists(lock_path):
+        # Stale lock: break it
+        try: os.remove(lock_path)
+        except: pass
+    try:
+        open(lock_path, 'w').close()
+        # 1. 儲存到主資料目錄（包含所有詳細內容）
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+    finally:
+        try: os.remove(lock_path)
+        except: pass
     
     # 2. 同步儲存到 EXE 本地目錄（主要作為「路徑指針」）
     if os.path.normpath(CONFIG_DIR) != os.path.normpath(_APP_DATA_DIR):

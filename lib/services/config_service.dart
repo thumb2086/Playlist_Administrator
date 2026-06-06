@@ -71,7 +71,22 @@ class ConfigService extends ChangeNotifier {
       return;
     }
 
-    await File(savePath).writeAsString(jsonEncode(json));
+    // File lock to prevent concurrent writes from Python pipeline
+    final lockFile = File('$savePath.lock');
+    for (int i = 0; i < 100; i++) {  // wait up to ~10s
+      if (!await lockFile.exists()) break;
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    if (await lockFile.exists()) {
+      // Stale lock: break it
+      try { await lockFile.delete(); } catch (_) {}
+    }
+    try {
+      await lockFile.writeAsString('');
+      await File(savePath).writeAsString(jsonEncode(json));
+    } finally {
+      try { await lockFile.delete(); } catch (_) {}
+    }
     notifyListeners();
   }
 }
