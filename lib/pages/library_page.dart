@@ -286,29 +286,50 @@ class LibraryPageState extends State<LibraryPage> {
 
   Widget _buildStatsBar(List<PlaylistConfig> playlists) {
     int totalTracks = 0, totalMatched = 0;
+    String dbgJpName = '', dbgJpStats = '';
     for (final p in playlists) {
       final s = _stats[p.name];
       if (s != null) { totalTracks += s.total; totalMatched += s.matched; }
+      if (p.name.contains('日語') || p.name.contains('71oGPN') || p.name.contains('J-Pop')) {
+        dbgJpName = p.name;
+        dbgJpStats = s != null ? '${s.total}/${s.matched}' : 'null';
+      }
     }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(children: [
-        _Chip(Icons.playlist_play, '${playlists.length}', t('library.stats_playlists')),
-        const SizedBox(width: 20),
-        _Chip(Icons.music_note, '$totalTracks', t('library.stats_songs')),
-        const SizedBox(width: 20),
-        _Chip(Icons.check_circle, '$totalMatched', t('library.stats_matched'), color: AppColors.accent),
-        if (totalTracks > 0) ...[
+    return Column(children: [
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(children: [
+          _Chip(Icons.playlist_play, '${playlists.length}', t('library.stats_playlists')),
           const SizedBox(width: 20),
-          _Chip(Icons.trending_up, totalTracks > 0 ? '${(totalMatched / totalTracks * 100).toStringAsFixed(0)}%' : '0%', t('library.stats_completion')),
-        ],
-      ]),
-    );
+          _Chip(Icons.music_note, '$totalTracks', t('library.stats_songs')),
+          const SizedBox(width: 20),
+          _Chip(Icons.check_circle, '$totalMatched', t('library.stats_matched'), color: AppColors.accent),
+          if (totalTracks > 0) ...[
+            const SizedBox(width: 20),
+            _Chip(Icons.trending_up, totalTracks > 0 ? '${(totalMatched / totalTracks * 100).toStringAsFixed(0)}%' : '0%', t('library.stats_completion')),
+          ],
+        ]),
+      ),
+      if (dbgJpName.isNotEmpty)
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+          ),
+          child: Text(
+            'DEBUG: 日語榜 name="$dbgJpName" stats=$dbgJpStats   statsKeys=${_stats.keys.length}',
+            style: const TextStyle(color: Colors.orange, fontSize: 11, fontFamily: 'Consolas'),
+          ),
+        ),
+    ]);
   }
 }
 
