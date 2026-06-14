@@ -249,10 +249,12 @@ class SpotifyScraper {
 
     final buffer = StringBuffer('#EXTM3U\n');
     int resolved = 0;
+    int totalTracks = 0;
     for (final t in tracks) {
+      totalTracks++;
       final matched = _findAudioFile(t);
+      buffer.writeln('#EXTINF:-1,$t');
       if (matched != null) {
-        buffer.writeln('#EXTINF:-1,$t');
         // Write relative path from Playlists dir
         final absPath = File(matched).absolute.path;
         final absPl = File(m3uPath).parent.absolute.path;
@@ -265,7 +267,7 @@ class SpotifyScraper {
         buffer.writeln(relPath);
         resolved++;
       }
-      // skip unmatched — consistent with Python pipeline behavior
+      // unmatched: EXTINF only, no path line (countable by #EXTINF lines)
     }
     await File(m3uPath).writeAsString(buffer.toString(), flush: true);
     log('  已儲存: $plName.m3u8 (已解析路徑: $resolved/${tracks.length})');

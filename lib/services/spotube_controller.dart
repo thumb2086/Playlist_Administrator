@@ -304,12 +304,16 @@ class SpotubeController {
     await _wait(800);
     if (_checkAborted()) return;
     clickConfirm();
-    await _wait(2000);
-    if (_checkAborted()) return;
-    if (hasSkipDialog()) {
-      clickSkip();
-      await _wait(300);
-      clickSkipAll();
+    // Monitor for skip dialog — can appear at any time, and may repeat
+    for (int i = 0; i < 30; i++) {
+      await _wait(1000);
+      if (_checkAborted()) return;
+      if (hasSkipDialog()) {
+        clickSkip();
+        await _wait(300);
+        clickSkipAll();
+        i = 0;  // reset timer; more skips may follow
+      }
     }
   }
 
