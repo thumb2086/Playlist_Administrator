@@ -304,16 +304,15 @@ class SpotubeController {
     await _wait(800);
     if (_checkAborted()) return;
     clickConfirm();
-    // Monitor for skip dialog — can appear at any time, and may repeat
-    for (int i = 0; i < 30; i++) {
+    // Wait up to 15s for skip dialog; if shown, click Skip then Skip All
+    for (int i = 0; i < 15; i++) {
       await _wait(1000);
       if (_checkAborted()) return;
       if (hasSkipDialog()) {
+        clickSkip();
+        await _wait(200);
         clickSkipAll();
-        await _wait(300);
-        // dismiss dialog if still open
-        sendEscape();
-        i = 0;
+        break;
       }
     }
   }
