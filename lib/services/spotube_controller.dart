@@ -277,7 +277,7 @@ class SpotubeController {
   }
 
   bool _checkAborted() {
-    if (_aborted) {
+    if (_aborted || _spotubeAbortedGlobal) {
       sendEscape();
       minimize();
       bringFlutterToFront();
@@ -309,10 +309,11 @@ class SpotubeController {
       await _wait(1000);
       if (_checkAborted()) return;
       if (hasSkipDialog()) {
-        clickSkip();
-        await _wait(300);
         clickSkipAll();
-        i = 0;  // reset timer; more skips may follow
+        await _wait(300);
+        // dismiss dialog if still open
+        sendEscape();
+        i = 0;
       }
     }
   }
