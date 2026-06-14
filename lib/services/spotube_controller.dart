@@ -287,7 +287,7 @@ class SpotubeController {
     return false;
   }
 
-  Future<void> _stepPlaylist(String name) async {
+  Future<void> _stepPlaylist(String name, {bool checkSkip = false}) async {
     clickSidebarLibrary();
     await _wait(800);
     if (_checkAborted()) return;
@@ -304,15 +304,17 @@ class SpotubeController {
     await _wait(800);
     if (_checkAborted()) return;
     clickConfirm();
-    // Quick check for skip dialog (3s max); if shown, skip once and move on
-    for (int i = 0; i < 6; i++) {
-      await _wait(500);
-      if (_checkAborted()) return;
-      if (hasSkipDialog()) {
-        clickSkip();
-        await _wait(200);
-        clickSkipAll();
-        break;
+    if (checkSkip) {
+      // Only check for skip dialog on the first playlist (Skip All applies globally)
+      for (int i = 0; i < 6; i++) {
+        await _wait(500);
+        if (_checkAborted()) return;
+        if (hasSkipDialog()) {
+          clickSkip();
+          await _wait(200);
+          clickSkipAll();
+          break;
+        }
       }
     }
   }
@@ -322,7 +324,7 @@ class SpotubeController {
     if (!isRunning()) throw Exception('Spotube is not running');
     maximize();
     activate();
-    await _stepPlaylist(name);
+    await _stepPlaylist(name, checkSkip: true);
     minimize();
     restorePrevious();
   }
@@ -333,9 +335,9 @@ class SpotubeController {
     if (!isRunning()) throw Exception('Spotube is not running');
     maximize();
     activate();
-    for (final name in names) {
+    for (int i = 0; i < names.length; i++) {
       if (_aborted) break;
-      await _stepPlaylist(name);
+      await _stepPlaylist(names[i], checkSkip: i == 0);
     }
     minimize();
     restorePrevious();
