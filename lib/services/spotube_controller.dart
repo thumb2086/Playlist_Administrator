@@ -304,9 +304,9 @@ class SpotubeController {
     await _wait(800);
     if (_checkAborted()) return;
     clickConfirm();
-    // Wait up to 15s for skip dialog; if shown, click Skip then Skip All
-    for (int i = 0; i < 15; i++) {
-      await _wait(1000);
+    // Quick check for skip dialog (3s max); if shown, skip once and move on
+    for (int i = 0; i < 6; i++) {
+      await _wait(500);
       if (_checkAborted()) return;
       if (hasSkipDialog()) {
         clickSkip();
