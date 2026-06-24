@@ -117,11 +117,15 @@ class _PipelinePageState extends State<PipelinePage> {
                 _log('Pipeline 已暫停');
                 setState(() {});
               }, false, color: Colors.orange),
-              _PButton(t('pipeline.cancel'), Icons.stop_rounded, () {
+                    _PButton(t('pipeline.cancel'), Icons.stop_rounded, () {
                 _state.cancel();
                 _log('正在取消 Pipeline…');
                 setState(() {});
               }, false, color: AppColors.error),
+              _PButton(t('pipeline.clear_log'), Icons.delete_outline_rounded, () {
+                _logs.clear();
+                setState(() {});
+              }, _logs.isEmpty, color: AppColors.textMuted),
             ],
           ]),
           const SizedBox(height: 20),

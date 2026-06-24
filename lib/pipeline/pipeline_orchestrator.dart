@@ -111,7 +111,7 @@ class PipelineOrchestrator {
     }
 
     final index = LibraryIndex();
-    await index.build(config.libraryPath, onLog);
+    await index.build(config.libraryPath, onLog, basePath: config.basePath);
 
     final tasks = <_ConvertTask>[];
     int skipped = 0;

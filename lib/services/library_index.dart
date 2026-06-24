@@ -86,7 +86,7 @@ class LibraryIndex {
     } catch (_) {}
   }
 
-  Future<void> build(String libraryPath, void Function(String) log) async {
+  Future<void> build(String libraryPath, void Function(String) log, {String? basePath}) async {
     // Check static in-memory cache first
     if (_cache != null && _cacheKey == _resolvePath(libraryPath)) {
       _copyFrom(_cache!);
@@ -96,6 +96,13 @@ class LibraryIndex {
 
     log('掃描音檔…');
     final allFiles = await _walkDir(libraryPath);
+    // Also scan basePath if it's different (mp3/m4a might be there instead of libraryPath)
+    if (basePath != null && basePath != libraryPath) {
+      final baseFiles = await _walkDir(basePath);
+      for (final f in baseFiles) {
+        if (!allFiles.contains(f)) allFiles.add(f);
+      }
+    }
     final mp3s = <String>[];
     final m4as = <String>[];
     for (final f in allFiles) {
@@ -127,6 +134,19 @@ class LibraryIndex {
       for (final entry in currentFp) {
         if (!_cachedFingerprint!.contains(entry)) {
           // Extract file path from the fingerprint entry "path|mtime"
+          final pipeIdx = entry.indexOf('|');
+          if (pipeIdx > 0) {
+            final path = entry.substring(0, pipeIdx);
+            changedStems.add(File(path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase());
+          }
+        }
+      }
+    }
+
+    // Also detect deleted files (in cache but not on disk)
+    if (_cachedFingerprint != null) {
+      for (final entry in _cachedFingerprint!) {
+        if (!currentFp.contains(entry)) {
           final pipeIdx = entry.indexOf('|');
           if (pipeIdx > 0) {
             final path = entry.substring(0, pipeIdx);
@@ -189,8 +209,20 @@ class LibraryIndex {
     final newEntries = await _buildMetadataIndex(toIndex, log);
     _metadataIndex.addAll(newEntries);
 
+    // Remove cache entries for files that no longer exist on disk
+    final onDisk = mp3s.toSet();
+    final toRemove = <List<String>>[];
+    for (final e in _metadataIndex.entries) {
+      e.value.removeWhere((p) => !onDisk.contains(p));
+      if (e.value.isEmpty) toRemove.add(e.key);
+    }
+    for (final k in toRemove) {
+      _metadataIndex.remove(k);
+    }
+
     if (changedStems.isNotEmpty) {
       log('索引完成 (新增 ${newEntries.length}，快取 ${_metadataIndex.length - newEntries.length})');
+      if (toRemove.isNotEmpty) log('  清除 ${toRemove.length} 條已刪除檔案的快取');
     } else {
       log('索引完成');
     }
