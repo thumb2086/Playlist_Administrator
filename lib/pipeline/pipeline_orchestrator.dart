@@ -138,10 +138,7 @@ class PipelineOrchestrator {
       }
 
       final stem = File(m4a).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-      final mp3Name = (meta.title != null && meta.title!.isNotEmpty)
-          ? '${meta.title}${meta.artist != null ? ' - ${meta.artist}' : ''}.mp3'
-              .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
-          : '$stem.mp3';
+      final mp3Name = '$stem.mp3';
       final dest = '${config.mp3Path}\\$mp3Name';
 
       tasks.add(_ConvertTask(m4a, dest, stem, meta));
