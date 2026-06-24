@@ -68,7 +68,10 @@ class SpotifyScraper {
           final low = f.path.toLowerCase();
           if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac')) {
             final stem = File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
-            index[stem] = f.path;
+            // Prefer mp3 over m4a/flac when same stem already exists
+            if (!index.containsKey(stem) || low.endsWith('.mp3')) {
+              index[stem] = f.path;
+            }
           }
         }
       }
@@ -253,8 +256,10 @@ class SpotifyScraper {
     for (final t in tracks) {
       totalTracks++;
       final matched = _findAudioFile(t);
-      buffer.writeln('#EXTINF:-1,$t');
       if (matched != null) {
+        // Use local filename (no ext) as EXTINF title — avoids commas & encoding issues
+        final localName = File(matched).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+        buffer.writeln('#EXTINF:-1,$localName');
         // Write relative path from Playlists dir
         final absPath = File(matched).absolute.path;
         final absPl = File(m3uPath).parent.absolute.path;
@@ -267,7 +272,7 @@ class SpotifyScraper {
         buffer.writeln(relPath);
         resolved++;
       }
-      // unmatched: EXTINF only, no path line (countable by #EXTINF lines)
+      // skip unmatched — consistent with Python pipeline behavior
     }
     await File(m3uPath).writeAsString(buffer.toString(), flush: true);
     log('  已儲存: $plName.m3u8 (已解析路徑: $resolved/${tracks.length})');
