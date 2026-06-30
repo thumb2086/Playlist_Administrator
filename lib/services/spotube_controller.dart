@@ -306,8 +306,8 @@ class SpotubeController {
     clickConfirm();
     if (checkSkip) {
       // Only check for skip dialog on the first playlist (Skip All applies globally)
-      for (int i = 0; i < 6; i++) {
-        await _wait(500);
+      for (int i = 0; i < 5; i++) {
+        await _wait(2000);
         if (_checkAborted()) return;
         if (hasSkipDialog()) {
           clickSkip();

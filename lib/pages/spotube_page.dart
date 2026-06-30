@@ -5,6 +5,7 @@ import '../services/config_service.dart';
 import '../services/i18n.dart';
 import '../services/spotube_controller.dart';
 import '../widgets/dark_theme.dart';
+import '../widgets/calibrate_dialog.dart';
 
 class SpotubePage extends StatefulWidget {
   const SpotubePage({super.key});
@@ -37,6 +38,10 @@ class _SpotubePageState extends State<SpotubePage> {
   }
 
   SpotubeController? _ctrl;
+
+  Future<void> _runCalibrate() async {
+    await showDialog<bool>(context: context, builder: (_) => const CalibrateDialog());
+  }
 
   void _cancelDownload() {
     if (_ctrl != null) {
@@ -122,6 +127,7 @@ class _SpotubePageState extends State<SpotubePage> {
                 ConfigService.instance.config.lastUpdated.clear();
                 ConfigService.instance.save(); setState(() {}); _log(t('spotube.records_reset'));
               }, false),
+              _SButton(t('spotube.calibrate'), Icons.tune_rounded, _runCalibrate, false),
             ]),
           ]),
         ),

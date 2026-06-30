@@ -107,6 +107,7 @@ class I18N extends ChangeNotifier {
     'spotube.download_complete': '下載完成',
     'spotube.move_complete': '搬移完成: {0} 個檔案',
     'spotube.move_failed': '搬移失敗',
+    'spotube.calibrate': '校準座標',
 
     // Settings
     'settings.general': '一般設定',
@@ -223,6 +224,7 @@ class I18N extends ChangeNotifier {
     'spotube.download_complete': 'Download complete',
     'spotube.move_complete': 'Moved {0} files',
     'spotube.move_failed': 'Move failed',
+    'spotube.calibrate': 'Calibrate',
 
     'settings.general': 'General',
     'settings.library_path': 'Library Path',
