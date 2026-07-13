@@ -370,36 +370,36 @@ class _StatsPageState extends State<StatsPage> {
             style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
           const SizedBox(height: 10),
           SizedBox(
-            height: 150,
+            height: 200,
             child: BarChart(BarChartData(
               alignment: BarChartAlignment.spaceEvenly,
               maxY: (maxCount * 1.15).ceilToDouble(),
-              groupsSpace: 1,
+              groupsSpace: 2,
               baselineY: 0,
               barTouchData: BarTouchData(enabled: true,
                 touchTooltipData: BarTouchTooltipData(
-                  tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  tooltipPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   getTooltipItem: (group, i, v, d) {
                     final pct = (buckets[group.x.toInt()] / values.length * 100).toStringAsFixed(1);
                     return BarTooltipItem('${labels[group.x.toInt()]}\n${buckets[group.x.toInt()]} 個 ($pct%)',
-                      TextStyle(color: Colors.white, fontSize: 12, height: 1.4));
+                      TextStyle(color: Colors.white, fontSize: 13, height: 1.5));
                   })),
               titlesData: FlTitlesData(
                 leftTitles: AxisTitles(sideTitles: SideTitles(
-                  showTitles: true, reservedSize: 28,
+                  showTitles: true, reservedSize: 32,
                   getTitlesWidget: (v, _) {
                     if (v == 0) return const SizedBox.shrink();
-                    return Text('${v.toInt()}', style: const TextStyle(fontSize: 10, color: AppColors.textMuted));
+                    return Text('${v.toInt()}', style: const TextStyle(fontSize: 12, color: AppColors.textMuted));
                   })),
                 rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 14,
+                bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 16,
                   getTitlesWidget: (v, _) {
                     final i = v.toInt();
                     if (i < 0 || i >= labels.length) return const SizedBox.shrink();
                     if (i > 0 && i < labels.length - 1 && i % 2 != 0) return const SizedBox(width: 0);
                     return Text(labels[i], style: TextStyle(
-                      fontSize: 9, color: i == peakIdx ? accent : AppColors.textMuted,
+                      fontSize: 10, color: i == peakIdx ? accent : AppColors.textMuted,
                       fontWeight: i == peakIdx ? FontWeight.bold : FontWeight.normal));
                   })),
               ),
@@ -416,8 +416,8 @@ class _StatsPageState extends State<StatsPage> {
                 BarChartGroupData(x: i, barRods: [
                   BarChartRodData(toY: buckets[i].toDouble(),
                     color: i == peakIdx ? accent : accent.withValues(alpha: 0.55),
-                    width: 24,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(3))),
+                    width: 32,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(4))),
                 ]),
               ),
             )),
