@@ -446,26 +446,19 @@ class PipelineOrchestrator {
       onLog('MP3 LUFS 快取: ${mp3 >= 0 ? "$mp3 個檔案" : "無快取"}');
       onLog('M4A LUFS 快取: ${m4a >= 0 ? "$m4a 個檔案" : "無快取"}');
 
-      double p = 0;
+      // Background measurement (non-blocking)
       if (mp3 <= 0) {
-        onLog('MP3 快取缺失，開始測量...');
-        await svc.measureFormat('mp3', onLog: onLog, onProgress: (d, t) {
-          if (t > 0) { p = d / t * 50; progress(p); }
-        });
-        mp3 = svc.cachedCount('mp3');
+        onLog('MP3 快取缺失，背景測量中（請稍候，跑完會自動存檔）...');
+        svc.measureFormat('mp3', onLog: onLog);
       }
       if (m4a <= 0) {
-        onLog('M4A 快取缺失，開始測量...');
-        await svc.measureFormat('m4a', onLog: onLog, onProgress: (d, t) {
-          if (t > 0) { p = 50 + d / t * 50; progress(p); }
-        });
+        onLog('M4A 快取缺失，背景測量中...');
+        svc.measureFormat('m4a', onLog: onLog);
       }
 
-      if (mp3 > 100) {
-        onLog('檢查需 normalize 的 MP3...');
-        await svc.normalizeMp3(onLog: onLog, onProgress: (d, t) {
-          if (t > 0) progress(p + d / t * (100 - p));
-        });
+      // Normalize (reads existing cache, doesn't need await for fresh measure)
+      if (mp3 > 100 || svc.cachedCount('mp3') > 100) {
+        svc.normalizeMp3(onLog: onLog);
       }
     } catch (e) {
       onLog('LUFS 步驟異常: $e');
