@@ -439,76 +439,84 @@ class PipelineOrchestrator {
   }
 
   Future<void> _stepMeasureLufs(void Function(double) progress) async {
-    // Find measure_lufs.py by walking up from exe dir
-    String? findScript(String name) {
-      final exeDir = Directory(File(Platform.resolvedExecutable).parent.path);
-      Directory? d = exeDir;
-      while (d != null) {
-        final candidate = '${d.path}\\tools\\$name';
-        if (File(candidate).existsSync()) return candidate;
-        final parent = d.parent;
-        d = parent.path == d.path ? null : parent;
+    try {
+      // Find scripts by walking up from exe dir
+      String? findScript(String name) {
+        try {
+          final exeDir = Directory(File(Platform.resolvedExecutable).parent.path);
+          Directory? d = exeDir;
+          int guard = 0;
+          while (d != null && guard < 20) {
+            guard++;
+            final candidate = '${d.path}\\tools\\$name';
+            if (File(candidate).existsSync()) return candidate;
+            final parent = d.parent;
+            d = parent.path == d.path ? null : parent;
+          }
+        } catch (_) {}
+        return null;
       }
-      return null;
-    }
 
-    final scriptPath = findScript('measure_lufs.py');
-    final bridgePath = findScript('flutter_download_bridge.py');
-    if (scriptPath == null) {
-      onLog('找不到 measure_lufs.py，跳過 LUFS 測量');
-      progress(100);
-      return;
-    }
-
-    onLog('開始測量 LUFS...');
-    final env = Map<String, String>.from(Platform.environment);
-    env['PYTHONUNBUFFERED'] = '1';
-    var proc = await Process.start('python', [scriptPath],
-      runInShell: true, workingDirectory: config.basePath, environment: env);
-
-    await proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).forEach((line) {
-      if (line.contains(']')) {
-        final m = RegExp(r'\[(\w+)\]\s+(\d+)/(\d+)').firstMatch(line);
-        if (m != null) {
-          final done = int.parse(m.group(2)!);
-          final total = int.parse(m.group(3)!);
-          if (total > 0) progress(done / total * 100);
-        }
+      final scriptPath = findScript('measure_lufs.py');
+      final bridgePath = findScript('flutter_download_bridge.py');
+      if (scriptPath == null) {
+        onLog('找不到 measure_lufs.py，跳過 LUFS 測量');
+        progress(100);
+        return;
       }
-    });
-    await proc.exitCode;
 
-    // Normalize any MP3s that deviate from -14 LUFS
-    if (bridgePath == null) {
-      onLog('找不到 flutter_download_bridge.py，跳過 normalize');
-      progress(100);
-      return;
-    }
-    onLog('檢查需 normalize 的 MP3...');
-    progress(50);
-    proc = await Process.start('python', [bridgePath, 'normalize-mp3-lufs'],
-      runInShell: true, workingDirectory: config.basePath, environment: env);
-    await proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).forEach((line) {
-      if (line.contains(']')) {
-        final m = RegExp(r'(\d+)/(\d+)').firstMatch(line);
-        if (m != null) {
-          final done = int.parse(m.group(1)!);
-          final total = int.parse(m.group(2)!);
-          if (total > 0) progress(50 + done / total * 50);
-        }
-      }
-    });
-    final code = await proc.exitCode;
-    if (code == 0) {
-      onLog('MP3 loudness 統一完成');
-      // Re-measure to update cache
-      onLog('重新測量 LUFS...');
-      proc = await Process.start('python', [scriptPath],
+      final python = 'python';
+      final env = Map<String, String>.from(Platform.environment);
+      env['PYTHONUNBUFFERED'] = '1';
+
+      onLog('開始測量 LUFS...');
+      var proc = await Process.start(python, [scriptPath],
         runInShell: true, workingDirectory: config.basePath, environment: env);
-      await proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).forEach((line) {});
+      await proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).forEach((line) {
+        try {
+          final m = RegExp(r'\[(\w+)\]\s+(\d+)/(\d+)').firstMatch(line);
+          if (m != null) {
+            final done = int.parse(m.group(2)!);
+            final total = int.parse(m.group(3)!);
+            if (total > 0) progress(done / total * 100);
+          }
+        } catch (_) {}
+      });
       await proc.exitCode;
+
+      // Normalize deviating MP3s
+      if (bridgePath == null) {
+        onLog('找不到 flutter_download_bridge.py，跳過 normalize');
+        progress(100);
+        return;
+      }
+      onLog('檢查需 normalize 的 MP3...');
+      progress(50);
+      proc = await Process.start(python, [bridgePath, 'normalize-mp3-lufs'],
+        runInShell: true, workingDirectory: config.basePath, environment: env);
+      await proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).forEach((line) {
+        try {
+          final m = RegExp(r'(\d+)/(\d+)').firstMatch(line);
+          if (m != null) {
+            final done = int.parse(m.group(1)!);
+            final total = int.parse(m.group(2)!);
+            if (total > 0) progress(50 + done / total * 50);
+          }
+        } catch (_) {}
+      });
+      final code = await proc.exitCode;
+      if (code == 0) {
+        onLog('MP3 loudness 統一完成');
+        onLog('重新測量 LUFS...');
+        proc = await Process.start(python, [scriptPath],
+          runInShell: true, workingDirectory: config.basePath, environment: env);
+        await proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).forEach((_) {});
+        await proc.exitCode;
+      }
+      onLog('LUFS 處理完成');
+    } catch (e) {
+      onLog('LUFS 步驟異常: $e');
     }
-    onLog('LUFS 處理完成');
     progress(100);
   }
 }
