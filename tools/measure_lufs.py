@@ -103,7 +103,7 @@ def process_format(fmt):
 
     _save_callbacks.append(save_cache)
 
-    with ThreadPoolExecutor(max_workers=12) as pool:
+    with ThreadPoolExecutor(max_workers=16) as pool:
         futures = {pool.submit(measure_one, f, library_path, cache): f for f in to_measure}
         for fut in as_completed(futures):
             done += 1

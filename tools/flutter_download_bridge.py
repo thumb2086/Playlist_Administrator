@@ -344,10 +344,10 @@ def cmd_batch_download(args):
 
 
 def cmd_normalize_mp3_lufs(args):
-    """Normalize any MP3s whose measured LUFS deviates from -14 by more than 1"""
-    from utils.config import load_config, get_data_file
+    """Normalize MP3s deviating from -14 LUFS. Handles sentinel values (-99) by measuring first."""
     import shutil
 
+    from utils.config import load_config, get_data_file
     config = load_config()
     library_path = config.get('library_path', '')
     if not library_path:
@@ -363,43 +363,87 @@ def cmd_normalize_mp3_lufs(args):
         cache = json.load(f)
 
     target = -14.0
-    to_normalize = {rel: val for rel, val in cache.items() if abs(float(val) - target) > 2.0}
-    if not to_normalize:
-        emit_json({'type': 'log', 'message': '所有 MP3 已在 -14 LUFS 附近，無需 normalize'})
+    ffmpeg_path = shutil.which('ffmpeg') or config.get('ffmpeg_path', 'ffmpeg')
+    sentinel = -99
+
+    # Phase 1: measure sentinel values and find files that need normalization
+    need_measure = {k: v for k, v in cache.items() if abs(float(v) - sentinel) < 0.5}
+    need_normalize = {k: float(v) for k, v in cache.items() if abs(float(v) - target) > 2.0 and k not in need_measure}
+
+    if need_measure:
+        emit_json({'type': 'log', 'message': f'測量 {len(need_measure)} 個未快取的 MP3...'})
+        done = 0
+        for rel_path in need_measure:
+            abs_path = os.path.join(library_path, rel_path)
+            if not os.path.exists(abs_path):
+                cache[rel_path] = target
+                done += 1
+                continue
+            # Quick measurement with ffmpeg loudnorm analysis
+            cmd = [ffmpeg_path, '-i', abs_path,
+                   '-af', 'loudnorm=print_format=json',
+                   '-f', 'null', 'NUL', '-hide_banner', '-y']
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=120,
+                                   encoding='utf-8', errors='replace')
+                out = r.stderr
+                json_start = out.rfind('{')
+                if json_start >= 0:
+                    try:
+                        data, _ = json.JSONDecoder().raw_decode(out[json_start:])
+                        input_i = data.get('input_i')
+                        if input_i is not None:
+                            measured = float(input_i)
+                            cache[rel_path] = measured
+                            if abs(measured - target) > 2.0:
+                                need_normalize[rel_path] = measured
+                            done += 1
+                            if done % 25 == 0:
+                                emit_json({'type': 'progress', 'percent': round(done / len(need_measure) * 100, 1)})
+                            continue
+                    except:
+                        pass
+            except:
+                pass
+            cache[rel_path] = target
+            done += 1
+
+    if not need_normalize:
+        emit_json({'type': 'log', 'message': '所有 MP3 已在 -14±2 LUFS 範圍內，無需 normalize'})
+        # Save updated cache
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
         return
 
-    emit_json({'type': 'log', 'message': f'發現 {len(to_normalize)} 個偏離 -14 的 MP3，開始 normalize...'})
-    ffmpeg_path = shutil.which('ffmpeg') or config.get('ffmpeg_path', 'ffmpeg')
+    emit_json({'type': 'log', 'message': f'Normalize {len(need_normalize)} 個偏離 -14 的 MP3...'})
+    total = len(need_normalize)
     done = 0
-    total = len(to_normalize)
 
-    for rel_path, val in to_normalize.items():
+    for rel_path, val in need_normalize.items():
         abs_path = os.path.join(library_path, rel_path)
         if not os.path.exists(abs_path):
             continue
         base, ext = os.path.splitext(abs_path)
         tmp = base + '_tmp' + ext
         cmd = [ffmpeg_path, '-y', '-i', abs_path,
-               '-af', 'loudnorm=I=-14:TP=-1:LRA=7',
+               '-af', f'loudnorm=I={target}:TP=-1:LRA=7',
                '-c:a', 'libmp3lame', '-q:a', '2', tmp]
         try:
             r = subprocess.run(cmd, capture_output=True, timeout=300)
             if r.returncode == 0 and os.path.exists(tmp):
                 os.replace(tmp, abs_path)
                 cache[rel_path] = target
-                emit_json({'type': 'log', 'message': f'  ✅ {rel_path}  ({val} → -14)'})
+                emit_json({'type': 'log', 'message': f'  ✅ {rel_path}  ({val:.1f} → -14)'})
             else:
                 emit_json({'type': 'log', 'message': f'  ❌ {rel_path} normalize 失敗'})
         except Exception as e:
             emit_json({'type': 'log', 'message': f'  ⚠️ {rel_path}: {str(e)[:60]}'})
-
         done += 1
         emit_json({'type': 'progress', 'percent': round(done / total * 100, 1)})
 
-    # Save updated cache
     with open(cache_file, 'w', encoding='utf-8') as f:
         json.dump(cache, f, ensure_ascii=False, indent=2)
-    emit_json({'type': 'log', 'message': f'Normalize 完成，已處理 {done} 個檔案'})
+    emit_json({'type': 'log', 'message': f'完成: 測量 {len(need_measure)} 個, normalize {done} 個'})
 
 
 def cmd_groq_transcribe(args):
