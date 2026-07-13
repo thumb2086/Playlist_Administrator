@@ -46,7 +46,7 @@ atexit.register(_atexit_save)
 
 def measure_one(path, library_path, cache_dict):
     rel_path = os.path.relpath(path, library_path)
-    cmd = [ffmpeg_path, '-i', path,
+    cmd = [ffmpeg_path, '-t', '30', '-i', path,
            '-af', 'loudnorm=print_format=json',
            '-f', 'null', 'NUL', '-hide_banner', '-y']
     try:

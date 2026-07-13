@@ -379,8 +379,8 @@ def cmd_normalize_mp3_lufs(args):
                 cache[rel_path] = target
                 done += 1
                 continue
-            # Quick measurement with ffmpeg loudnorm analysis
-            cmd = [ffmpeg_path, '-i', abs_path,
+            # Quick measurement with ffmpeg loudnorm analysis (first 30s)
+            cmd = [ffmpeg_path, '-t', '30', '-i', abs_path,
                    '-af', 'loudnorm=print_format=json',
                    '-f', 'null', 'NUL', '-hide_banner', '-y']
             try:
