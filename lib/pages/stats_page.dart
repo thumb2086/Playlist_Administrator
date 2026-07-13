@@ -339,10 +339,9 @@ class _StatsPageState extends State<StatsPage> {
     final accent = label == 'MP3' ? const Color(0xFF4FC3F7) : const Color(0xFFFFB74D);
 
     // Narrower buckets centered around -14 for better distribution visibility
-    final ranges = [const [-35.0, -22.0], const [-22.0, -18.0], const [-18.0, -16.0],
-                    const [-16.0, -14.0], const [-14.0, -12.0], const [-12.0, -10.0],
-                    const [-10.0, -8.0], const [-8.0, 0.0]];
-    final labels = ['<-22', '-22', '-18', '-16', '-14', '-12', '-10', '>-8'];
+    final ranges = [const [-35.0, -18.0], const [-18.0, -15.0], const [-15.0, -12.0],
+                    const [-12.0, -9.0], const [-9.0, 0.0]];
+    final labels = ['<-18', '-18', '-15', '-12', '-9'];
     final buckets = List<int>.filled(ranges.length, 0);
     for (final v in values) {
       bool found = false;

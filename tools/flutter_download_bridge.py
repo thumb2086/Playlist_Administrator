@@ -363,7 +363,7 @@ def cmd_normalize_mp3_lufs(args):
         cache = json.load(f)
 
     target = -14.0
-    to_normalize = {rel: val for rel, val in cache.items() if abs(float(val) - target) > 1.0}
+    to_normalize = {rel: val for rel, val in cache.items() if abs(float(val) - target) > 2.0}
     if not to_normalize:
         emit_json({'type': 'log', 'message': '所有 MP3 已在 -14 LUFS 附近，無需 normalize'})
         return
