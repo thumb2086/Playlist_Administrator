@@ -88,7 +88,7 @@ class LufsService {
       final proc = await Process.start(ffmpeg, [
         '-t', '30', '-i', path,
         '-af', 'loudnorm=print_format=json',
-        '-f', 'null', 'NUL', '-hide_banner', '-y',
+        '-f', 'null', '-', '-hide_banner', '-y',
       ]);
       // Drain both stdout and stderr to prevent deadlock
       final stderr = await proc.stderr.transform(utf8.decoder).join();
