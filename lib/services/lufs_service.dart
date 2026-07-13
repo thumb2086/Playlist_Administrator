@@ -28,9 +28,27 @@ class LufsService {
 
   int cachedCount(String fmt) => _load(fmt).length;
 
-  String get _ffmpeg {
-    final p = ConfigService.instance.config.ffmpegPath;
-    return p.isNotEmpty ? p : 'ffmpeg';
+  String? _ffmpegPath;
+
+  Future<String> _resolveFfmpeg() async {
+    if (_ffmpegPath != null) return _ffmpegPath!;
+    final cfg = ConfigService.instance.config.ffmpegPath;
+    if (cfg.isNotEmpty && File(cfg).existsSync()) {
+      _ffmpegPath = cfg; return cfg;
+    }
+    // Search PATH for ffmpeg.exe
+    final pathEnv = Platform.environment['PATH'] ?? '';
+    for (final dir in pathEnv.split(';')) {
+      if (dir.trim().isEmpty) continue;
+      try {
+        final candidate = '${dir.trim()}\\ffmpeg.exe';
+        if (File(candidate).existsSync()) {
+          _ffmpegPath = candidate; return candidate;
+        }
+      } catch (_) {}
+    }
+    _ffmpegPath = 'ffmpeg';
+    return 'ffmpeg';
   }
 
   /// Measure LUFS for all uncached files of given format.
@@ -88,7 +106,7 @@ class LufsService {
   }
 
   Future<void> _measureOne(String path, Map<String, double> cache, void Function(double) onResult) async {
-    final ffmpeg = _ffmpeg;
+    final ffmpeg = await _resolveFfmpeg();
     try {
       final proc = await Process.start(ffmpeg, [
         '-t', '30', '-i', path,
@@ -144,7 +162,7 @@ class LufsService {
     }
 
     onLog('Normalize ${toNormalize.length} 個偏離 ${target} 的 MP3...');
-    final ffmpeg = _ffmpeg;
+    final ffmpeg = await _resolveFfmpeg();
     int done = 0;
     int total = toNormalize.length;
 
