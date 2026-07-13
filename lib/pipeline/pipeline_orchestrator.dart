@@ -439,14 +439,56 @@ class PipelineOrchestrator {
   }
 
   Future<void> _stepMeasureLufs(void Function(double) progress) async {
-    final svc = LufsService.instance;
     try {
+      // Find measure_lufs.py using same logic as DownloadService
+      String? findPy(String name) {
+        try {
+          final exeDir = Directory(File(Platform.resolvedExecutable).parent.path);
+          Directory? d = exeDir;
+          int guard = 0;
+          while (d != null && guard < 20) {
+            guard++;
+            final p = '${d.path}\\tools\\$name';
+            if (File(p).existsSync()) return p;
+            d = d.parent.path == d.path ? null : d.parent;
+          }
+        } catch (_) {}
+        return null;
+      }
+
+      final script = findPy('measure_lufs.py');
+      if (script == null) {
+        final svc = LufsService.instance;
+        final mp3 = svc.cachedCount('mp3');
+        final m4a = svc.cachedCount('m4a');
+        onLog('MP3 LUFS 快取: ${mp3 >= 0 ? "$mp3 個檔案" : "無快取"}');
+        onLog('M4A LUFS 快取: ${m4a >= 0 ? "$m4a 個檔案" : "無快取"}');
+        if (mp3 <= 0) onLog('找不到 measure_lufs.py，跳過測量');
+        progress(100);
+        return;
+      }
+
+      final svc = LufsService.instance;
       final mp3 = svc.cachedCount('mp3');
       final m4a = svc.cachedCount('m4a');
       onLog('MP3 LUFS 快取: ${mp3 >= 0 ? "$mp3 個檔案" : "無快取"}');
       onLog('M4A LUFS 快取: ${m4a >= 0 ? "$m4a 個檔案" : "無快取"}');
-      if (mp3 <= 0) onLog('提示: MP3 無快取，執行 python tools/measure_lufs.py');
-      if (m4a <= 0) onLog('提示: M4A 無快取，執行 python tools/measure_lufs.py');
+
+      if (mp3 > 0 && m4a > 0) { progress(100); return; }
+
+      onLog('開始 LUFS 測量 (Python)...');
+      final env = Map<String, String>.from(Platform.environment);
+      env['PYTHONUNBUFFERED'] = '1';
+      final result = await Process.run('python', [script],
+        runInShell: true, workingDirectory: config.basePath, environment: env);
+
+      if (result.exitCode == 0) {
+        final m = svc.cachedCount('mp3');
+        final a = svc.cachedCount('m4a');
+        onLog('LUFS 測量完成: MP3 $m 個, M4A $a 個');
+      } else {
+        onLog('LUFS 測量異常 (code: ${result.exitCode})');
+      }
     } catch (e) {
       onLog('LUFS 步驟異常: $e');
     }
