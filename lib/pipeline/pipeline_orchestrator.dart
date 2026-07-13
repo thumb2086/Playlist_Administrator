@@ -440,7 +440,7 @@ class PipelineOrchestrator {
 
   Future<void> _stepMeasureLufs(void Function(double) progress) async {
     try {
-      // Find measure_lufs.py using same logic as DownloadService
+      // Find script via exe-dir walk (same as DownloadService)
       String? findPy(String name) {
         try {
           final exeDir = Directory(File(Platform.resolvedExecutable).parent.path);
@@ -456,41 +456,25 @@ class PipelineOrchestrator {
         return null;
       }
 
-      final script = findPy('measure_lufs.py');
-      if (script == null) {
-        final svc = LufsService.instance;
-        final mp3 = svc.cachedCount('mp3');
-        final m4a = svc.cachedCount('m4a');
-        onLog('MP3 LUFS 快取: ${mp3 >= 0 ? "$mp3 個檔案" : "無快取"}');
-        onLog('M4A LUFS 快取: ${m4a >= 0 ? "$m4a 個檔案" : "無快取"}');
-        if (mp3 <= 0) onLog('找不到 measure_lufs.py，跳過測量');
-        progress(100);
-        return;
-      }
-
       final svc = LufsService.instance;
       final mp3 = svc.cachedCount('mp3');
       final m4a = svc.cachedCount('m4a');
-      onLog('MP3 LUFS 快取: ${mp3 >= 0 ? "$mp3 個檔案" : "無快取"}');
-      onLog('M4A LUFS 快取: ${m4a >= 0 ? "$m4a 個檔案" : "無快取"}');
+      onLog('MP3 LUFS: $mp3, M4A LUFS: $m4a');
 
       if (mp3 > 0 && m4a > 0) { progress(100); return; }
 
-      onLog('開始 LUFS 測量 (Python)...');
+      final script = findPy('measure_lufs.py');
+      if (script == null) { onLog('找不到 measure_lufs.py'); progress(100); return; }
+
+      onLog('背景測量啟動中...');
       final env = Map<String, String>.from(Platform.environment);
       env['PYTHONUNBUFFERED'] = '1';
-      final result = await Process.run('python', [script],
+      // Fire-and-forget: pipeline won't wait
+      Process.start('python', [script],
         runInShell: true, workingDirectory: config.basePath, environment: env);
-
-      if (result.exitCode == 0) {
-        final m = svc.cachedCount('mp3');
-        final a = svc.cachedCount('m4a');
-        onLog('LUFS 測量完成: MP3 $m 個, M4A $a 個');
-      } else {
-        onLog('LUFS 測量異常 (code: ${result.exitCode})');
-      }
+      onLog('測量已啟動，統計頁重整可看進度');
     } catch (e) {
-      onLog('LUFS 步驟異常: $e');
+      onLog('LUFS 異常: $e');
     }
     progress(100);
   }
