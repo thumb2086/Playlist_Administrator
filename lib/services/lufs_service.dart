@@ -28,6 +28,11 @@ class LufsService {
 
   int cachedCount(String fmt) => _load(fmt).length;
 
+  String get _ffmpeg {
+    final p = ConfigService.instance.config.ffmpegPath;
+    return p.isNotEmpty ? p : 'ffmpeg';
+  }
+
   /// Measure LUFS for all uncached files of given format.
   /// Calls [onProgress] with (done, total) after each batch.
   Future<void> measureFormat(String fmt, {
@@ -83,7 +88,7 @@ class LufsService {
   }
 
   Future<void> _measureOne(String path, Map<String, double> cache, void Function(double) onResult) async {
-    final ffmpeg = 'ffmpeg';
+    final ffmpeg = _ffmpeg;
     try {
       final proc = await Process.start(ffmpeg, [
         '-t', '30', '-i', path,
@@ -139,7 +144,7 @@ class LufsService {
     }
 
     onLog('Normalize ${toNormalize.length} 個偏離 ${target} 的 MP3...');
-    final ffmpeg = 'ffmpeg';
+    final ffmpeg = _ffmpeg;
     int done = 0;
     int total = toNormalize.length;
 
