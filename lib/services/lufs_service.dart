@@ -108,17 +108,14 @@ class LufsService {
   Future<void> _measureOne(String path, Map<String, double> cache, void Function(double) onResult) async {
     final ffmpeg = await _resolveFfmpeg();
     try {
-      final proc = await Process.start(ffmpeg, [
+      final result = await Process.run(ffmpeg, [
         '-t', '30', '-i', path,
         '-af', 'loudnorm=print_format=json',
         '-f', 'null', '-', '-hide_banner', '-y',
       ]);
-      // Drain both stdout and stderr to prevent deadlock
-      final stderr = await proc.stderr.transform(utf8.decoder).join();
-      proc.stdout.drain();
-      final exit = await proc.exitCode;
-      if (exit != 0) { onResult(-14.0); return; }
+      if (result.exitCode != 0) { onResult(-14.0); return; }
 
+      final stderr = result.stderr as String? ?? '';
       final jsonStart = stderr.lastIndexOf('{');
       if (jsonStart >= 0) {
         try {
@@ -174,16 +171,12 @@ class LufsService {
       final tmp = '${base}_tmp.mp3';
 
       try {
-        final proc = await Process.start(ffmpeg, [
+        final result = await Process.run(ffmpeg, [
           '-y', '-i', absPath,
           '-af', 'loudnorm=I=$target:TP=-1:LRA=7',
           '-c:a', 'libmp3lame', '-q:a', '2', tmp,
         ]);
-        proc.stdout.drain();
-        await proc.stderr.drain();
-        final code = await proc.exitCode;
-
-        if (code == 0 && await File(tmp).exists()) {
+        if (result.exitCode == 0 && await File(tmp).exists()) {
           await File(tmp).rename(absPath);
           cache[absPath] = target;
           onLog('  ✅ ${absPath.split('\\').last}  (${e.value.toStringAsFixed(1)} → $target)');
