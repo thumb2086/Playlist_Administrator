@@ -363,14 +363,14 @@ class _StatsPageState extends State<StatsPage> {
         decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Text('$label LUFS 分佈 (${values.length} 個檔案)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            Text('$label LUFS 分佈 (${values.length} 個檔案)', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
           ]),
           const SizedBox(height: 2),
           Text('平均 ${avg.toStringAsFixed(1)}  |  ${p10.toStringAsFixed(1)} ~ ${p90.toStringAsFixed(1)} (P10-P90)  |  ${minV.toStringAsFixed(1)} ~ ${maxV.toStringAsFixed(1)}',
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
           const SizedBox(height: 10),
           SizedBox(
-            height: 140,
+            height: 150,
             child: BarChart(BarChartData(
               alignment: BarChartAlignment.spaceEvenly,
               maxY: (maxCount * 1.15).ceilToDouble(),
@@ -378,29 +378,28 @@ class _StatsPageState extends State<StatsPage> {
               baselineY: 0,
               barTouchData: BarTouchData(enabled: true,
                 touchTooltipData: BarTouchTooltipData(
-                  tooltipPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   getTooltipItem: (group, i, v, d) {
                     final pct = (buckets[group.x.toInt()] / values.length * 100).toStringAsFixed(1);
                     return BarTooltipItem('${labels[group.x.toInt()]}\n${buckets[group.x.toInt()]} 個 ($pct%)',
-                      TextStyle(color: Colors.white, fontSize: 11, height: 1.3));
+                      TextStyle(color: Colors.white, fontSize: 12, height: 1.4));
                   })),
               titlesData: FlTitlesData(
                 leftTitles: AxisTitles(sideTitles: SideTitles(
-                  showTitles: true, reservedSize: 24,
+                  showTitles: true, reservedSize: 28,
                   getTitlesWidget: (v, _) {
                     if (v == 0) return const SizedBox.shrink();
-                    return Text('${v.toInt()}', style: const TextStyle(fontSize: 9, color: AppColors.textMuted));
+                    return Text('${v.toInt()}', style: const TextStyle(fontSize: 10, color: AppColors.textMuted));
                   })),
                 rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 12,
+                bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 14,
                   getTitlesWidget: (v, _) {
                     final i = v.toInt();
                     if (i < 0 || i >= labels.length) return const SizedBox.shrink();
-                    // Show every other label to avoid crowding
                     if (i > 0 && i < labels.length - 1 && i % 2 != 0) return const SizedBox(width: 0);
                     return Text(labels[i], style: TextStyle(
-                      fontSize: 8, color: i == peakIdx ? accent : AppColors.textMuted,
+                      fontSize: 9, color: i == peakIdx ? accent : AppColors.textMuted,
                       fontWeight: i == peakIdx ? FontWeight.bold : FontWeight.normal));
                   })),
               ),
@@ -417,7 +416,7 @@ class _StatsPageState extends State<StatsPage> {
                 BarChartGroupData(x: i, barRods: [
                   BarChartRodData(toY: buckets[i].toDouble(),
                     color: i == peakIdx ? accent : accent.withValues(alpha: 0.55),
-                    width: 18,
+                    width: 24,
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(3))),
                 ]),
               ),
