@@ -441,32 +441,12 @@ class PipelineOrchestrator {
   Future<void> _stepMeasureLufs(void Function(double) progress) async {
     final svc = LufsService.instance;
     try {
-      int mp3 = svc.cachedCount('mp3');
-      int m4a = svc.cachedCount('m4a');
+      final mp3 = svc.cachedCount('mp3');
+      final m4a = svc.cachedCount('m4a');
       onLog('MP3 LUFS 快取: ${mp3 >= 0 ? "$mp3 個檔案" : "無快取"}');
       onLog('M4A LUFS 快取: ${m4a >= 0 ? "$m4a 個檔案" : "無快取"}');
-
-      double p = 0;
-      if (mp3 <= 0) {
-        onLog('MP3 快取缺失，開始測量...');
-        await svc.measureFormat('mp3', onLog: onLog, onProgress: (d, t) {
-          if (t > 0) { p = d / t * 50; progress(p); }
-        });
-        mp3 = svc.cachedCount('mp3');
-      }
-      if (m4a <= 0) {
-        onLog('M4A 快取缺失，開始測量...');
-        await svc.measureFormat('m4a', onLog: onLog, onProgress: (d, t) {
-          if (t > 0) { p = 50 + d / t * 50; progress(p); }
-        });
-      }
-
-      if (mp3 > 100) {
-        onLog('檢查需 normalize 的 MP3...');
-        await svc.normalizeMp3(onLog: onLog, onProgress: (d, t) {
-          if (t > 0) progress(p + d / t * (100 - p));
-        });
-      }
+      if (mp3 <= 0) onLog('提示: MP3 無快取，執行 python tools/measure_lufs.py');
+      if (m4a <= 0) onLog('提示: M4A 無快取，執行 python tools/measure_lufs.py');
     } catch (e) {
       onLog('LUFS 步驟異常: $e');
     }
