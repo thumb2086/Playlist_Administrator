@@ -267,11 +267,6 @@ class _PlayerPageState extends State<PlayerPage> {
                   leading: const Icon(Icons.playlist_play_rounded, color: AppColors.accent, size: 18),
                   title: Text(items[i], style: const TextStyle(fontSize: 13)),
                   onTap: () => _loadPlaylist(items[i]),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.download_rounded, color: AppColors.textMuted, size: 18),
-                    tooltip: 'spoDL 下載',
-                    onPressed: () => _downloadPlaylist(items[i]),
-                  ),
                 ),
               );
             },
@@ -281,27 +276,7 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  Future<void> _downloadPlaylist(String name) async {
-    setState(() => _statusText = 'spoDL: $name…');
-    try {
-      final ctrl = SpotubeController(
-        libraryPath: ConfigService.instance.config.libraryPath,
-        coords: ConfigService.instance.config.spotubeCoords,
-      );
-      if (!ctrl.isRunning()) {
-        setState(() => _statusText = 'Spotube 未執行');
-        return;
-      }
-      await ctrl.downloadPlaylist(name);
-      // Mark as synced today
-      final today = DateTime.now().toIso8601String().substring(0, 10);
-      ConfigService.instance.config.lastUpdated[name] = today;
-      await ConfigService.instance.save();
-      setState(() => _statusText = 'spoDL ✅ $name');
-    } catch (e) {
-      setState(() => _statusText = 'spoDL ❌ $e');
-    }
-  }
+
 
   Future<List<String>> _listPlaylists(Directory dir) async {
     if (!await dir.exists()) return [];

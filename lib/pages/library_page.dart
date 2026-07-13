@@ -49,12 +49,13 @@ class LibraryPageState extends State<LibraryPage> {
     final stats = <String, _PlStats>{};
 
     // Build a set of all audio file stems from the library (recursive)
+    // Only match MP3 & FLAC in playlists; M4A stays as source only
     final libStems = <String>{};
     if (await libDir.exists()) {
       await for (final f in libDir.list(recursive: true, followLinks: false)) {
         if (f is File) {
           final low = f.path.toLowerCase();
-          if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac')) {
+          if (low.endsWith('.mp3') || low.endsWith('.flac')) {
             libStems.add(File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase());
           }
         }
@@ -70,7 +71,7 @@ class LibraryPageState extends State<LibraryPage> {
           await for (final f in subDir.list(recursive: true, followLinks: false)) {
             if (f is File) {
               final low = f.path.toLowerCase();
-              if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac')) {
+              if (low.endsWith('.mp3') || low.endsWith('.flac')) {
                 libStems.add(File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase());
               }
             }

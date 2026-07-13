@@ -13,7 +13,7 @@ class StatsPage extends StatefulWidget {
 }
 
 class _StatsPageState extends State<StatsPage> {
-  int _mp3 = 0, _m4a = 0, _flac = 0, _playlists = 0, _entries = 0, _dual = 0, _duplicates = 0;
+  int _mp3 = 0, _m4a = 0, _flac = 0, _txt = 0, _playlists = 0, _entries = 0, _dual = 0, _duplicates = 0;
   double _sizeGb = 0, _savedGb = 0;
   bool _loading = false;
   List<Snapshot> _history = [];
@@ -31,7 +31,7 @@ class _StatsPageState extends State<StatsPage> {
     try {
       final lib = ConfigService.instance.config.libraryPath;
       final pl = ConfigService.instance.config.playlistsPath;
-      int mp3 = 0, m4a = 0, flac = 0;
+      int mp3 = 0, m4a = 0, flac = 0, txt = 0;
       double size = 0, savedGb = 0;
       final nameExts = <String, Set<String>>{};
       final nameCount = <String, int>{};  // stem -> total occurrences
@@ -56,6 +56,7 @@ class _StatsPageState extends State<StatsPage> {
             if (low.endsWith('.mp3')) { mp3++; nameExts[stem]!.add('mp3'); }
             else if (low.endsWith('.m4a')) { m4a++; nameExts[stem]!.add('m4a'); }
             else if (low.endsWith('.flac')) { flac++; nameExts[stem]!.add('flac'); }
+            else if (low.endsWith('.txt')) { txt++; nameExts[stem]!.add('txt'); }
           }
         }
       }
@@ -74,14 +75,14 @@ class _StatsPageState extends State<StatsPage> {
           }
         }
       }
-      setState(() { _mp3 = mp3; _m4a = m4a; _flac = flac; _playlists = plCount; _entries = entries; _dual = dual; _sizeGb = size; _savedGb = savedGb; _duplicates = duplicates; _loading = false; });
+      setState(() { _mp3 = mp3; _m4a = m4a; _flac = flac; _txt = txt; _playlists = plCount; _entries = entries; _dual = dual; _sizeGb = size; _savedGb = savedGb; _duplicates = duplicates; _loading = false; });
     } catch (_) { setState(() => _loading = false); }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    final total = _mp3 + _m4a + _flac;
+    final total = _mp3 + _m4a + _flac + _txt;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
@@ -95,6 +96,8 @@ class _StatsPageState extends State<StatsPage> {
           Expanded(child: _MetricCard(t('stats.m4a'), '$_m4a', Icons.music_video_rounded, const Color(0xFFFFB74D), _loading)),
           const SizedBox(width: 10),
           Expanded(child: _MetricCard(t('stats.flac'), '$_flac', Icons.library_music_rounded, const Color(0xFFCE93D8), _loading)),
+          const SizedBox(width: 10),
+          Expanded(child: _MetricCard(t('stats.txt'), '$_txt', Icons.description_outlined, const Color(0xFFA5D6A7), _loading)),
         ]),
         const SizedBox(height: 10),
         Row(children: [
@@ -122,32 +125,47 @@ class _StatsPageState extends State<StatsPage> {
           Text(t('stats.format_distribution'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
           Container(
-            height: 220,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: AppColors.card, borderRadius: BorderRadius.circular(14),
               border: Border.all(color: AppColors.border),
             ),
-            child: Row(children: [
-              Expanded(
-                child: PieChart(PieChartData(
-                  sections: [
-                    if (_mp3 > 0) PieChartSectionData(value: _mp3.toDouble(), color: const Color(0xFF4FC3F7), title: '', radius: 55),
-                    if (_m4a > 0) PieChartSectionData(value: _m4a.toDouble(), color: const Color(0xFFFFB74D), title: '', radius: 55),
-                    if (_flac > 0) PieChartSectionData(value: _flac.toDouble(), color: const Color(0xFFCE93D8), title: '', radius: 55),
-                  ],
-                  centerSpaceRadius: 35,
-                  sectionsSpace: 3,
-                )),
-              ),
-              const SizedBox(width: 20),
-              Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                _Legend('MP3', '$_mp3', const Color(0xFF4FC3F7)),
-                const SizedBox(height: 8),
-                _Legend('M4A', '$_m4a', const Color(0xFFFFB74D)),
-                const SizedBox(height: 8),
-                _Legend('FLAC', '$_flac', const Color(0xFFCE93D8)),
+            child: Column(children: [
+              Row(children: [
+                Expanded(
+                  flex: 3,
+                  child: SizedBox(
+                    height: 180,
+                    child: PieChart(PieChartData(
+                      sections: [
+                        if (_mp3 > 0) PieChartSectionData(value: _mp3.toDouble(), color: const Color(0xFF4FC3F7), title: '', radius: 50),
+                        if (_m4a > 0) PieChartSectionData(value: _m4a.toDouble(), color: const Color(0xFFFFB74D), title: '', radius: 50),
+                        if (_flac > 0) PieChartSectionData(value: _flac.toDouble(), color: const Color(0xFFCE93D8), title: '', radius: 50),
+                        if (_txt > 0) PieChartSectionData(value: _txt.toDouble(), color: const Color(0xFFA5D6A7), title: '', radius: 50),
+                      ],
+                      centerSpaceRadius: 30,
+                      sectionsSpace: 3,
+                    )),
+                  ),
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  flex: 2,
+                  child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    _Legend('MP3', '$_mp3', const Color(0xFF4FC3F7)),
+                    const SizedBox(height: 6),
+                    _Legend('M4A', '$_m4a', const Color(0xFFFFB74D)),
+                    const SizedBox(height: 6),
+                    _Legend('FLAC', '$_flac', const Color(0xFFCE93D8)),
+                    const SizedBox(height: 6),
+                    _Legend('TXT', '$_txt', const Color(0xFFA5D6A7)),
+                  ]),
+                ),
               ]),
+              if (_txt > 0 || _mp3 > 0 || _m4a > 0 || _flac > 0) ...[
+                const Divider(height: 24),
+                _buildTextDistribution(),
+              ],
             ]),
           ),
         ],
@@ -204,6 +222,74 @@ class _StatsPageState extends State<StatsPage> {
           belowBarData: BarAreaData(show: true, color: AppColors.accent.withValues(alpha: 0.1))),
       ],
     ));
+  }
+
+  Widget _buildTextDistribution() {
+    final items = <MapEntry<String, int>>[];
+    if (_mp3 > 0) items.add(MapEntry('MP3', _mp3));
+    if (_m4a > 0) items.add(MapEntry('M4A', _m4a));
+    if (_flac > 0) items.add(MapEntry('FLAC', _flac));
+    if (_txt > 0) items.add(MapEntry('TXT', _txt));
+    final totalItems = items.fold(0, (sum, e) => sum + e.value);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF080808),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('📄 ${t('stats.format_breakdown')}',
+            style: const TextStyle(color: AppColors.textSecondary, fontSize: 11, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        ...items.map((e) {
+          final pct = totalItems > 0 ? (e.value / totalItems * 100) : 0.0;
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(children: [
+              SizedBox(
+                width: 40,
+                child: Text(e.key, style: const TextStyle(color: AppColors.textMuted, fontSize: 10, fontFamily: 'Consolas')),
+              ),
+              SizedBox(
+                width: 50,
+                child: Text('${e.value}', style: const TextStyle(color: AppColors.text, fontSize: 10, fontFamily: 'Consolas')),
+              ),
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: pct / 100,
+                    backgroundColor: AppColors.surfaceLight,
+                    valueColor: AlwaysStoppedAnimation(_colorForFormat(e.key)),
+                    minHeight: 8,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 45,
+                child: Text('${pct.toStringAsFixed(1)}%',
+                    style: const TextStyle(color: AppColors.textMuted, fontSize: 10, fontFamily: 'Consolas'), textAlign: TextAlign.right),
+              ),
+            ]),
+          );
+        }),
+        const SizedBox(height: 4),
+        Text('${t('stats.total_files')}: $totalItems',
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 10, fontFamily: 'Consolas')),
+      ]),
+    );
+  }
+
+  Color _colorForFormat(String fmt) {
+    switch (fmt) {
+      case 'MP3': return const Color(0xFF4FC3F7);
+      case 'M4A': return const Color(0xFFFFB74D);
+      case 'FLAC': return const Color(0xFFCE93D8);
+      case 'TXT': return const Color(0xFFA5D6A7);
+      default: return AppColors.textMuted;
+    }
   }
 
   Widget _buildPlaylistChart() {

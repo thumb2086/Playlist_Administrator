@@ -6,6 +6,7 @@ import 'pages/stats_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/spotube_page.dart';
 import 'pages/player_page.dart';
+import 'pages/download_page.dart';
 import 'services/i18n.dart';
 import 'services/config_service.dart';
 import 'services/version_checker.dart';
@@ -64,6 +65,7 @@ class _MainShellState extends State<MainShell> {
     PlayerPage(),
     PipelinePage(),
     StatsPage(),
+    DownloadPage(),
     SpotubePage(),
     SettingsPage(),
   ];
@@ -100,6 +102,7 @@ class _MainShellState extends State<MainShell> {
         _NavItemData(Icons.music_note_outlined, Icons.music_note, t('app.sidebar.player')),
         _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, t('app.sidebar.pipeline')),
         _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, t('app.sidebar.stats')),
+        _NavItemData(Icons.cloud_download_outlined, Icons.cloud_download, t('app.sidebar.download')),
         _NavItemData(Icons.download_outlined, Icons.download, t('app.sidebar.spotube')),
         _NavItemData(Icons.settings_outlined, Icons.settings, t('app.sidebar.settings')),
       ];

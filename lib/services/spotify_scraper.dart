@@ -53,7 +53,6 @@ class SpotifyScraper {
   final String playlistsPath;
   final String libraryPath;
   Map<String, String>? _mp3Index;
-  Map<String, String>? _m4aIndex;
 
   SpotifyScraper({required this.log, required this.playlistsPath, this.libraryPath = ''});
 
@@ -61,27 +60,25 @@ class SpotifyScraper {
     if (_mp3Index != null || libraryPath.isEmpty) return;
     log('  掃描音樂庫建立檔案索引…');
     final mp3 = <String, String>{};
-    final m4a = <String, String>{};
 
     Future<void> scanDir(Directory dir) async {
       if (!await dir.exists()) return;
       await for (final f in dir.list(recursive: true, followLinks: false)) {
         if (f is File) {
           final low = f.path.toLowerCase();
+          if (!low.endsWith('.mp3')) continue;
           final stem = File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
-          if (low.endsWith('.mp3') && !mp3.containsKey(stem)) mp3[stem] = f.path;
-          if (low.endsWith('.m4a') && !m4a.containsKey(stem)) m4a[stem] = f.path;
+          if (!mp3.containsKey(stem)) mp3[stem] = f.path;
         }
       }
     }
 
     await scanDir(Directory(libraryPath));
-    for (final sub in ['mp3', 'm4a', 'flac']) {
+    for (final sub in ['mp3', 'flac']) {
       await scanDir(Directory('$libraryPath\\$sub'));
     }
     _mp3Index = mp3;
-    _m4aIndex = m4a;
-    log('  音檔索引完成: MP3 ${mp3.length} + M4A ${m4a.length}');
+    log('  音檔索引完成: MP3 ${mp3.length}');
   }
 
   String? _findAudioFile(String trackName, {Map<String, String>? index}) {
@@ -270,32 +267,6 @@ class SpotifyScraper {
     }
     await File(m3uPath).writeAsString(buffer.toString(), flush: true);
     log('  已儲存: $plName.m3u8 (已解析路徑: $resolved/${tracks.length})');
-
-    // Also write M4A version (_m4a.m3u8) for devices that prefer M4A
-    if (_m4aIndex != null && _m4aIndex!.isNotEmpty) {
-      final m4aBuf = StringBuffer('#EXTM3U\n');
-      int m4aResolved = 0;
-      for (final t in tracks) {
-        final matched = _findAudioFile(t, index: _m4aIndex);
-        if (matched != null) {
-          final localName = File(matched).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-          m4aBuf.writeln('#EXTINF:-1,$localName');
-          final absPath = File(matched).absolute.path;
-          final absPl = File(m3uPath).parent.absolute.path;
-          try {
-            m4aBuf.writeln(_relativePath(absPath, absPl));
-          } catch (_) {
-            m4aBuf.writeln(matched);
-          }
-          m4aResolved++;
-        }
-      }
-      if (m4aResolved > 0) {
-        final m4aPath = '$playlistsPath\\${plName}_m4a.m3u8';
-        await File(m4aPath).writeAsString(m4aBuf.toString(), flush: true);
-        log('  已儲存: ${plName}_m4a.m3u8 (M4A: $m4aResolved/${tracks.length})');
-      }
-    }
 
     // Update config with the real playlist name
     ConfigService.instance.config.urlNames[url] = plName;

@@ -23,6 +23,10 @@ class AppConfig {
   String theme;
   String skippedVersion;
   bool setupCompleted;
+  String groqApiKey;
+  int groqConcurrency;
+  Map<String, String> podcastSubscriptions;
+  Map<String, String> podcastHistory;
   Map<String, String> urlNames;
   Map<String, String> searchNames;
   Map<String, List<int>> spotubeCoords;
@@ -51,12 +55,18 @@ class AppConfig {
     this.theme = 'dark',
     this.skippedVersion = '',
     this.setupCompleted = false,
+    this.groqApiKey = '',
+    this.groqConcurrency = 3,
+    Map<String, String>? podcastSubscriptions,
+    Map<String, String>? podcastHistory,
     Map<String, String>? urlNames,
     Map<String, String>? searchNames,
     Map<String, List<int>>? spotubeCoords,
     Map<String, String>? lastUpdated,
     Map<String, double>? lyricsOffsets,
-  })  : urlNames = urlNames ?? {},
+  })  : podcastSubscriptions = podcastSubscriptions ?? {},
+        podcastHistory = podcastHistory ?? {},
+        urlNames = urlNames ?? {},
         searchNames = searchNames ?? {},
         spotubeCoords = spotubeCoords ?? {},
         lastUpdated = lastUpdated ?? {},
@@ -110,6 +120,10 @@ class AppConfig {
         theme: json['theme'] as String? ?? 'dark',
         skippedVersion: json['skipped_version'] as String? ?? '',
         setupCompleted: json['setup_completed'] as bool? ?? false,
+        groqApiKey: json['groq_api_key'] as String? ?? '',
+        groqConcurrency: json['groq_concurrency'] as int? ?? 3,
+        podcastSubscriptions: (json['podcast_subscriptions'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
+        podcastHistory: (json['podcast_history'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         urlNames: (json['url_names'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         searchNames: (json['search_names'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         spotubeCoords: (json['spotube_coords'] as Map<String, dynamic>?)?.map(
@@ -140,6 +154,10 @@ class AppConfig {
         'theme': theme,
         'skipped_version': skippedVersion,
         'setup_completed': setupCompleted,
+        'groq_api_key': groqApiKey,
+        'groq_concurrency': groqConcurrency,
+        'podcast_subscriptions': podcastSubscriptions,
+        'podcast_history': podcastHistory,
         'url_names': urlNames,
         'search_names': searchNames,
         'spotube_coords': spotubeCoords.map((k, v) => MapEntry(k, v)),

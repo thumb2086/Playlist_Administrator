@@ -1,0 +1,494 @@
+import sys
+import os
+import json
+import tempfile
+import traceback
+import re
+import subprocess
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+# Force UTF-8 output to avoid cp950 encoding errors with Chinese characters
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+
+def emit_json(data):
+    try:
+        print(json.dumps(data, ensure_ascii=False), flush=True)
+    except UnicodeEncodeError:
+        print(json.dumps(data, ensure_ascii=True), flush=True)
+
+
+def cmd_rss_list(args):
+    import requests
+    url = args[0]
+    resp = requests.get(url, timeout=30, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    })
+    resp.raise_for_status()
+    root = ET.fromstring(resp.content)
+    ns = {'itunes': 'http://www.itunes.com/dtds/podcast-1.0.dtd'}
+    channel = root.find('channel')
+    if channel is None:
+        channel = root
+    episodes = []
+    for item in channel.findall('.//item'):
+        title_el = item.find('title')
+        title = title_el.text.strip() if title_el is not None and title_el.text else ''
+        pub_date_el = item.find('pubDate')
+        pub_date = pub_date_el.text.strip() if pub_date_el is not None and pub_date_el.text else ''
+        enclosure = item.find('enclosure')
+        audio_url = enclosure.get('url', '') if enclosure is not None else ''
+        audio_type = enclosure.get('type', '') if enclosure is not None else ''
+        duration_el = item.find('{http://www.itunes.com/dtds/podcast-1.0.dtd}duration')
+        duration = ''
+        if duration_el is not None and duration_el.text:
+            duration = duration_el.text.strip()
+        description_el = item.find('description')
+        description = ''
+        if description_el is not None and description_el.text:
+            description = description_el.text.strip()
+        episodes.append({
+            'title': title,
+            'pub_date': pub_date,
+            'audio_url': audio_url,
+            'audio_type': audio_type,
+            'duration': duration,
+            'description': description,
+        })
+    channel_title_el = channel.find('title')
+    channel_title = channel_title_el.text.strip() if channel_title_el is not None and channel_title_el.text else ''
+    emit_json({'type': 'rss_list', 'title': channel_title, 'episodes': episodes})
+
+
+def cmd_rss_get_audio(args):
+    """Get audio URL from a podcast RSS by episode index"""
+    url = args[0]
+    index = int(args[1])
+    import requests
+    resp = requests.get(url, timeout=30, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    })
+    resp.raise_for_status()
+    root = ET.fromstring(resp.content)
+    items = root.findall('.//item')
+    if index >= len(items):
+        emit_json({'type': 'error', 'message': f'Episode index {index} out of range'})
+        return
+    item = items[index]
+    enclosure = item.find('enclosure')
+    if enclosure is None:
+        emit_json({'type': 'error', 'message': 'No enclosure found'})
+        return
+    audio_url = enclosure.get('url', '')
+    title_el = item.find('title')
+    title = title_el.text.strip() if title_el is not None and title_el.text else f'episode_{index}'
+    emit_json({'type': 'rss_audio', 'title': title, 'audio_url': audio_url})
+
+
+def cmd_rss_download(args):
+    """Download a single podcast episode"""
+    url = args[0]
+    output_path = args[1]
+    import requests
+    resp = requests.get(url, stream=True, timeout=60, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    })
+    resp.raise_for_status()
+    total = int(resp.headers.get('content-length', 0))
+    downloaded = 0
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'wb') as f:
+        for chunk in resp.iter_content(chunk_size=8192):
+            if not chunk:
+                break
+            f.write(chunk)
+            downloaded += len(chunk)
+            if total > 0:
+                pct = downloaded / total * 100
+                emit_json({'type': 'progress', 'downloaded': downloaded, 'total': total, 'percent': round(pct, 1)})
+    emit_json({'type': 'complete', 'path': output_path})
+
+
+def cmd_download_song(args):
+    """Download a song using existing core/downloader.py"""
+    song_name = args[0]
+    library_path = args[1]
+    audio_format = args[2] if len(args) > 2 else 'mp3'
+    from utils.config import CONFIG_DIR, load_config
+    config = load_config()
+    from core.downloader import download_song
+    result = download_song(song_name, library_path, audio_format, lambda msg: emit_json({
+        'type': 'log', 'message': msg
+    }), file_list=[], config=config)
+    if result:
+        emit_json({'type': 'complete', 'path': result})
+    else:
+        emit_json({'type': 'error', 'message': f'Failed to download: {song_name}'})
+
+
+def cmd_download_youtube(args):
+    """Download audio from a YouTube URL"""
+    url = args[0]
+    output_path = args[1]
+    audio_format = args[2] if len(args) > 2 else 'mp3'
+
+    import yt_dlp
+    from utils.helpers import sanitize_filename
+
+    def progress_hook(d):
+        if d['status'] == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+            downloaded = d.get('downloaded_bytes', 0)
+            speed = d.get('speed', 0)
+            pct = round(downloaded / total * 100, 1) if total > 0 else 0
+            emit_json({'type': 'progress', 'downloaded': downloaded, 'total': total, 'percent': pct, 'speed': speed})
+        elif d['status'] == 'finished':
+            emit_json({'type': 'log', 'message': 'Processing audio...'})
+
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': output_path.replace(f'.{audio_format}', '.%(ext)s'),
+        'quiet': True,
+        'no_warnings': True,
+        'extract_audio': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': audio_format,
+            'preferredquality': '320',
+        }],
+        'progress_hooks': [progress_hook],
+        'keepvideo': False,
+        'windowsfilenames': True,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        final_path = output_path
+        if os.path.exists(final_path):
+            emit_json({'type': 'complete', 'path': final_path})
+        else:
+            base = os.path.splitext(os.path.basename(output_path))[0]
+            dir_path = os.path.dirname(output_path)
+            candidates = [f for f in os.listdir(dir_path) if f.startswith(base) and f.endswith(f'.{audio_format}')]
+            if candidates:
+                emit_json({'type': 'complete', 'path': os.path.join(dir_path, candidates[0])})
+            else:
+                emit_json({'type': 'error', 'message': 'Output file not found'})
+    except Exception as e:
+        emit_json({'type': 'error', 'message': str(e)})
+
+
+def cmd_download_spotdl(args):
+    """Download a song via spotDL to a separate spotdl_downloads folder"""
+    song_url = args[0]
+    output_dir = args[1]
+    audio_format = args[2] if len(args) > 2 else 'mp3'
+    output_template = os.path.join(output_dir, '{artist} - {title}.{ext}')
+    from core.downloader import download_with_spotdl
+    config = {'format': audio_format, 'ffmpeg_path': 'bin/ffmpeg.exe', 'overwrite': 'skip'}
+    result = download_with_spotdl(song_url, output_template, config)
+    if result:
+        emit_json({'type': 'complete', 'path': str(result)})
+    else:
+        emit_json({'type': 'error', 'message': f'spotDL failed: {song_url}'})
+
+
+def cmd_groq_transcribe(args):
+    """Transcribe audio via curl.exe + ffmpeg chunking"""
+    audio_path = args[0]
+    api_keys_csv = args[1]
+    model = args[2] if len(args) > 2 else 'whisper-large-v3'
+    language = args[3] if len(args) > 3 else 'zh'
+
+    import os, time, subprocess, json, tempfile, io, shutil
+
+    keys = [k.strip() for k in api_keys_csv.split(',') if k.strip()]
+    if not keys:
+        emit_json({'type': 'error', 'message': 'No API keys provided'})
+        return
+
+    curl_path = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'System32', 'curl.exe')
+    if not os.path.exists(curl_path):
+        emit_json({'type': 'error', 'message': 'curl.exe not found'})
+        return
+
+    temp_file = None
+    file_to_send = audio_path
+    ffmpeg_path = shutil.which('ffmpeg')
+
+    try:
+        if ffmpeg_path and os.path.exists(audio_path):
+            size_mb = os.path.getsize(audio_path) / (1024*1024)
+            if size_mb > 5:
+                emit_json({'type': 'progress', 'percent': 5, 'message': 'Compressing...'})
+                tmp = tempfile.NamedTemporaryFile(suffix='.flac', delete=False)
+                tmp.close()
+                r = subprocess.run(
+                    [ffmpeg_path, '-y', '-i', audio_path, '-ar', '16000', '-ac', '1',
+                     '-map', '0:a', '-c:a', 'flac', '-compression_level', '0', tmp.name],
+                    capture_output=True, timeout=180
+                )
+                if r.returncode == 0 and os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 0:
+                    file_to_send = tmp.name
+                    temp_file = tmp.name
+    except: pass
+
+    # Chunk: split if > 20MB after conversion
+    chunk_files = [file_to_send]
+    if ffmpeg_path and os.path.exists(file_to_send) and os.path.getsize(file_to_send) > 20 * 1024 * 1024:
+        try:
+            emit_json({'type': 'progress', 'percent': 8, 'message': 'Splitting audio...'})
+            fp = shutil.which('ffprobe') or ffmpeg_path.replace('ffmpeg', 'ffprobe')
+            dur = subprocess.run([fp, '-v', 'error', '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1', file_to_send],
+                capture_output=True, text=True, timeout=30)
+            duration = float(dur.stdout.strip()) if dur.stdout.strip() else 0
+            if duration > 0:
+                base = os.path.basename(file_to_send).rsplit('.', 1)[0]
+                tmpdir = tempfile.gettempdir()
+                chunks = []
+                for s in range(0, int(duration), 600):
+                    cp = os.path.join(tmpdir, f'chunk_{base}_{len(chunks)}.flac')
+                    subprocess.run([ffmpeg_path, '-y', '-i', file_to_send, '-ss', str(s), '-t', '600',
+                        '-ar', '16000', '-ac', '1', '-c:a', 'flac', cp], capture_output=True, timeout=180)
+                    chunks.append(cp)
+                if chunks: chunk_files = chunks
+        except: pass
+
+    def upload_file(fpath, try_key):
+        """Upload a single file via curl, return (status, body)"""
+        boundary = '----' + str(int(time.time() * 1000000))
+        body_buf = io.BytesIO()
+        def w(s): body_buf.write(s.encode())
+        w('--' + boundary + '\r\n')
+        w('Content-Disposition: form-data; name="model"\r\n\r\n')
+        w(model + '\r\n')
+        w('--' + boundary + '\r\n')
+        w('Content-Disposition: form-data; name="response_format"\r\n\r\n')
+        w('verbose_json\r\n')
+        w('--' + boundary + '\r\n')
+        w('Content-Disposition: form-data; name="temperature"\r\n\r\n')
+        w('0.0\r\n')
+        if language:
+            w('--' + boundary + '\r\n')
+            w('Content-Disposition: form-data; name="language"\r\n\r\n')
+            w(language + '\r\n')
+        w('--' + boundary + '\r\n')
+        w('Content-Disposition: form-data; name="file"; filename="' + os.path.basename(fpath) + '"\r\n')
+        w('Content-Type: audio/flac\r\n\r\n')
+        with open(fpath, 'rb') as fh:
+            body_buf.write(fh.read())
+        w('\r\n--' + boundary + '--\r\n')
+
+        body_file = tempfile.NamedTemporaryFile(suffix='.tmp', delete=False)
+        body_file.write(body_buf.getvalue())
+        body_file.close()
+
+        cmd = [curl_path, '-s', '-S', '-i', '--ssl', '--max-time', '600',
+            '-H', 'Authorization: Bearer ' + try_key,
+            '-H', 'Content-Type: multipart/form-data; boundary=' + boundary,
+            '-H', 'User-Agent: ' + ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'),
+            '-H', 'Connection: close']
+        # Read Windows system proxy from registry
+        proxy_url = None
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r'Software\Microsoft\Windows\CurrentVersion\Internet Settings') as key:
+                enabled = winreg.QueryValueEx(key, 'ProxyEnable')[0]
+                server = winreg.QueryValueEx(key, 'ProxyServer')[0]
+                if enabled and server:
+                    proxy_url = 'http://' + server
+                    emit_json({'type': 'log', 'message': 'Proxy: ' + proxy_url})
+        except: pass
+        # Fallback to env vars
+        if not proxy_url:
+            for e in ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy']:
+                if e in os.environ:
+                    proxy_url = os.environ[e]
+                    break
+        if proxy_url:
+            cmd.extend(['--proxy', proxy_url])
+        cmd.extend(['--data-binary', '@' + body_file.name,
+            'https://api.groq.com/openai/v1/audio/transcriptions'])
+
+        result = subprocess.run(cmd, capture_output=True, timeout=610)
+        os.unlink(body_file.name)
+        out = result.stdout.decode('utf-8', errors='replace')
+        # Find final status line and body (skip 100 Continue + proxy header)
+        lines = out.split('\r\n')
+        sc = 0
+        sc_idx = 0
+        for j, line in enumerate(lines):
+            if line.startswith('HTTP/'):
+                parts = line.split(' ')
+                if len(parts) >= 2:
+                    try:
+                        code = int(parts[1])
+                        if code != 100:  # skip 100 Continue
+                            sc = code
+                            sc_idx = j
+                    except: pass
+        # Find body: it's after the blank line that follows the final HTTP status
+        # The response looks like:
+        # HTTP/1.1 200 Connection established  (proxy)
+        # (blank line)
+        # HTTP/1.1 200 OK  (groq)
+        # headers...
+        # (blank line)
+        # body
+        body_start = out.rfind('\r\n\r\n')
+        body = out[body_start+4:] if body_start >= 0 else out
+        return (sc, body)
+
+    results = []
+    for ci, cf in enumerate(chunk_files):
+        if len(chunk_files) > 1:
+            emit_json({'type': 'progress', 'percent': 10 + ci * 80 // len(chunk_files),
+                'message': 'Chunk ' + str(ci+1) + '/' + str(len(chunk_files)) + '...'})
+
+        last_error = None
+        last_status = 0
+        last_body = ''
+        chunk_ok = False
+
+        for attempt in range(len(keys) + 2):
+            try_key = keys[attempt % len(keys)]
+            try:
+                emit_json({'type': 'progress', 'percent': 15, 'message': 'Uploading...'})
+                sc, body = upload_file(cf, try_key)
+                last_status = sc
+                last_body = body[:300]
+
+                if sc == 200:
+                    try:
+                        j = json.loads(body)
+                        text = j.get('text', '')
+                    except (json.JSONDecodeError, ValueError):
+                        emit_json({'type': 'log', 'message': f'Chunk {ci+1}: HTTP 200 but invalid JSON body ({len(body)} bytes), retrying...'})
+                        time.sleep(3)
+                        continue
+                    results.append(text)
+                    chunk_ok = True
+                    if len(chunk_files) <= 1:
+                        emit_json({'type': 'progress', 'percent': 100})
+                        emit_json({'type': 'transcription', 'text': text})
+                        if temp_file: os.unlink(temp_file)
+                        for c in chunk_files:
+                            if c != audio_path and c != temp_file:
+                                try: os.unlink(c)
+                                except: pass
+                        return
+                    break
+
+                if sc in (429, 500, 502, 503):
+                    emit_json({'type': 'log', 'message': 'HTTP ' + str(sc) + ', retry ' + str(attempt+1) + '/' + str(len(keys)+2)})
+                    time.sleep(5 + attempt * 3)
+                    continue
+
+                # Non-retryable error
+                try: j = json.loads(body); msg = j.get('error', {}).get('message', body[:200])
+                except: msg = body[:200]
+                emit_json({'type': 'error', 'message': '[' + str(sc) + '] ' + msg})
+                if temp_file: os.unlink(temp_file)
+                for c in chunk_files:
+                    if c != audio_path and c != temp_file:
+                        try: os.unlink(c)
+                        except: pass
+                return
+
+            except Exception as e:
+                last_error = e
+                if attempt < len(keys) + 1:
+                    emit_json({'type': 'log', 'message': 'Retry ' + str(attempt+1) + ': ' + str(e)[:60]})
+                    time.sleep(3 + attempt * 2)
+                    continue
+                break
+
+        if not chunk_ok:
+            # Build detailed error message
+            file_size = os.path.getsize(cf) if os.path.exists(cf) else 0
+            err_msg = 'Chunk failed: '
+            if last_error:
+                err_msg += str(last_error)[:150]
+            elif last_status:
+                try:
+                    j = json.loads(last_body)
+                    err_msg += 'HTTP ' + str(last_status) + ' - ' + j.get('error', {}).get('message', last_body[:100])
+                except:
+                    err_msg += 'HTTP ' + str(last_status) + ' (' + last_body[:100] + ')'
+            else:
+                err_msg += 'unknown error (no response)'
+            err_msg += ' [' + str(file_size // 1024) + 'KB]'
+            emit_json({'type': 'error', 'message': err_msg[:300]})
+            # Also write to log file
+            try:
+                log_dir = os.path.expanduser(r'~\Music\Spotube\logs')
+                os.makedirs(log_dir, exist_ok=True)
+                with open(os.path.join(log_dir, 'stt_errors.log'), 'a', encoding='utf-8') as lf:
+                    lf.write(f'\n--- {time.strftime("%Y-%m-%d %H:%M:%S")} ---\n')
+                    lf.write(f'File: {audio_path}\n')
+                    lf.write(f'Status: {last_status}\n')
+                    lf.write(f'Body: {last_body[:500]}\n')
+                    lf.write(f'Error: {str(last_error)[:300] if last_error else "none"}\n')
+                    lf.write(f'Keys tried: {len(keys) + 2}\n')
+            except: pass
+            if temp_file: os.unlink(temp_file)
+            for c in chunk_files:
+                if c != audio_path and c != temp_file:
+                    try: os.unlink(c)
+                    except: pass
+            return
+
+    if len(results) > 1:
+        emit_json({'type': 'transcription', 'text': '\n\n---\n\n'.join(results)})
+    if temp_file: os.unlink(temp_file)
+    for c in chunk_files:
+        if c != audio_path and c != temp_file:
+            try: os.unlink(c)
+            except: pass
+
+def main():
+    if len(sys.argv) < 2:
+        emit_json({'type': 'error', 'message': 'No command specified'})
+        return 1
+
+    command = sys.argv[1]
+    args = sys.argv[2:]
+
+    try:
+        if command == 'rss-list':
+            cmd_rss_list(args)
+        elif command == 'rss-get-audio':
+            cmd_rss_get_audio(args)
+        elif command == 'rss-download':
+            cmd_rss_download(args)
+        elif command == 'download-song':
+            cmd_download_song(args)
+        elif command == 'download-youtube':
+            cmd_download_youtube(args)
+        elif command == 'download-spotdl':
+            cmd_download_spotdl(args)
+        elif command == 'groq-transcribe':
+            cmd_groq_transcribe(args)
+        else:
+            emit_json({'type': 'error', 'message': f'Unknown command: {command}'})
+            return 1
+    except Exception as e:
+        emit_json({'type': 'error', 'message': str(e), 'traceback': traceback.format_exc()})
+        return 1
+
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

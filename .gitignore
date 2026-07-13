@@ -17,6 +17,12 @@ Thumbs.db
 .DS_Store
 .metadata
 
+# Env
+.env
+
+# Music data (user-specific)
+music/
+
 # Python (legacy - removed)
 *.pyc
 __pycache__/
