@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import '../models/pipeline_step.dart';
 import '../models/config_model.dart';
@@ -10,6 +9,7 @@ import '../services/metadata_enricher.dart';
 import '../services/snapshot_manager.dart';
 import '../services/file_renamer.dart';
 import '../services/playlist_parser.dart';
+import '../services/lufs_service.dart';
 
 class PipelineOrchestrator {
   final AppConfig config;
@@ -439,24 +439,36 @@ class PipelineOrchestrator {
   }
 
   Future<void> _stepMeasureLufs(void Function(double) progress) async {
+    final svc = LufsService.instance;
     try {
-      final base = config.basePath;
-      int count(String name) {
-        try {
-          final f = File('$base\\${name}_lufs_cache.json');
-          if (!f.existsSync()) return -1;
-          final json = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
-          return json.length;
-        } catch (_) { return -1; }
+      int mp3 = svc.cachedCount('mp3');
+      int m4a = svc.cachedCount('m4a');
+      onLog('MP3 LUFS 快取: ${mp3 >= 0 ? "$mp3 個檔案" : "無快取"}');
+      onLog('M4A LUFS 快取: ${m4a >= 0 ? "$m4a 個檔案" : "無快取"}');
+
+      double p = 0;
+      if (mp3 <= 0) {
+        onLog('MP3 快取缺失，開始測量...');
+        await svc.measureFormat('mp3', onLog: onLog, onProgress: (d, t) {
+          if (t > 0) { p = d / t * 50; progress(p); }
+        });
+        mp3 = svc.cachedCount('mp3');
       }
-      final mp3 = count('mp3');
-      final m4a = count('m4a');
-      if (mp3 > 0) onLog('MP3 LUFS 快取: $mp3 個檔案');
-      else onLog('MP3 無 LUFS 快取，請手動執行 tools/measure_lufs.py');
-      if (m4a > 0) onLog('M4A LUFS 快取: $m4a 個檔案');
-      else onLog('M4A 無 LUFS 快取，請手動執行 tools/measure_lufs.py');
+      if (m4a <= 0) {
+        onLog('M4A 快取缺失，開始測量...');
+        await svc.measureFormat('m4a', onLog: onLog, onProgress: (d, t) {
+          if (t > 0) { p = 50 + d / t * 50; progress(p); }
+        });
+      }
+
+      if (mp3 > 100) {
+        onLog('檢查需 normalize 的 MP3...');
+        await svc.normalizeMp3(onLog: onLog, onProgress: (d, t) {
+          if (t > 0) progress(p + d / t * (100 - p));
+        });
+      }
     } catch (e) {
-      onLog('檢查 LUFS 快取時異常: $e');
+      onLog('LUFS 步驟異常: $e');
     }
     progress(100);
   }
