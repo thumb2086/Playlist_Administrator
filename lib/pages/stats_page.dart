@@ -339,9 +339,13 @@ class _StatsPageState extends State<StatsPage> {
     final accent = label == 'MP3' ? const Color(0xFF4FC3F7) : const Color(0xFFFFB74D);
 
     // Narrower buckets centered around -14 for better distribution visibility
-    final ranges = [const [-35.0, -18.0], const [-18.0, -15.0], const [-15.0, -12.0],
-                    const [-12.0, -9.0], const [-9.0, 0.0]];
-    final labels = ['<-18', '-18', '-15', '-12', '-9'];
+    final ranges = [const [-35.0, -16.0], const [-16.0, -15.5], const [-15.5, -15.0],
+                    const [-15.0, -14.5], const [-14.5, -14.0], const [-14.0, -13.5],
+                    const [-13.5, -13.0], const [-13.0, -12.5], const [-12.5, -12.0],
+                    const [-12.0, -11.5], const [-11.5, -11.0], const [-11.0, -10.5],
+                    const [-10.5, -10.0], const [-10.0, 0.0]];
+    final labels = ['-16', '-15.5', '-15', '-14.5', '-14', '-13.5', '-13', '-12.5',
+                    '-12', '-11.5', '-11', '-10.5', '-10', '-9'];
     final buckets = List<int>.filled(ranges.length, 0);
     for (final v in values) {
       bool found = false;
@@ -366,11 +370,11 @@ class _StatsPageState extends State<StatsPage> {
             style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
           const SizedBox(height: 10),
           SizedBox(
-            height: 130,
+            height: 140,
             child: BarChart(BarChartData(
-              alignment: BarChartAlignment.center,
+              alignment: BarChartAlignment.spaceEvenly,
               maxY: (maxCount * 1.15).ceilToDouble(),
-              groupsSpace: 2,
+              groupsSpace: 1,
               baselineY: 0,
               barTouchData: BarTouchData(enabled: true,
                 touchTooltipData: BarTouchTooltipData(
@@ -389,12 +393,14 @@ class _StatsPageState extends State<StatsPage> {
                   })),
                 rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 14,
+                bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 12,
                   getTitlesWidget: (v, _) {
                     final i = v.toInt();
                     if (i < 0 || i >= labels.length) return const SizedBox.shrink();
+                    // Show every other label to avoid crowding
+                    if (i > 0 && i < labels.length - 1 && i % 2 != 0) return const SizedBox(width: 0);
                     return Text(labels[i], style: TextStyle(
-                      fontSize: 9, color: i == peakIdx ? accent : AppColors.textMuted,
+                      fontSize: 8, color: i == peakIdx ? accent : AppColors.textMuted,
                       fontWeight: i == peakIdx ? FontWeight.bold : FontWeight.normal));
                   })),
               ),
@@ -411,7 +417,7 @@ class _StatsPageState extends State<StatsPage> {
                 BarChartGroupData(x: i, barRods: [
                   BarChartRodData(toY: buckets[i].toDouble(),
                     color: i == peakIdx ? accent : accent.withValues(alpha: 0.55),
-                    width: 32,
+                    width: 18,
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(3))),
                 ]),
               ),
