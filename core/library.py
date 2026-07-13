@@ -2020,7 +2020,8 @@ def update_library_logic_legacy(config, stats, log_func, progress_func=None, pos
     }
     spotdl_output_template = config.get("spotdl_output_template")
     if not spotdl_output_template:
-        spotdl_output_template = os.path.join(library_path, "{artist}", "{album}", "{title}.{output-ext}")
+        spotdl_base = os.path.join(config['base_path'], "spotdl_downloads")
+        spotdl_output_template = os.path.join(spotdl_base, "{artist}", "{album}", "{title}.{output-ext}")
     # Compatibility for user-provided "{format}" token
     spotdl_output_template = spotdl_output_template.replace("{format}", "{output-ext}")
         

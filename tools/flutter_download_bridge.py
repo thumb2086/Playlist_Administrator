@@ -202,6 +202,147 @@ def cmd_download_spotdl(args):
         emit_json({'type': 'error', 'message': f'spotDL failed: {song_url}'})
 
 
+def cmd_list_missing(args):
+    """List all songs missing a specific format (mp3/flac) across all playlists"""
+    target_format = args[0] if args else 'mp3'
+    from utils.config import load_config, get_data_file
+    import glob
+    import hashlib
+
+    config = load_config()
+    library_path = config.get('library_path', '')
+    if not library_path:
+        emit_json({'type': 'error', 'message': 'Library path not configured'})
+        return
+
+    search_pattern = os.path.join(library_path, "**", "*")
+    all_files = glob.glob(search_pattern, recursive=True)
+    audio_files = [f for f in all_files if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav'))]
+
+    from core.library import build_library_index, find_song_exact_format, parse_playlist, is_internal_playlist_name
+    library_index = build_library_index(audio_files)
+
+    playlist_dir = os.path.join(library_path, 'playlists')
+    if not os.path.exists(playlist_dir):
+        emit_json({'type': 'error', 'message': 'Playlists directory not found'})
+        return
+
+    playlist_files = [os.path.join(playlist_dir, f) for f in os.listdir(playlist_dir)
+                      if f.endswith('.m3u8') and not is_internal_playlist_name(f)]
+
+    # Load failed FLAC cache (only relevant for flac format)
+    failed_cache = {}
+    if target_format == 'flac':
+        try:
+            cache_file = get_data_file('failed_flac.json')
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    failed_cache = json.load(f)
+        except:
+            pass
+
+    missing_songs = []
+    seen = set()
+
+    for pl_file in playlist_files:
+        playlist_name = os.path.splitext(os.path.basename(pl_file))[0]
+        songs = parse_playlist(pl_file)
+        for song_name in songs:
+            norm_name = song_name.strip().lower()
+            song_key = hashlib.md5(norm_name.encode('utf-8')).hexdigest()
+
+            if target_format == 'flac' and song_key in failed_cache:
+                continue
+
+            if find_song_exact_format(song_name, target_format, library_index):
+                continue
+
+            if song_key in seen:
+                continue
+            seen.add(song_key)
+
+            artist_hint = ''
+            if ' - ' in song_name:
+                parts = song_name.split(' - ', 1)
+                artist_hint = parts[1].strip()
+
+            missing_songs.append({
+                'name': song_name,
+                'playlist': playlist_name,
+                'artist_hint': artist_hint,
+            })
+
+    emit_json({'type': 'missing_list', 'format': target_format, 'songs': missing_songs, 'total_missing': len(missing_songs)})
+
+
+def cmd_batch_download(args):
+    """Download missing songs in specified format"""
+    target_format = args[0] if len(args) > 0 else 'mp3'
+    songs_json = args[1] if len(args) > 1 else '[]'
+    songs = json.loads(songs_json)
+
+    from utils.config import load_config, get_data_file
+    config = load_config()
+    library_path = config.get('library_path', '')
+    if not library_path:
+        emit_json({'type': 'error', 'message': 'Library path not configured'})
+        return
+
+    use_dab_lossless = config.get('dab_use_lossless', False) and target_format == 'flac'
+    use_dab_metadata = config.get('dab_use_metadata', False) and target_format == 'flac'
+    dab_credentials = None
+    if use_dab_lossless:
+        dab_email = config.get('dab_email', '')
+        dab_password = config.get('dab_password', '')
+        if dab_email and dab_password:
+            dab_credentials = {'email': dab_email, 'password': dab_password}
+
+    total = len(songs)
+    successful = 0
+    failed = 0
+
+    emit_json({'type': 'batch_start', 'total': total, 'format': target_format})
+
+    for i, song in enumerate(songs):
+        song_name = song['name']
+        emit_json({'type': 'batch_progress', 'index': i, 'total': total,
+                   'song': song_name, 'format': target_format,
+                   'percent': round(i / total * 100, 1) if total > 0 else 0})
+
+        from core.downloader import download_song
+        result = download_song(
+            song_name, library_path, target_format, lambda msg: emit_json({
+                'type': 'log', 'message': msg
+            }), file_list=[], config=config,
+            use_dab_lossless=use_dab_lossless, use_dab_metadata=use_dab_metadata,
+            dab_credentials=dab_credentials
+        )
+
+        if result and os.path.exists(result):
+            successful += 1
+            emit_json({'type': 'log', 'message': f'✅ {song_name} - {target_format.upper()} 下載成功'})
+            if target_format == 'flac':
+                import hashlib
+                norm_name = song_name.strip().lower()
+                song_key = hashlib.md5(norm_name.encode('utf-8')).hexdigest()
+                try:
+                    cache_file = get_data_file('failed_flac.json')
+                    if os.path.exists(cache_file):
+                        with open(cache_file, 'r', encoding='utf-8') as f:
+                            fc = json.load(f)
+                        if song_key in fc:
+                            del fc[song_key]
+                            with open(cache_file, 'w', encoding='utf-8') as f:
+                                json.dump(fc, f, ensure_ascii=False, indent=2)
+                except:
+                    pass
+        else:
+            failed += 1
+            emit_json({'type': 'log', 'message': f'❌ {song_name} - {target_format.upper()} 下載失敗'})
+
+    emit_json({'type': 'batch_complete', 'successful': successful, 'failed': failed, 'format': target_format})
+
+
 def cmd_groq_transcribe(args):
     """Transcribe audio via curl.exe + ffmpeg chunking"""
     audio_path = args[0]
@@ -480,6 +621,10 @@ def main():
             cmd_download_spotdl(args)
         elif command == 'groq-transcribe':
             cmd_groq_transcribe(args)
+        elif command == 'list-missing':
+            cmd_list_missing(args)
+        elif command == 'batch-download':
+            cmd_batch_download(args)
         else:
             emit_json({'type': 'error', 'message': f'Unknown command: {command}'})
             return 1

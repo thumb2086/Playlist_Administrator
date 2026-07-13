@@ -502,9 +502,30 @@ class _SongDownloadTabState extends State<_SongDownloadTab> {
   final _queryCtrl = TextEditingController();
   final _logs = <String>[];
   final _scrollCtrl = ScrollController();
-  String _format = 'mp3';
   bool _running = false;
   double _progress = 0;
+
+  // MP3 batch state
+  List<MissingFlacSong> _mp3Missing = [];
+  bool _mp3Scanning = false;
+  bool _mp3Downloading = false;
+  int _mp3Current = 0;
+  int _mp3Total = 0;
+  String _mp3CurrentSong = '';
+
+  // FLAC batch state
+  List<MissingFlacSong> _flacMissing = [];
+  bool _flacScanning = false;
+  bool _flacDownloading = false;
+  int _flacCurrent = 0;
+  int _flacTotal = 0;
+  String _flacCurrentSong = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) { _scanMissing('mp3'); _scanMissing('flac'); });
+  }
 
   @override
   void dispose() { _queryCtrl.dispose(); _scrollCtrl.dispose(); super.dispose(); }
@@ -522,7 +543,7 @@ class _SongDownloadTabState extends State<_SongDownloadTab> {
     setState(() { _running = true; _progress = 0; _logs.clear(); });
     final cfg = ConfigService.instance.config;
     try {
-      await DownloadService.instance.downloadSong(songName: query, libraryPath: cfg.libraryPath, format: _format,
+      await DownloadService.instance.downloadSong(songName: query, libraryPath: cfg.libraryPath, format: 'mp3',
         onLog: _log, onProgress: (p) { if (mounted) setState(() => _progress = p); });
     } catch (e) { _log('❌ $e'); }
     setState(() => _running = false);
@@ -533,17 +554,61 @@ class _SongDownloadTabState extends State<_SongDownloadTab> {
     if (url.isEmpty) return;
     setState(() { _running = true; _progress = 0; _logs.clear(); });
     final cfg = ConfigService.instance.config;
-    final outPath = '${cfg.libraryPath}\\${DateTime.now().millisecondsSinceEpoch}.$_format';
+    final outPath = '${cfg.libraryPath}\\${DateTime.now().millisecondsSinceEpoch}.mp3';
     try {
-      await DownloadService.instance.downloadYouTube(url: url, outputPath: outPath, format: _format,
+      await DownloadService.instance.downloadYouTube(url: url, outputPath: outPath, format: 'mp3',
         onLog: _log, onProgress: (p) { if (mounted) setState(() => _progress = p); });
     } catch (e) { _log('❌ $e'); }
     setState(() => _running = false);
   }
 
+  Future<void> _scanMissing(String format) async {
+    final isFlac = format == 'flac';
+    setState(() { if (isFlac) _flacScanning = true; else _mp3Scanning = true; });
+    _log('🔍 掃描歌單中，尋找缺漏的 ${format.toUpperCase()}...');
+    try {
+      final songs = await DownloadService.instance.listMissing(format, onLog: _log);
+      if (mounted) setState(() {
+        if (isFlac) { _flacMissing = songs; _flacScanning = false; }
+        else { _mp3Missing = songs; _mp3Scanning = false; }
+      });
+      _log('📋 找到 ${songs.length} 首缺少 ${format.toUpperCase()}');
+    } catch (e) {
+      _log('❌ 掃描失敗: $e');
+      if (mounted) setState(() { if (isFlac) _flacScanning = false; else _mp3Scanning = false; });
+    }
+  }
+
+  Future<void> _startBatch(String format) async {
+    final isFlac = format == 'flac';
+    final songs = isFlac ? _flacMissing : _mp3Missing;
+    if (songs.isEmpty) return;
+    setState(() {
+      if (isFlac) { _flacDownloading = true; _flacCurrent = 0; _flacTotal = songs.length; _flacCurrentSong = ''; }
+      else { _mp3Downloading = true; _mp3Current = 0; _mp3Total = songs.length; _mp3CurrentSong = ''; }
+    });
+    try {
+      await DownloadService.instance.downloadBatch(format,
+        songs: songs,
+        onLog: _log,
+        onProgress: (current, total, song) {
+          if (mounted) setState(() {
+            if (isFlac) { _flacCurrent = current + 1; _flacTotal = total; _flacCurrentSong = song; }
+            else { _mp3Current = current + 1; _mp3Total = total; _mp3CurrentSong = song; }
+          });
+        },
+      );
+    } catch (e) {
+      _log('❌ $format 批次下載異常: $e');
+    }
+    if (mounted) setState(() { if (isFlac) _flacDownloading = false; else _mp3Downloading = false; });
+    _scanMissing(format);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Column(children: [
+    return SingleChildScrollView(child: Column(children: [
+      // Manual download section
       Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
@@ -552,10 +617,6 @@ class _SongDownloadTabState extends State<_SongDownloadTab> {
             Expanded(child: TextField(controller: _queryCtrl,
               decoration: InputDecoration(hintText: t('download.song_hint'), prefixIcon: const Icon(Icons.search, size: 18), border: const OutlineInputBorder()),
               style: const TextStyle(fontSize: 13))),
-            const SizedBox(width: 8),
-            DropdownButton<String>(value: _format, underline: const SizedBox(),
-              items: const [DropdownMenuItem(value: 'mp3', child: Text('MP3', style: TextStyle(fontSize: 12))), DropdownMenuItem(value: 'flac', child: Text('FLAC', style: TextStyle(fontSize: 12)))],
-              onChanged: (v) { if (v != null) setState(() => _format = v); }),
             const SizedBox(width: 8),
             _ActionBtn(t('download.dl_song'), Icons.download, _startDownload, _running, isPrimary: true),
           ]),
@@ -572,20 +633,87 @@ class _SongDownloadTabState extends State<_SongDownloadTab> {
         const SizedBox(height: 6),
         Text('${(_progress * 100).toStringAsFixed(0)}%', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
       ],
-      const SizedBox(height: 10),
+      const SizedBox(height: 16),
+      // MP3 batch section
+      _buildBatchSection('mp3', Icons.music_note_rounded, const Color(0xFF4FC3F7),
+        _mp3Missing, _mp3Scanning, _mp3Downloading, _mp3Current, _mp3Total, _mp3CurrentSong),
+      const SizedBox(height: 12),
+      // FLAC batch section
+      _buildBatchSection('flac', Icons.music_video_rounded, const Color(0xFFEF5350),
+        _flacMissing, _flacScanning, _flacDownloading, _flacCurrent, _flacTotal, _flacCurrentSong),
+      const SizedBox(height: 16),
       Text(t('download.log'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
       const SizedBox(height: 4),
-      Expanded(child: Container(
-        decoration: BoxDecoration(color: const Color(0xFF080808), borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
-        clipBehavior: Clip.antiAlias,
-        child: _logs.isEmpty
-            ? Center(child: Text(t('download.log_empty'), style: const TextStyle(color: AppColors.textMuted, fontSize: 11)))
-            : ListView.builder(controller: _scrollCtrl, padding: const EdgeInsets.all(8), itemCount: _logs.length,
-                itemBuilder: (ctx, i) => Padding(padding: const EdgeInsets.symmetric(vertical: 1),
-                  child: Text(_logs[i], style: const TextStyle(fontSize: 12, fontFamily: 'Consolas', color: AppColors.textMuted, height: 1.4))))),
+      SizedBox(
+        height: 200,
+        child: Container(
+          decoration: BoxDecoration(color: const Color(0xFF080808), borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+          clipBehavior: Clip.antiAlias,
+          child: _logs.isEmpty
+              ? Center(child: Text(t('download.log_empty'), style: const TextStyle(color: AppColors.textMuted, fontSize: 11)))
+              : ListView.builder(controller: _scrollCtrl, padding: const EdgeInsets.all(8), itemCount: _logs.length,
+                  itemBuilder: (ctx, i) => Padding(padding: const EdgeInsets.symmetric(vertical: 1),
+                    child: Text(_logs[i], style: const TextStyle(fontSize: 12, fontFamily: 'Consolas', color: AppColors.textMuted, height: 1.4))))),
       ),
       const SizedBox(height: 12),
-    ]);
+    ]));
+  }
+
+  Widget _buildBatchSection(String format, IconData icon, Color color,
+      List<MissingFlacSong> songs, bool scanning, bool downloading,
+      int current, int total, String currentSong) {
+    final label = format.toUpperCase();
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Text('$label 批次下載', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+          const Spacer(),
+          if (scanning)
+            const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+          if (!scanning && !downloading)
+            _ActionBtn('掃描', Icons.refresh, () => _scanMissing(format), false),
+        ]),
+        if (downloading) ...[
+          const SizedBox(height: 10),
+          ClipRRect(borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(value: total > 0 ? current / total : 0,
+              backgroundColor: AppColors.surfaceLight, valueColor: AlwaysStoppedAnimation(color), minHeight: 6)),
+          const SizedBox(height: 6),
+          Text('$current / $total  $currentSong',
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+        ],
+        if (songs.isNotEmpty && !downloading) ...[
+          const SizedBox(height: 10),
+          Text('${songs.length} 首歌曲缺少 $label', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 120,
+            child: ListView.separated(
+              itemCount: songs.length.clamp(0, 20),
+              separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
+              itemBuilder: (ctx, i) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Text('${i + 1}. ${songs[i].name}',
+                  style: const TextStyle(fontSize: 11, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            ),
+          ),
+          if (songs.length > 20)
+            Padding(padding: const EdgeInsets.only(top: 4),
+              child: Text('...還有 ${songs.length - 20} 首', style: const TextStyle(color: AppColors.textMuted, fontSize: 10))),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity, child: _ActionBtn('下載全部 $label (${songs.length})', Icons.download,
+              () => _startBatch(format), false, isPrimary: true)),
+        ],
+        if (songs.isEmpty && !scanning)
+          Padding(padding: const EdgeInsets.only(top: 8),
+            child: Text('✅ 所有歌曲已有 $label 版本', style: const TextStyle(color: Color(0xFFA5D6A7), fontSize: 12))),
+      ]),
+    );
   }
 }
 

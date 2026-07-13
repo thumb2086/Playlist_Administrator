@@ -31,10 +31,18 @@ class AudioConverter {
       '-y', '-i', inputPath,
       '-map_metadata', '0',
       '-id3v2_version', '3',
+    ];
+
+    // Apply EBU R128 loudnorm to MP3 output (YouTube/Spotify standard -14 LUFS)
+    if (format == 'mp3') {
+      args.addAll(['-af', 'loudnorm=I=-14:TP=-1:LRA=7']);
+    }
+
+    args.addAll([
       '-codec:a', format == 'mp3' ? 'libmp3lame' : 'flac',
       '-q:a', '0',
       outputPath,
-    ];
+    ]);
 
     try {
       final result = await Process.run(ffmpeg, args);

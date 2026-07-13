@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import '../models/pipeline_step.dart';
 import '../models/config_model.dart';
@@ -25,11 +26,12 @@ class PipelineOrchestrator {
 
   Future<void> run({int fromStep = 0, int? toStep}) async {
     final steps = [
-      ('Convert M4A → MP3', 35.0),
-      ('Scrape Spotify playlists', 30.0),
+      ('Convert M4A → MP3', 30.0),
+      ('Scrape Spotify playlists', 25.0),
       ('Prune missing tracks', 15.0),
       ('Organize unsorted songs', 10.0),
       ('Enrich metadata', 10.0),
+      ('Measure LUFS', 10.0),
     ];
 
     final end = toStep ?? steps.length;
@@ -71,6 +73,7 @@ class PipelineOrchestrator {
       case 2: await _stepPrune(progress); break;
       case 3: await _stepUnsorted(progress); break;
       case 4: await _stepMetadata(progress); break;
+      case 5: await _stepMeasureLufs(progress); break;
     }
   }
 
@@ -431,6 +434,45 @@ class PipelineOrchestrator {
       onLog('重新命名完成: $renamed 個檔案');
     } else {
       onLog('無需重新命名');
+    }
+    progress(100);
+  }
+
+  Future<void> _stepMeasureLufs(void Function(double) progress) async {
+    final script = '${config.basePath}\\tools\\measure_lufs.py';
+    if (!await File(script).exists()) {
+      script.replaceAll('\\tools\\measure_lufs.py', '');
+      final alt = '${Directory.current.path}\\tools\\measure_lufs.py';
+      if (!await File(alt).exists()) {
+        onLog('找不到 measure_lufs.py，跳過 LUFS 測量');
+        progress(100);
+        return;
+      }
+    }
+    final scriptPath = await File(script).exists() ? script : '${Directory.current.path}\\tools\\measure_lufs.py';
+
+    onLog('開始測量 LUFS...');
+    final env = Map<String, String>.from(Platform.environment);
+    env['PYTHONUNBUFFERED'] = '1';
+    final proc = await Process.start('python', [scriptPath],
+      runInShell: true, workingDirectory: config.basePath, environment: env);
+
+    await proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).forEach((line) {
+      if (line.contains(']')) {
+        final m = RegExp(r'\[(\w+)\]\s+(\d+)/(\d+)').firstMatch(line);
+        if (m != null) {
+          final done = int.parse(m.group(2)!);
+          final total = int.parse(m.group(3)!);
+          if (total > 0) progress(done / total * 100);
+        }
+      }
+    });
+
+    final exitCode = await proc.exitCode;
+    if (exitCode == 0) {
+      onLog('LUFS 測量完成');
+    } else {
+      onLog('LUFS 測量異常結束 (code: $exitCode)');
     }
     progress(100);
   }

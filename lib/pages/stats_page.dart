@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -13,10 +14,12 @@ class StatsPage extends StatefulWidget {
 }
 
 class _StatsPageState extends State<StatsPage> {
-  int _mp3 = 0, _m4a = 0, _flac = 0, _txt = 0, _playlists = 0, _entries = 0, _dual = 0, _duplicates = 0;
+  int _mp3 = 0, _m4a = 0, _flac = 0, _txt = 0, _podcast = 0, _playlists = 0, _entries = 0, _dual = 0, _duplicates = 0;
   double _sizeGb = 0, _savedGb = 0;
   bool _loading = false;
   List<Snapshot> _history = [];
+  List<double> _m4aLufs = [], _mp3Lufs = [];
+  bool _lufsReady = false;
 
   @override
   void initState() {
@@ -31,7 +34,18 @@ class _StatsPageState extends State<StatsPage> {
     try {
       final lib = ConfigService.instance.config.libraryPath;
       final pl = ConfigService.instance.config.playlistsPath;
-      int mp3 = 0, m4a = 0, flac = 0, txt = 0;
+      int mp3 = 0, m4a = 0, flac = 0, txt = 0, podcast = 0;
+
+      final podcastDir = Directory('${ConfigService.instance.config.basePath}\\podcast_downloads');
+      if (await podcastDir.exists()) {
+        await for (final e in podcastDir.list(recursive: true, followLinks: false)) {
+          if (e is File) {
+            final low = e.path.toLowerCase();
+            if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.wav') || low.endsWith('.flac')) podcast++;
+            else if (low.endsWith('.txt')) txt++;
+          }
+        }
+      }
       double size = 0, savedGb = 0;
       final nameExts = <String, Set<String>>{};
       final nameCount = <String, int>{};  // stem -> total occurrences
@@ -75,8 +89,24 @@ class _StatsPageState extends State<StatsPage> {
           }
         }
       }
-      setState(() { _mp3 = mp3; _m4a = m4a; _flac = flac; _txt = txt; _playlists = plCount; _entries = entries; _dual = dual; _sizeGb = size; _savedGb = savedGb; _duplicates = duplicates; _loading = false; });
+      setState(() { _mp3 = mp3; _m4a = m4a; _flac = flac; _txt = txt; _podcast = podcast; _playlists = plCount; _entries = entries; _dual = dual; _sizeGb = size; _savedGb = savedGb; _duplicates = duplicates; _loading = false; });
     } catch (_) { setState(() => _loading = false); }
+    _loadLufsCache();
+  }
+
+  Future<void> _loadLufsCache() async {
+    final base = ConfigService.instance.config.basePath;
+    List<double> loadOne(String name) {
+      try {
+        final f = File('$base\\${name}_lufs_cache.json');
+        if (!f.existsSync()) return [];
+        final json = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+        return json.values.whereType<num>().map((e) => e.toDouble()).toList();
+      } catch (_) { return []; }
+    }
+    final m4a = loadOne('m4a');
+    final mp3 = loadOne('mp3');
+    if (mounted) setState(() { _m4aLufs = m4a; _mp3Lufs = mp3; _lufsReady = true; });
   }
 
   @override
@@ -112,6 +142,8 @@ class _StatsPageState extends State<StatsPage> {
           Expanded(child: _MetricCard(t('stats.playlists'), '$_playlists', Icons.playlist_play_rounded, const Color(0xFF81D4FA), _loading)),
           const SizedBox(width: 10),
           Expanded(child: _MetricCard(t('stats.entries'), '$_entries', Icons.list_alt_rounded, const Color(0xFFFFF176), _loading)),
+          const SizedBox(width: 10),
+          Expanded(child: _MetricCard(t('stats.podcast'), '$_podcast', Icons.podcasts, const Color(0xFFEF5350), _loading)),
         ]),
         const SizedBox(height: 24),
         // History charts
@@ -165,6 +197,10 @@ class _StatsPageState extends State<StatsPage> {
               if (_txt > 0 || _mp3 > 0 || _m4a > 0 || _flac > 0) ...[
                 const Divider(height: 24),
                 _buildTextDistribution(),
+                if (_lufsReady) ...[
+                  if (_mp3Lufs.isNotEmpty) _buildLufsSection('MP3', _mp3Lufs),
+                  if (_m4aLufs.isNotEmpty) _buildLufsSection('M4A', _m4aLufs),
+                ],
               ],
             ]),
           ),
@@ -290,6 +326,101 @@ class _StatsPageState extends State<StatsPage> {
       case 'TXT': return const Color(0xFFA5D6A7);
       default: return AppColors.textMuted;
     }
+  }
+
+  Widget _buildLufsSection(String label, List<double> values) {
+    if (values.isEmpty) return const SizedBox.shrink();
+    final sorted = List<double>.from(values)..sort();
+    final avg = sorted.reduce((a, b) => a + b) / values.length;
+    final minV = sorted.first;
+    final maxV = sorted.last;
+    final p10 = sorted[(values.length * 0.1).toInt()];
+    final p90 = sorted[(values.length * 0.9).clamp(0, values.length - 1).toInt()];
+    final accent = label == 'MP3' ? const Color(0xFF4FC3F7) : const Color(0xFFFFB74D);
+
+    // Narrower buckets centered around -14 for better distribution visibility
+    final ranges = [const [-35.0, -22.0], const [-22.0, -18.0], const [-18.0, -16.0],
+                    const [-16.0, -14.0], const [-14.0, -12.0], const [-12.0, -10.0],
+                    const [-10.0, -8.0], const [-8.0, 0.0]];
+    final labels = ['<-22', '-22', '-18', '-16', '-14', '-12', '-10', '>-8'];
+    final buckets = List<int>.filled(ranges.length, 0);
+    for (final v in values) {
+      bool found = false;
+      for (int i = 0; i < ranges.length; i++) {
+        if (v >= ranges[i][0] && v < ranges[i][1]) { buckets[i]++; found = true; break; }
+      }
+      if (!found) buckets[ranges.length - 1]++;
+    }
+    final maxCount = buckets.reduce((a, b) => a > b ? a : b);
+    final peakIdx = buckets.indexOf(maxCount);
+
+    return Padding(padding: const EdgeInsets.only(top: 16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Text('$label LUFS 分佈 (${values.length} 個檔案)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          ]),
+          const SizedBox(height: 2),
+          Text('平均 ${avg.toStringAsFixed(1)}  |  ${p10.toStringAsFixed(1)} ~ ${p90.toStringAsFixed(1)} (P10-P90)  |  ${minV.toStringAsFixed(1)} ~ ${maxV.toStringAsFixed(1)}',
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 130,
+            child: BarChart(BarChartData(
+              alignment: BarChartAlignment.center,
+              maxY: (maxCount * 1.15).ceilToDouble(),
+              groupsSpace: 2,
+              baselineY: 0,
+              barTouchData: BarTouchData(enabled: true,
+                touchTooltipData: BarTouchTooltipData(
+                  tooltipPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  getTooltipItem: (group, i, v, d) {
+                    final pct = (buckets[group.x.toInt()] / values.length * 100).toStringAsFixed(1);
+                    return BarTooltipItem('${labels[group.x.toInt()]}\n${buckets[group.x.toInt()]} 個 ($pct%)',
+                      TextStyle(color: Colors.white, fontSize: 11, height: 1.3));
+                  })),
+              titlesData: FlTitlesData(
+                leftTitles: AxisTitles(sideTitles: SideTitles(
+                  showTitles: true, reservedSize: 24,
+                  getTitlesWidget: (v, _) {
+                    if (v == 0) return const SizedBox.shrink();
+                    return Text('${v.toInt()}', style: const TextStyle(fontSize: 9, color: AppColors.textMuted));
+                  })),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 14,
+                  getTitlesWidget: (v, _) {
+                    final i = v.toInt();
+                    if (i < 0 || i >= labels.length) return const SizedBox.shrink();
+                    return Text(labels[i], style: TextStyle(
+                      fontSize: 9, color: i == peakIdx ? accent : AppColors.textMuted,
+                      fontWeight: i == peakIdx ? FontWeight.bold : FontWeight.normal));
+                  })),
+              ),
+              gridData: FlGridData(show: true, drawVerticalLine: false,
+                getDrawingHorizontalLine: (v) => FlLine(
+                  color: v == 0 ? AppColors.border : AppColors.border.withValues(alpha: 0.12),
+                  strokeWidth: v == 0 ? 1.0 : 0.5)),
+              borderData: FlBorderData(show: false),
+              extraLinesData: label == 'MP3' ? ExtraLinesData(horizontalLines: [
+                HorizontalLine(y: 14, color: Colors.white.withValues(alpha: 0.3),
+                  strokeWidth: 1, dashArray: [4, 4]),
+              ]) : null,
+              barGroups: List.generate(ranges.length, (i) =>
+                BarChartGroupData(x: i, barRods: [
+                  BarChartRodData(toY: buckets[i].toDouble(),
+                    color: i == peakIdx ? accent : accent.withValues(alpha: 0.55),
+                    width: 32,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(3))),
+                ]),
+              ),
+            )),
+          ),
+        ]),
+      ),
+    );
   }
 
   Widget _buildPlaylistChart() {

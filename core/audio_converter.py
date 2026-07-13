@@ -259,11 +259,12 @@ def convert_audio_file(input_path, output_path, target_format, log_func=None, ff
         ffmpeg_cmd = ffmpeg_path if (ffmpeg_path and os.path.isfile(ffmpeg_path)) else 'ffmpeg'
         
         if target_format == 'mp3':
-            # High quality MP3 conversion with metadata preservation
+            # High quality MP3 conversion with LUFS normalization
             cmd = [
                 ffmpeg_cmd, '-y',  # Overwrite output files
                 '-i', input_path,
                 '-map_metadata', '0',  # Copy metadata from input
+                '-af', 'loudnorm=I=-14:TP=-1:LRA=7',  # EBU R128 normalize
                 '-codec:a', 'libmp3lame',
                 '-qscale:a', '0',  # Highest quality VBR
                 '-ar', '44100',    # Sample rate
