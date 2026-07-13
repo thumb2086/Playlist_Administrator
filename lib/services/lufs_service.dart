@@ -89,20 +89,24 @@ class LufsService {
         '-t', '30', '-i', path,
         '-af', 'loudnorm=print_format=json',
         '-f', 'null', 'NUL', '-hide_banner', '-y',
-      ], runInShell: true);
+      ]);
+      // Drain both stdout and stderr to prevent deadlock
       final stderr = await proc.stderr.transform(utf8.decoder).join();
-      await proc.exitCode;
+      proc.stdout.drain();
+      final exit = await proc.exitCode;
+      if (exit != 0) { onResult(-14.0); return; }
 
       final jsonStart = stderr.lastIndexOf('{');
       if (jsonStart >= 0) {
-        final data = jsonDecode(stderr.substring(jsonStart)) as Map<String, dynamic>;
-        final inputI = data['input_i'];
-        if (inputI != null) {
-          onResult((inputI as num).toDouble());
-          return;
-        }
+        try {
+          final data = jsonDecode(stderr.substring(jsonStart)) as Map<String, dynamic>;
+          final inputI = data['input_i'];
+          if (inputI != null) {
+            onResult((inputI as num).toDouble());
+            return;
+          }
+        } catch (_) {}
       }
-      // Fallback: set to target
       onResult(-14.0);
     } catch (_) {
       onResult(-14.0);
@@ -151,7 +155,8 @@ class LufsService {
           '-y', '-i', absPath,
           '-af', 'loudnorm=I=$target:TP=-1:LRA=7',
           '-c:a', 'libmp3lame', '-q:a', '2', tmp,
-        ], runInShell: true);
+        ]);
+        proc.stdout.drain();
         await proc.stderr.drain();
         final code = await proc.exitCode;
 
