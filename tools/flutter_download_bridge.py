@@ -701,6 +701,84 @@ def cmd_groq_transcribe(args):
             try: os.unlink(c)
             except: pass
 
+def cmd_youtube_subs(args):
+    """Search YouTube and download Chinese subtitles for a podcast episode"""
+    query = args[0]
+    output_path = args[1] if len(args) > 1 else ''
+    if not output_path:
+        emit_json({'type': 'error', 'message': 'No output path'})
+        return
+
+    import yt_dlp
+    import urllib.parse
+    import requests
+    import re
+    import shutil
+
+    youtube_dl = shutil.which('yt-dlp') or 'yt-dlp'
+
+    # Step 1: Search YouTube
+    emit_json({'type': 'log', 'message': f'🔍 搜尋 YouTube: {query}'})
+    try:
+        search_url = 'https://www.youtube.com/results?' + urllib.parse.urlencode({'search_query': query})
+        r = requests.get(search_url, timeout=15, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        vids = re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', r.text)
+        unique = list(dict.fromkeys(vids))
+        if not unique:
+            emit_json({'type': 'error', 'message': '找不到符合的 YouTube 影片'})
+            return
+        video_id = unique[0]
+        emit_json({'type': 'log', 'message': f'  ✅ 找到影片: https://youtube.com/watch?v={video_id}'})
+    except Exception as e:
+        emit_json({'type': 'error', 'message': f'搜尋失敗: {e}'})
+        return
+
+    # Step 2: Download subtitles
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    srt_path = output_path.replace('.mp3', '').replace('.m4a', '').replace('.wav', '') + '.srt'
+
+    try:
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['zh', 'zh-Hant', 'zh-Hans', 'en'],
+            'subtitlesformat': 'srt',
+            'outtmpl': srt_path.replace('.srt', '.%(ext)s'),
+            'windowsfilenames': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f'https://www.youtube.com/watch?v={video_id}'])
+
+        # Find the actual SRT file (yt-dlp may add language suffix)
+        base = srt_path.replace('.srt', '')
+        candidates = []
+        for f in os.listdir(os.path.dirname(srt_path)):
+            if f.startswith(os.path.basename(base)):
+                candidates.append(os.path.join(os.path.dirname(srt_path), f))
+
+        srt_found = None
+        for c in candidates:
+            if c.endswith('.srt'):
+                srt_found = c
+                break
+
+        if srt_found and os.path.exists(srt_found):
+            # Rename to clean name
+            if srt_found != srt_path:
+                os.replace(srt_found, srt_path)
+            emit_json({'type': 'log', 'message': f'  ✅ 字幕已儲存: {srt_path}'})
+            emit_json({'type': 'complete', 'path': srt_path})
+        else:
+            emit_json({'type': 'error', 'message': '下載字幕失敗（無可用字幕）'})
+    except Exception as e:
+        emit_json({'type': 'error', 'message': f'下載字幕異常: {e}'})
+
+
 def main():
     if len(sys.argv) < 2:
         emit_json({'type': 'error', 'message': 'No command specified'})
@@ -730,6 +808,8 @@ def main():
             cmd_batch_download(args)
         elif command == 'normalize-mp3-lufs':
             cmd_normalize_mp3_lufs(args)
+        elif command == 'youtube-subs':
+            cmd_youtube_subs(args)
         else:
             emit_json({'type': 'error', 'message': f'Unknown command: {command}'})
             return 1

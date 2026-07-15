@@ -191,20 +191,23 @@ class _PodcastTabState extends State<_PodcastTab> {
   bool _isDownloaded(int index) {
     if (index >= _episodes.length) return false;
     final ep = _episodes[index];
-    return PodcastService.instance.isEpisodeDownloaded(ep.title, ep.audioUrl, podcastName: _podcastTitle);
+    final name = PodcastService.normalizeFileName(ep.title);
+    final dir = PodcastService.instance.episodeOutputPath(ep.title, ep.audioUrl);
+    final podDir = Directory(dir).parent.path;
+    return File('$podDir\\$name.srt').existsSync();
   }
 
   bool get _hasActiveJobs => _jobs.any((j) => !j.done && !j.failed);
 
   Future<void> _downloadEpisode(int index) async {
     if (_currentRssUrl.isEmpty) return;
-    if (_isDownloaded(index)) { _log('⏭️ 已存在: ${_episodes[index].title}'); return; }
+    if (_isDownloaded(index)) { _log('⏭️ 已有字幕: ${_episodes[index].title}'); return; }
     final job = _DownloadJob(title: _episodes[index].title);
     setState(() { _jobs.add(job); });
     try {
-      final downloaded = await PodcastService.instance.downloadEpisode(_currentRssUrl, index, (p) { if (mounted) setState(() => job.progress = p); }, podcastName: _podcastTitle);
-      job.done = true; job.skipped = !downloaded;
-      _log(downloaded ? '✅ ${_episodes[index].title}' : '⏭️ 已存在: ${_episodes[index].title}');
+      await PodcastService.instance.downloadSubtitles(_episodes[index].title, _podcastTitle, onLog: _log);
+      job.done = true;
+      _log('✅ 字幕: ${_episodes[index].title}');
     } catch (e) { job.failed = true; _log('❌ ${_episodes[index].title}: $e'); }
     if (mounted) setState(() {});
   }
@@ -214,7 +217,7 @@ class _PodcastTabState extends State<_PodcastTab> {
     final indices = _selected.toList()..sort();
     _selected.clear();
     for (final idx in indices) {
-      if (_isDownloaded(idx)) { _log('⏭️ 已存在: ${_episodes[idx].title}'); continue; }
+      if (_isDownloaded(idx)) { _log('⏭️ 已有字幕: ${_episodes[idx].title}'); continue; }
       final job = _DownloadJob(title: _episodes[idx].title);
       setState(() { _jobs.add(job); });
       _downloadSingleInBg(idx, job);
@@ -224,9 +227,9 @@ class _PodcastTabState extends State<_PodcastTab> {
 
   Future<void> _downloadSingleInBg(int idx, _DownloadJob job) async {
     try {
-      final downloaded = await PodcastService.instance.downloadEpisode(_currentRssUrl, idx, (p) { if (mounted) setState(() => job.progress = p); }, podcastName: _podcastTitle);
-      job.done = true; job.skipped = !downloaded;
-      _log(downloaded ? '✅ ${_episodes[idx].title}' : '⏭️ 已存在: ${_episodes[idx].title}');
+      await PodcastService.instance.downloadSubtitles(_episodes[idx].title, _podcastTitle, onLog: _log);
+      job.done = true;
+      _log('✅ 字幕: ${_episodes[idx].title}');
     } catch (e) { job.failed = true; _log('❌ ${_episodes[idx].title}: $e'); }
     if (mounted) setState(() {});
   }

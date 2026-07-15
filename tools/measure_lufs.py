@@ -86,7 +86,11 @@ def process_format(fmt):
             cache = {}
 
     all_files = glob.glob(os.path.join(library_path, '**', f'*.{fmt}'), recursive=True)
-    to_measure = [f for f in all_files if f not in cache]
+    # Normalize to relative paths for cache key comparison
+    cache_rel = {os.path.relpath(k, library_path) if os.path.isabs(k) else k: v for k, v in cache.items()}
+    if cache_rel != cache:
+        cache = cache_rel
+    to_measure = [f for f in all_files if os.path.relpath(f, library_path) not in cache]
     print(f'[{fmt.upper()}] {len(all_files)} files, {len(cache)} cached, {len(to_measure)} to measure')
 
     if not to_measure:
@@ -96,10 +100,11 @@ def process_format(fmt):
     total = len(to_measure)
 
     def save_cache():
-        with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump(cache, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
+        with lock:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(cache, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
 
     _save_callbacks.append(save_cache)
 

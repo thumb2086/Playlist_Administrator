@@ -206,6 +206,56 @@ class PodcastService {
     return true;
   }
 
+  /// Download YouTube subtitles for a podcast episode instead of RSS audio
+  Future<bool> downloadSubtitles(
+    String episodeTitle,
+    String podcastName, {
+    required void Function(String log) onLog,
+  }) async {
+    final bridge = _bridgePath;
+    if (bridge.isEmpty) throw Exception('Base path not configured');
+
+    final query = '$episodeTitle $podcastName';
+    final outDir = _podcastDir(podcastName);
+    final safeName = normalizeFileName(episodeTitle);
+    final outputPath = '$outDir\\$safeName.mp3'; // placeholder ext, bridge outputs .srt
+
+    final env = Map<String, String>.from(Platform.environment);
+    env['PYTHONIOENCODING'] = 'utf-8';
+
+    if (await File(outputPath.replaceAll('.mp3', '.srt')).exists()) {
+      onLog('⏭️ 已有字幕，跳過');
+      return false;
+    }
+
+    final proc = await Process.start(
+      _pythonPath,
+      [bridge, 'youtube-subs', query, outputPath],
+      runInShell: true,
+      workingDirectory: ConfigService.instance.config.basePath,
+      environment: env,
+    );
+
+    await proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).forEach((line) {
+      if (line.trim().isEmpty) return;
+      try {
+        final json = jsonDecode(line.trim()) as Map<String, dynamic>;
+        final type = json['type'] as String?;
+        if (type == 'log') {
+          onLog(json['message'] as String? ?? '');
+        } else if (type == 'error') {
+          onLog('❌ ${json['message']}');
+        } else if (type == 'complete') {
+          onLog('✅ 字幕下載完成');
+        }
+      } catch (_) {
+        onLog(line);
+      }
+    });
+    await proc.exitCode;
+    return true;
+  }
+
   String _guessExtension(String url) {
     final path = Uri.tryParse(url)?.path ?? '';
     if (path.endsWith('.mp3')) return 'mp3';
