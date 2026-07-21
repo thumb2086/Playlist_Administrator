@@ -36,7 +36,6 @@ class LufsService {
     if (cfg.isNotEmpty && File(cfg).existsSync()) {
       _ffmpegPath = cfg; return cfg;
     }
-    // Search PATH for ffmpeg.exe
     final pathEnv = Platform.environment['PATH'] ?? '';
     for (final dir in pathEnv.split(';')) {
       if (dir.trim().isEmpty) continue;
@@ -51,8 +50,193 @@ class LufsService {
     return 'ffmpeg';
   }
 
-  /// Measure LUFS for all uncached files of given format.
-  /// Calls [onProgress] with (done, total) after each batch.
+  /// Resolve a playlist entry path to an absolute file path.
+  String? _resolvePlaylistPath(String entry, String playlistsPath, String basePath, String libraryPath) {
+    if (entry.isEmpty) return null;
+    if (!entry.contains('.') && !entry.contains('\\') && !entry.contains('/')) return null;
+
+    final resolved = '${playlistsPath}\\$entry';
+    if (File(resolved).existsSync()) return resolved;
+
+    if (File(entry).existsSync()) return entry;
+
+    final fname = File(entry).uri.pathSegments.last;
+    for (final base in [basePath, libraryPath, playlistsPath]) {
+      final candidate = '$base\\$fname';
+      if (File(candidate).existsSync()) return candidate;
+    }
+    return null;
+  }
+
+  /// Collect all MP3 file paths referenced in non-internal playlist m3u8 files.
+  Future<Set<String>> getPlaylistMp3Files(String playlistsPath, String basePath, String libraryPath) async {
+    final plDir = Directory(playlistsPath);
+    if (!await plDir.exists()) return {};
+
+    final mp3Files = <String>{};
+    await for (final e in plDir.list()) {
+      if (e is! File) continue;
+      final low = e.path.toLowerCase();
+      if (!low.endsWith('.m3u8') && !low.endsWith('.m3u')) continue;
+      if (_isInternalPlaylist(e.path)) continue;
+
+      try {
+        final content = await e.readAsString(encoding: utf8);
+        for (final line in content.split('\n')) {
+          final trimmed = line.trim();
+          if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+          if (!trimmed.contains('.mp3') && !trimmed.contains('.m4a') && !trimmed.contains('.flac')) continue;
+          final resolved = _resolvePlaylistPath(trimmed, playlistsPath, basePath, libraryPath);
+          if (resolved != null && resolved.toLowerCase().endsWith('.mp3')) {
+            mp3Files.add(resolved);
+          }
+        }
+      } catch (_) {}
+    }
+    return mp3Files;
+  }
+
+  static bool _isInternalPlaylist(String path) {
+    final name = File(path).uri.pathSegments.last.toLowerCase();
+    if (name.contains('_removed songs') || name.contains('_unsorted') || name.contains('single tracks')) return true;
+    return false;
+  }
+
+  /// Normalize all playlisted MP3s to -14 LUFS in a single pass.
+  /// Captures the measured input LUFS from ffmpeg stderr to update cache.
+  /// This gives complete (whole-file) LUFS measurement + normalization together,
+  /// which is faster than measuring first then normalizing separately.
+  Future<void> measureAndNormalizePlaylistMp3s({
+    required void Function(String log) onLog,
+    void Function(int done, int total)? onProgress,
+    int concurrency = 8,
+    double tolerance = 2.0,
+  }) async {
+    final config = ConfigService.instance.config;
+    final lib = config.libraryPath;
+    final plPath = config.playlistsPath;
+    final base = config.basePath;
+
+    if (lib.isEmpty || plPath.isEmpty) {
+      onLog('Library or Playlists path not configured');
+      return;
+    }
+
+    onLog('掃描歌單中的 MP3 檔案…');
+    final playlistFiles = await getPlaylistMp3Files(plPath, base, lib);
+    if (playlistFiles.isEmpty) {
+      onLog('歌單中沒有 MP3 檔案');
+      return;
+    }
+    onLog('歌單內共 ${playlistFiles.length} 個 MP3');
+
+    final cache = _load('mp3');
+    final target = -14.0;
+
+    // Determine which files actually need normalization (uncached or deviating)
+    final needsNormalize = <String>[];
+    int skipCount = 0;
+    for (final path in playlistFiles) {
+      final cached = cache[path];
+      if (cached != null && (cached - target).abs() <= tolerance) {
+        skipCount++;
+      } else {
+        needsNormalize.add(path);
+      }
+    }
+
+    if (needsNormalize.isEmpty) {
+      onLog('所有歌單 MP3 已在 $target±${tolerance}LUFS 範圍內 (已快取 $skipCount 檔)');
+      return;
+    }
+
+    onLog('需 Normalize/測量: ${needsNormalize.length} 檔 ($skipCount 檔已合格)');
+    final ffmpeg = await _resolveFfmpeg();
+    int done = 0;
+    int total = needsNormalize.length;
+    int lastSave = 0;
+
+    // Process with concurrency
+    for (int i = 0; i < total; i += concurrency) {
+      final batch = needsNormalize.skip(i).take(concurrency).toList();
+      final futures = <Future<void>>[];
+      for (final path in batch) {
+        futures.add(_normalizeOne(path, ffmpeg, target, cache, onLog));
+      }
+      await Future.wait(futures);
+      done += batch.length;
+      onProgress?.call(done, total);
+
+      if (done - lastSave >= 10) {
+        _save('mp3', cache);
+        lastSave = done;
+        onLog('  進度: $done/$total');
+      }
+    }
+
+    _save('mp3', cache);
+    onLog('完成: $done 個檔案已統一至 $target LUFS');
+  }
+
+  /// Run loudnorm normalization in one pass and capture input LUFS from stderr.
+  Future<void> _normalizeOne(String absPath, String ffmpeg, double target,
+      Map<String, double> cache, void Function(String) onLog) async {
+    if (!await File(absPath).exists()) return;
+
+    final base = absPath.substring(0, absPath.lastIndexOf('.'));
+    final tmp = '${base}_tmp.mp3';
+    final name = absPath.split('\\').last;
+
+    try {
+      final result = await Process.run(ffmpeg, [
+        '-y', '-i', absPath,
+        '-af', 'loudnorm=I=$target:TP=-1:LRA=7',
+        '-c:a', 'libmp3lame', '-q:a', '2', tmp,
+      ]);
+
+      if (result.exitCode != 0 || !await File(tmp).exists()) {
+        onLog('  ❌ $name normalize 失敗');
+        return;
+      }
+
+      // Parse input LUFS from stderr: "Input Integrated:    -15.2 LUFS"
+      double inputLufs = target;
+      final stderr = result.stderr as String? ?? '';
+      final inputMatch = RegExp(r'Input Integrated:\s+([-\d.]+)').firstMatch(stderr);
+      if (inputMatch != null) {
+        inputLufs = double.tryParse(inputMatch.group(1)!) ?? target;
+      }
+
+      await File(tmp).rename(absPath);
+      cache[absPath] = target;
+
+      if ((inputLufs - target).abs() > 0.1) {
+        onLog('  ✅ $name  (${inputLufs.toStringAsFixed(1)} → $target)');
+      }
+    } catch (ex) {
+      onLog('  ⚠️ $name: $ex');
+    }
+  }
+
+  /// Measure and cache an M4A file's LUFS, then set the MP3 cache to -14.
+  /// Used by the conversion step: M4A → MP3 with loudnorm, so output is always -14.
+  Future<void> cacheConversionLufs(String m4aPath, String mp3Path) async {
+    final m4aCache = _load('m4a');
+    if (!m4aCache.containsKey(m4aPath)) {
+      await _measureOne(m4aPath, m4aCache, (v) { m4aCache[m4aPath] = v; });
+      _save('m4a', m4aCache);
+    }
+    final mp3Cache = _load('mp3');
+    mp3Cache[mp3Path] = -14.0;
+    _save('mp3', mp3Cache);
+  }
+
+  /// Delete the mp3 LUFS cache to force a fresh measurement.
+  void clearMp3Cache() {
+    try { File(_cacheFile('mp3')).deleteSync(); } catch (_) {}
+  }
+
+  /// Legacy: measure all files of given format (for completeness).
   Future<void> measureFormat(String fmt, {
     required void Function(String log) onLog,
     void Function(int done, int total)? onProgress,
@@ -83,18 +267,16 @@ class LufsService {
     int total = toMeasure.length;
     int lastSave = 0;
 
-    // Process in batches
     for (int i = 0; i < total; i += concurrency) {
       final batch = toMeasure.skip(i).take(concurrency).toList();
       final futures = <Future<void>>[];
       for (final path in batch) {
-        futures.add(_measureOne(path, cache, (v) { cache[path] = v; }));
+        futures.add(_measureOneLegacy(path, cache, (v) { cache[path] = v; }));
       }
       await Future.wait(futures);
       done += batch.length;
       onProgress?.call(done, total);
 
-      // Save every 25 files
       if (done - lastSave >= 25) {
         _save(fmt, cache);
         lastSave = done;
@@ -105,11 +287,11 @@ class LufsService {
     onLog('[$fmt] 測量完成，共 ${cache.length} 個檔案');
   }
 
-  Future<void> _measureOne(String path, Map<String, double> cache, void Function(double) onResult) async {
+  Future<void> _measureOneLegacy(String path, Map<String, double> cache, void Function(double) onResult) async {
     final ffmpeg = await _resolveFfmpeg();
     try {
       final result = await Process.run(ffmpeg, [
-        '-t', '30', '-i', path,
+        '-i', path,
         '-af', 'loudnorm=print_format=json',
         '-f', 'null', '-', '-hide_banner', '-y',
       ]);
@@ -133,7 +315,7 @@ class LufsService {
     }
   }
 
-  /// Normalize MP3s deviating from -14 LUFS by more than [tolerance].
+  /// Legacy: normalize all MP3s (for completeness).
   Future<void> normalizeMp3({
     required void Function(String log) onLog,
     void Function(int done, int total)? onProgress,

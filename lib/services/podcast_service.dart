@@ -269,6 +269,9 @@ class PodcastService {
 
   String get downloadPath => _downloadPath;
 
+  /// Get the podcast directory for a specific podcast name.
+  String podcastDir(String? podcastName) => _podcastDir(podcastName);
+
   /// 取得 Podcast 下載目錄路徑（相對於 base_path）
   static String relativePodcastPath = 'podcast_downloads';
 

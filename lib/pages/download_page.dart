@@ -92,11 +92,11 @@ class _DownloadPageState extends State<DownloadPage> {
 
 class _DownloadJob {
   String title;
-  double progress;
-  bool done;
-  bool skipped;
-  bool failed;
-  _DownloadJob({required this.title, this.progress = 0, this.done = false, this.skipped = false, this.failed = false});
+  double progress = 0;
+  bool done = false;
+  bool skipped = false;
+  bool failed = false;
+  _DownloadJob({required this.title});
 }
 
 class _PodcastTab extends StatefulWidget {
@@ -120,8 +120,6 @@ class _PodcastTabState extends State<_PodcastTab> {
   final Set<int> _selected = {};
   int _maxEpisodes = 100;
   final List<_DownloadJob> _jobs = [];
-  bool _cancelRequested = false;
-  bool _pauseRequested = false;
 
   Map<String, String> get _history => ConfigService.instance.config.podcastHistory;
 
@@ -191,23 +189,25 @@ class _PodcastTabState extends State<_PodcastTab> {
   bool _isDownloaded(int index) {
     if (index >= _episodes.length) return false;
     final ep = _episodes[index];
-    final name = PodcastService.normalizeFileName(ep.title);
-    final dir = PodcastService.instance.episodeOutputPath(ep.title, ep.audioUrl);
-    final podDir = Directory(dir).parent.path;
-    return File('$podDir\\$name.srt').existsSync();
+    return PodcastService.instance.isEpisodeDownloaded(ep.title, ep.audioUrl, podcastName: _podcastTitle);
   }
 
-  bool get _hasActiveJobs => _jobs.any((j) => !j.done && !j.failed);
+  void _cancelAllDownloads() {
+    for (final j in _jobs) { if (!j.done && !j.failed) { j.failed = true; _log('⏹️ 已取消: ${j.title}'); } }
+    setState(() {});
+  }
 
   Future<void> _downloadEpisode(int index) async {
     if (_currentRssUrl.isEmpty) return;
-    if (_isDownloaded(index)) { _log('⏭️ 已有字幕: ${_episodes[index].title}'); return; }
+    if (_isDownloaded(index)) { _log('⏭️ 已有檔案: ${_episodes[index].title}'); return; }
     final job = _DownloadJob(title: _episodes[index].title);
     setState(() { _jobs.add(job); });
     try {
-      await PodcastService.instance.downloadSubtitles(_episodes[index].title, _podcastTitle, onLog: _log);
+      await PodcastService.instance.downloadEpisode(_currentRssUrl, index,
+          (p) { if (mounted) setState(() => job.progress = p); },
+          podcastName: _podcastTitle);
       job.done = true;
-      _log('✅ 字幕: ${_episodes[index].title}');
+      _log('✅ ${_episodes[index].title}');
     } catch (e) { job.failed = true; _log('❌ ${_episodes[index].title}: $e'); }
     if (mounted) setState(() {});
   }
@@ -217,7 +217,7 @@ class _PodcastTabState extends State<_PodcastTab> {
     final indices = _selected.toList()..sort();
     _selected.clear();
     for (final idx in indices) {
-      if (_isDownloaded(idx)) { _log('⏭️ 已有字幕: ${_episodes[idx].title}'); continue; }
+      if (_isDownloaded(idx)) { _log('⏭️ 已有檔案: ${_episodes[idx].title}'); continue; }
       final job = _DownloadJob(title: _episodes[idx].title);
       setState(() { _jobs.add(job); });
       _downloadSingleInBg(idx, job);
@@ -227,23 +227,13 @@ class _PodcastTabState extends State<_PodcastTab> {
 
   Future<void> _downloadSingleInBg(int idx, _DownloadJob job) async {
     try {
-      await PodcastService.instance.downloadSubtitles(_episodes[idx].title, _podcastTitle, onLog: _log);
+      await PodcastService.instance.downloadEpisode(_currentRssUrl, idx,
+          (p) { if (mounted) setState(() => job.progress = p); },
+          podcastName: _podcastTitle);
       job.done = true;
-      _log('✅ 字幕: ${_episodes[idx].title}');
+      _log('✅ ${_episodes[idx].title}');
     } catch (e) { job.failed = true; _log('❌ ${_episodes[idx].title}: $e'); }
     if (mounted) setState(() {});
-  }
-
-  void _cancelAllDownloads() {
-    _cancelRequested = true;
-    for (final j in _jobs) { if (!j.done && !j.failed) { j.failed = true; _log('⏹️ 已取消: ${j.title}'); } }
-    setState(() {});
-  }
-
-  void _pauseDownloads() {
-    if (_pauseRequested) { _pauseRequested = false; _log('▶️ 繼續'); }
-    else { _pauseRequested = true; _log('⏸️ 暫停中，等待目前檔案完成...'); }
-    setState(() {});
   }
 
   void _clearCompletedJobs() { _jobs.removeWhere((j) => j.done || j.failed); setState(() {}); }
@@ -723,11 +713,11 @@ class _SongDownloadTabState extends State<_SongDownloadTab> {
 class _SttJob {
   String path;
   String name;
-  double progress;
-  bool done;
-  bool failed;
+  double progress = 0;
+  bool done = false;
+  bool failed = false;
   String? result;
-  _SttJob({required this.path, required this.name, this.progress = 0, this.done = false, this.failed = false, this.result});
+  _SttJob({required this.path, required this.name, this.result});
 }
 
 class _GroqSttTab extends StatefulWidget {
@@ -784,11 +774,10 @@ class _GroqSttTabState extends State<_GroqSttTab> {
         '${Platform.environment['HOMEDRIVE'] ?? ''}${Platform.environment['HOMEPATH'] ?? ''}${Platform.pathSeparator}Music${Platform.pathSeparator}Spotube${Platform.pathSeparator}podcast_downloads',
       ];
       Directory? baseDir;
-      String? foundPath;
       for (final p in candidates) {
         if (p.isEmpty) continue;
         final d = Directory(p);
-        if (d.existsSync()) { baseDir = d; foundPath = p; break; }
+        if (d.existsSync()) { baseDir = d; break; }
       }
       if (baseDir == null) {
         if (mounted) setState(() { _loadingFiles = false; _loadError = '找不到 podcast_downloads\nbasePath=[$cfgBase]\n嘗試了 ${candidates.length} 個路徑'; });
@@ -892,7 +881,7 @@ class _GroqSttTabState extends State<_GroqSttTab> {
         final txtPath = path.replaceAll(RegExp(r'\.\w+$'), '.txt');
 
         if (File(txtPath).existsSync()) {
-          setState(() => _jobs.add(_SttJob(path: path, name: name, done: true, result: '⏭️ 已有逐字稿')));
+          setState(() => _jobs.add(_SttJob(path: path, name: name, result: '⏭️ 已有逐字稿')..done = true));
           continue;
         }
 

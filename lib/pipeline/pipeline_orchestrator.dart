@@ -10,6 +10,7 @@ import '../services/snapshot_manager.dart';
 import '../services/file_renamer.dart';
 import '../services/playlist_parser.dart';
 import '../services/lufs_service.dart';
+import '../services/subtitle_service.dart';
 
 class PipelineOrchestrator {
   final AppConfig config;
@@ -32,6 +33,7 @@ class PipelineOrchestrator {
       ('Organize unsorted songs', 10.0),
       ('Enrich metadata', 10.0),
       ('Measure LUFS', 10.0),
+      ('Download SRT subtitles', 5.0),
     ];
 
     final end = toStep ?? steps.length;
@@ -74,10 +76,14 @@ class PipelineOrchestrator {
       case 3: await _stepUnsorted(progress); break;
       case 4: await _stepMetadata(progress); break;
       case 5: await _stepMeasureLufs(progress); break;
+      case 6: await _stepDownloadSrt(progress); break;
     }
   }
 
   Future<void> _stepConvert(void Function(double) progress) async {
+    // Delete stale mp3 LUFS cache; m4a cache is authoritative
+    LufsService.instance.clearMp3Cache();
+
     final m4aDir = Directory(config.m4aPath);
     final mp3Dir = Directory(config.mp3Path);
     if (!await m4aDir.exists()) {
@@ -167,6 +173,12 @@ class PipelineOrchestrator {
         ));
       }
       final results = await Future.wait(futures);
+      for (int j = 0; j < batch.length; j++) {
+        if (results[j]) {
+          // Capture M4A LUFS (uses cache if available) and mark MP3 at -14
+          await LufsService.instance.cacheConversionLufs(batch[j].src, batch[j].dest);
+        }
+      }
       converted += results.where((r) => r).length;
 
       final pct = (i + batch.length) / tasks.length * 100;
@@ -440,41 +452,33 @@ class PipelineOrchestrator {
 
   Future<void> _stepMeasureLufs(void Function(double) progress) async {
     try {
-      // Find script via exe-dir walk (same as DownloadService)
-      String? findPy(String name) {
-        try {
-          final exeDir = Directory(File(Platform.resolvedExecutable).parent.path);
-          Directory? d = exeDir;
-          int guard = 0;
-          while (d != null && guard < 20) {
-            guard++;
-            final p = '${d.path}\\tools\\$name';
-            if (File(p).existsSync()) return p;
-            d = d.parent.path == d.path ? null : d.parent;
-          }
-        } catch (_) {}
-        return null;
-      }
-
       final svc = LufsService.instance;
-      final mp3 = svc.cachedCount('mp3');
-      final m4a = svc.cachedCount('m4a');
-      onLog('MP3 LUFS: $mp3, M4A LUFS: $m4a');
-
-      if (mp3 > 0 && m4a > 0) { progress(100); return; }
-
-      final script = findPy('measure_lufs.py');
-      if (script == null) { onLog('找不到 measure_lufs.py'); progress(100); return; }
-
-      onLog('背景測量啟動中...');
-      final env = Map<String, String>.from(Platform.environment);
-      env['PYTHONUNBUFFERED'] = '1';
-      // Fire-and-forget: pipeline won't wait
-      Process.start('python', [script],
-        runInShell: true, workingDirectory: config.basePath, environment: env);
-      onLog('測量已啟動，統計頁重整可看進度');
+      await svc.measureAndNormalizePlaylistMp3s(
+        onLog: onLog,
+        onProgress: (done, total) {
+          progress(total > 0 ? done / total * 100 : 0);
+        },
+        concurrency: 8,
+        tolerance: 2.0,
+      );
     } catch (e) {
       onLog('LUFS 異常: $e');
+    }
+    progress(100);
+  }
+
+  Future<void> _stepDownloadSrt(void Function(double) progress) async {
+    try {
+      final svc = SubtitleService.instance;
+      await svc.downloadSrtForPlaylistMp3s(
+        onLog: onLog,
+        onProgress: (done, total) {
+          progress(total > 0 ? done / total * 100 : 0);
+        },
+        concurrency: 4,
+      );
+    } catch (e) {
+      onLog('SRT 下載異常: $e');
     }
     progress(100);
   }
