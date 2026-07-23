@@ -2,6 +2,7 @@ import 'dart:io';
 import 'services/config_service.dart';
 import 'services/spotube_controller.dart';
 import 'pipeline/pipeline_orchestrator.dart';
+import 'pipeline/podcast_pipeline.dart';
 import 'models/pipeline_step.dart';
 
 void main(List<String> args) async {
@@ -79,6 +80,16 @@ Usage:
 
     case 'spotube-cleanup':
       await _cleanupMp3(cfg.libraryPath);
+      break;
+
+    case 'podcast':
+      final state = PipelineState();
+      final pipeline = PodcastPipeline(
+        onLog: (msg) => print(msg),
+        onProgress: (c, t, s) {},
+        state: state,
+      );
+      await pipeline.run();
       break;
 
     case 'status':

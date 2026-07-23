@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
@@ -7,6 +8,8 @@ import '../services/podcast_service.dart';
 import '../services/groq_service.dart';
 import '../models/podcast_episode.dart';
 import '../models/podcast_search_result.dart';
+import '../models/pipeline_step.dart';
+import '../pipeline/podcast_pipeline.dart';
 import '../widgets/dark_theme.dart';
 
 class DownloadPage extends StatefulWidget {
@@ -122,6 +125,7 @@ class _PodcastTabState extends State<_PodcastTab> {
   final List<_DownloadJob> _jobs = [];
 
   Map<String, String> get _history => ConfigService.instance.config.podcastHistory;
+  Map<String, String> get _subscriptions => ConfigService.instance.config.podcastSubscriptions;
 
   void _saveHistory(String title, String url) {
     final cfg = ConfigService.instance.config;
@@ -129,6 +133,21 @@ class _PodcastTabState extends State<_PodcastTab> {
     while (cfg.podcastHistory.length > 30) { cfg.podcastHistory.remove(cfg.podcastHistory.keys.first); }
     ConfigService.instance.save();
   }
+
+  void _toggleSubscription(String name, String rssUrl) {
+    final cfg = ConfigService.instance.config;
+    if (cfg.podcastSubscriptions.containsKey(name)) {
+      cfg.podcastSubscriptions.remove(name);
+      _log('🔔 已取消訂閱: $name');
+    } else {
+      cfg.podcastSubscriptions[name] = rssUrl;
+      _log('🔔 已訂閱: $name');
+    }
+    ConfigService.instance.save();
+    if (mounted) setState(() {});
+  }
+
+  bool _isSubscribed(String name) => _subscriptions.containsKey(name);
 
   @override
   void dispose() { _searchCtrl.dispose(); _urlCtrl.dispose(); _scrollCtrl.dispose(); super.dispose(); }
@@ -311,9 +330,64 @@ class _PodcastTabState extends State<_PodcastTab> {
                   ],
                 ),
               ],
-            ],
+],
+            ),
           ),
-        ),
+        if (_subscriptions.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.notifications_active, size: 14, color: Color(0xFFCE93D8)),
+                const SizedBox(width: 4),
+                Text('已訂閱 (${_subscriptions.length})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                const Spacer(),
+                SizedBox(
+                  height: 26,
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const _PipelinePageForPodcast()),
+                    ),
+                    icon: const Icon(Icons.play_arrow_rounded, size: 12),
+                    label: Text('Podcast 流程', style: const TextStyle(fontSize: 10)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFCE93D8), foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(horizontal: 8), visualDensity: VisualDensity.compact),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 6),
+              ..._subscriptions.entries.map((e) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(children: [
+                  const Icon(Icons.podcasts, size: 14, color: AppColors.textMuted),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(e.key, style: const TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  SizedBox(
+                    height: 22,
+                    child: TextButton(
+                      onPressed: () {
+                        _searchCtrl.text = e.key;
+                        _urlCtrl.text = e.value;
+                        _fetchByUrl();
+                      },
+                      child: Text('檢視', style: TextStyle(fontSize: 10, color: AppColors.accent)),
+                    ),
+                  ),
+                  SizedBox(
+                    height: 22,
+                    child: TextButton(
+                      onPressed: () => _toggleSubscription(e.key, e.value),
+                      child: Text('取消訂閱', style: TextStyle(fontSize: 10, color: Colors.red[300])),
+                    ),
+                  ),
+                ]),
+              )),
+            ]),
+          ),
+        ],
         if (_searchResults.isNotEmpty && _episodes.isEmpty)
           Expanded(flex: 5, child: ListView.builder(
             itemCount: _searchResults.length,
@@ -340,6 +414,19 @@ class _PodcastTabState extends State<_PodcastTab> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Expanded(child: Text(_podcastTitle, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+                SizedBox(
+                  height: 26,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _toggleSubscription(_podcastTitle, _currentRssUrl),
+                    icon: Icon(_isSubscribed(_podcastTitle) ? Icons.notifications_off : Icons.notifications_none, size: 12),
+                    label: Text(_isSubscribed(_podcastTitle) ? '訂閱中' : '訂閱', style: const TextStyle(fontSize: 10)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isSubscribed(_podcastTitle) ? AppColors.accentDim : AppColors.surfaceLight,
+                      foregroundColor: _isSubscribed(_podcastTitle) ? AppColors.accent : AppColors.text,
+                      padding: const EdgeInsets.symmetric(horizontal: 8), visualDensity: VisualDensity.compact),
+                  ),
+                ),
+                const SizedBox(width: 4),
                 if (_episodes.isNotEmpty) ...[
                   SizedBox(height: 28, child: DropdownButton<int>(
                     value: _maxEpisodes, underline: const SizedBox(),
@@ -1093,6 +1180,123 @@ class _GroqSttTabState extends State<_GroqSttTab> {
       ],
       const SizedBox(height: 12),
     ]);
+  }
+}
+
+class _PipelinePageForPodcast extends StatefulWidget {
+  const _PipelinePageForPodcast();
+  @override
+  State<_PipelinePageForPodcast> createState() => _PipelinePageForPodcastState();
+}
+
+class _PipelinePageForPodcastState extends State<_PipelinePageForPodcast>
+    with SingleTickerProviderStateMixin {
+  final _logs = <String>[];
+  final _scrollCtrl = ScrollController();
+  PipelineState _state = PipelineState();
+  bool _running = false;
+  double _progress = 0;
+  late TabController _tabCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 3, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _start());
+  }
+
+  @override
+  void dispose() { _scrollCtrl.dispose(); _tabCtrl.dispose(); super.dispose(); }
+
+  void _start() async {
+    if (_running) return;
+    setState(() { _running = true; _progress = 0; });
+    _state = PipelineState();
+    _log('Podcast Pipeline 啟動中…');
+
+    try {
+      final pipeline = PodcastPipeline(
+        onLog: (msg) { _log(msg); },
+        onProgress: (c, t, stepIdx) {
+          if (mounted) setState(() => _progress = t > 0 ? c / t : 0.0);
+        },
+        state: _state,
+      );
+      await pipeline.run();
+    } catch (e) {
+      _log('❌ Podcast Pipeline 錯誤: $e');
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
+
+  void _log(String msg) {
+    if (mounted) setState(() => _logs.add(msg));
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        title: const Text('Podcast Pipeline', style: TextStyle(fontSize: 16)),
+        backgroundColor: AppColors.card,
+        actions: [
+          if (_running)
+            TextButton.icon(
+              onPressed: () { _state.cancel(); _log('正在取消…'); setState(() {}); },
+              icon: const Icon(Icons.stop_rounded, size: 16, color: Colors.red),
+              label: const Text('取消', style: TextStyle(fontSize: 11, color: Colors.red)),
+            ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_running || _progress > 0) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: _progress, backgroundColor: AppColors.surfaceLight,
+                  valueColor: const AlwaysStoppedAnimation(AppColors.accent), minHeight: 7,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text('${(_progress * 100).toStringAsFixed(0)}%', style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+              const SizedBox(height: 10),
+            ],
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(color: const Color(0xFF080808), borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border)),
+                clipBehavior: Clip.antiAlias,
+                child: _logs.isEmpty
+                    ? const Center(child: Text('執行中，請稍候…', style: TextStyle(color: AppColors.textMuted, fontSize: 11)))
+                    : ListView.builder(controller: _scrollCtrl, padding: const EdgeInsets.all(8),
+                        itemCount: _logs.length,
+                        itemBuilder: (ctx, i) {
+                          final line = _logs[i];
+                          Color? color;
+                          if (line.contains('❌')) color = Colors.red[300];
+                          else if (line.contains('✅') || line.contains('完成')) color = AppColors.accent;
+                          return Padding(padding: const EdgeInsets.symmetric(vertical: 1),
+                            child: Text(line, style: TextStyle(fontSize: 11, fontFamily: 'Consolas',
+                                color: color ?? AppColors.textMuted, height: 1.4)));
+                        }),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

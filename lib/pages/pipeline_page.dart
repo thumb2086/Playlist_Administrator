@@ -5,6 +5,7 @@ import '../services/i18n.dart';
 import '../services/chinese_converter.dart';
 import '../services/history_recorder.dart';
 import '../pipeline/pipeline_orchestrator.dart';
+import '../pipeline/podcast_pipeline.dart';
 import '../models/pipeline_step.dart';
 import '../widgets/dark_theme.dart';
 
@@ -21,6 +22,7 @@ class _PipelinePageState extends State<PipelinePage> {
   bool _running = false;
   double _progress = 0;
   int _currentStep = 0;
+  bool _isPodcast = false;
 
   late List<String> _stepLabels;
 
@@ -46,11 +48,13 @@ class _PipelinePageState extends State<PipelinePage> {
         t('pipeline.step_prune'),
         t('pipeline.step_unsorted'),
         t('pipeline.step_metadata'),
+        t('pipeline.step_lufs'),
+        t('pipeline.step_srt'),
       ];
     });
   }
 
-  void _log(String msg) { _logs.add(msg); if (mounted) setState(() {}); _autoScroll(); }
+  void _log(String msg) { if (mounted) setState(() { _logs.add(msg); }); _autoScroll(); }
 
   void _autoScroll() {
     Future.delayed(const Duration(milliseconds: 50), () {
@@ -63,38 +67,53 @@ class _PipelinePageState extends State<PipelinePage> {
 
   Future<void> _run({int fromStep = 0, int? toStep}) async {
     if (_running) return;
-    setState(() { _running = true; _progress = 0; _currentStep = fromStep; });
+    setState(() { _running = true; _progress = 0; _currentStep = fromStep; _isPodcast = false; });
     _state = PipelineState();
     _log(t('pipeline.starting'));
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
     try {
-      try {
-        await ChineseConverter.instance.load();
-      } catch (e) {
-        _log('注意: 中文轉換器載入失敗: $e');
-      }
+      try { await ChineseConverter.instance.load(); } catch (e) { _log('注意: 中文轉換器載入失敗: $e'); }
 
       final orch = PipelineOrchestrator(
         config: ConfigService.instance.config,
         onLog: _log,
         onProgress: (c, t, stepIdx) {
-          try {
-            if (mounted) setState(() {
-              _progress = t > 0 ? c / t : 0.0;
-              _currentStep = stepIdx;
-            });
-          } catch (_) {}
+          try { if (mounted) setState(() { _progress = t > 0 ? c / t : 0.0; _currentStep = stepIdx; }); } catch (_) {}
         },
         state: _state,
       );
       await orch.run(fromStep: fromStep, toStep: toStep);
-      // Record history snapshot in background (don't block UI)
       HistoryRecorder.record().ignore();
     } catch (e) {
       _log('  ❌ Pipeline 執行錯誤: $e');
     } finally {
       if (mounted) setState(() { _running = false; _progress = 0; });
+    }
+  }
+
+  Future<void> _runPodcast() async {
+    if (_running) return;
+    setState(() { _running = true; _progress = 0; _currentStep = 0; _isPodcast = true; });
+    _state = PipelineState();
+    _log('Podcast Pipeline 啟動中…');
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    try {
+      try { await ChineseConverter.instance.load(); } catch (e) { _log('注意: 中文轉換器載入失敗: $e'); }
+
+      final pipeline = PodcastPipeline(
+        onLog: _log,
+        onProgress: (c, t, stepIdx) {
+          try { if (mounted) setState(() { _progress = t > 0 ? c / t : 0.0; _currentStep = stepIdx; }); } catch (_) {}
+        },
+        state: _state,
+      );
+      await pipeline.run();
+    } catch (e) {
+      _log('  ❌ Podcast Pipeline 錯誤: $e');
+    } finally {
+      if (mounted) setState(() { _running = false; _progress = 0; _isPodcast = false; });
     }
   }
 
@@ -105,19 +124,19 @@ class _PipelinePageState extends State<PipelinePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Controls
           Wrap(spacing: 8, runSpacing: 8, children: [
             _PButton(t('pipeline.run_all'), Icons.play_arrow_rounded, () => _run(), _running, isPrimary: true),
             _PButton(t('pipeline.run_convert'), Icons.transform, () => _run(fromStep: 0, toStep: 1), _running),
             _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1, toStep: 2), _running),
             _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2, toStep: 3), _running),
+            _PButton(t('pipeline.run_podcast'), Icons.podcasts, _runPodcast, _running, color: const Color(0xFFCE93D8)),
             if (_running) ...[
               _PButton(t('pipeline.pause'), Icons.pause_rounded, () {
                 _state.pause();
                 _log('Pipeline 已暫停');
                 setState(() {});
               }, false, color: Colors.orange),
-                    _PButton(t('pipeline.cancel'), Icons.stop_rounded, () {
+              _PButton(t('pipeline.cancel'), Icons.stop_rounded, () {
                 _state.cancel();
                 _log('正在取消 Pipeline…');
                 setState(() {});
@@ -129,7 +148,6 @@ class _PipelinePageState extends State<PipelinePage> {
             ],
           ]),
           const SizedBox(height: 20),
-          // Overall progress
           AnimatedSize(duration: const Duration(milliseconds: 300), curve: Curves.easeOut,
             child: (_running || _progress > 0) ? Column(children: [
               ClipRRect(
@@ -141,7 +159,7 @@ class _PipelinePageState extends State<PipelinePage> {
               ),
               const SizedBox(height: 8),
               Row(children: [
-                Text('${_stepLabels[_currentStep]}  (${(_progress * 100).toStringAsFixed(0)}%)',
+                Text('${_isPodcast ? 'Podcast' : _stepLabels[_currentStep]}  (${(_progress * 100).toStringAsFixed(0)}%)',
                     style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                 const Spacer(),
                 if (_running)
@@ -150,35 +168,40 @@ class _PipelinePageState extends State<PipelinePage> {
             ]) : const SizedBox.shrink(),
           ),
           if (_running || _progress > 0) const SizedBox(height: 16),
-          // Step indicators
-          Row(
-            children: List.generate(_stepLabels.length, (i) {
-              final active = i == _currentStep && _running;
-              final done = i < _currentStep;
-              return Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 3),
-                  child: Column(children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: done ? AppColors.accent : (active ? AppColors.accent.withValues(alpha: 0.6) : AppColors.surfaceLight),
-                        borderRadius: BorderRadius.circular(3),
+          if (!_isPodcast)
+            Row(
+              children: List.generate(_stepLabels.length, (i) {
+                final active = i == _currentStep && _running;
+                final done = i < _currentStep;
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Column(children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: done ? AppColors.accent : (active ? AppColors.accent.withValues(alpha: 0.6) : AppColors.surfaceLight),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(_stepLabels[i], style: TextStyle(
-                      color: done ? AppColors.accent : (active ? AppColors.text : AppColors.textMuted),
-                      fontSize: 10, fontWeight: done || active ? FontWeight.w600 : FontWeight.normal,
-                    )),
-                  ]),
-                ),
-              );
-            }),
-          ),
+                      const SizedBox(height: 5),
+                      Text(_stepLabels[i], style: TextStyle(
+                        color: done ? AppColors.accent : (active ? AppColors.text : AppColors.textMuted),
+                        fontSize: 10, fontWeight: done || active ? FontWeight.w600 : FontWeight.normal,
+                      )),
+                    ]),
+                  ),
+                );
+              }),
+            ),
+          if (_isPodcast && _running)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text('Podcast Pipeline 執行中…',
+                  style: const TextStyle(color: AppColors.accent, fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
           const SizedBox(height: 16),
-          // Log
           Expanded(
             child: Container(
               decoration: BoxDecoration(

@@ -81,9 +81,6 @@ class PipelineOrchestrator {
   }
 
   Future<void> _stepConvert(void Function(double) progress) async {
-    // Delete stale mp3 LUFS cache; m4a cache is authoritative
-    LufsService.instance.clearMp3Cache();
-
     final m4aDir = Directory(config.m4aPath);
     final mp3Dir = Directory(config.mp3Path);
     if (!await m4aDir.exists()) {

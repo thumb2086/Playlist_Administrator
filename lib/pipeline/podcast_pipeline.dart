@@ -93,13 +93,19 @@ class PodcastPipeline {
     final feedTitle = result.title;
     onLog('  Feed: $feedTitle (${episodes.length} 集)');
 
-    // Filter to new episodes not yet processed
+    // Filter to new episodes not yet processed,
+    // or cached ones that have no SRT and no TXT (need Groq)
     final newEps = <int>[];
     for (int i = 0; i < episodes.length; i++) {
       final ep = episodes[i];
       final key = '$podcastName|${ep.title}';
       if (!cache.containsKey(key)) {
         newEps.add(i);
+      } else {
+        final cached = cache[key]!;
+        if (cached['srt'] != true && cached['txt'] != true) {
+          newEps.add(i); // retry: no SRT, no TXT → try Groq
+        }
       }
     }
 
@@ -155,10 +161,12 @@ class PodcastPipeline {
         onLog('  [${i + 1}/$total] ⏭️ $safeName (已存在)');
       }
 
-      // --- Step 2: Try SRT download (skip if already exists) ---
+      // --- Step 2: Try SRT download (skip if already exists or already failed) ---
       if (await File(srtPath).exists()) {
         status['srt'] = true;
         onLog('    ✅ 已有 SRT');
+      } else if (cache[key]?['srt'] == false) {
+        onLog('    ⏭️ 先前已確認無 YT 字幕，跳過搜尋');
       } else {
         onLog('    🔍 搜尋 YouTube 字幕...');
         try {

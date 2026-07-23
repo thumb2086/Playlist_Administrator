@@ -271,7 +271,7 @@ class LufsService {
       final batch = toMeasure.skip(i).take(concurrency).toList();
       final futures = <Future<void>>[];
       for (final path in batch) {
-        futures.add(_measureOneLegacy(path, cache, (v) { cache[path] = v; }));
+        futures.add(_measureOne(path, cache, (v) { cache[path] = v; }));
       }
       await Future.wait(futures);
       done += batch.length;
@@ -287,7 +287,7 @@ class LufsService {
     onLog('[$fmt] 測量完成，共 ${cache.length} 個檔案');
   }
 
-  Future<void> _measureOneLegacy(String path, Map<String, double> cache, void Function(double) onResult) async {
+  Future<void> _measureOne(String path, Map<String, double> cache, void Function(double) onResult) async {
     final ffmpeg = await _resolveFfmpeg();
     try {
       final result = await Process.run(ffmpeg, [
