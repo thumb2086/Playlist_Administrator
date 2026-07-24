@@ -13,6 +13,7 @@ class PodcastService {
   String get _pythonPath => 'python';
 
   String get _bridgePath {
+    // Try walk-up from exe directory
     final exeDir = Directory(File(Platform.resolvedExecutable).parent.path);
     Directory? d = exeDir;
     while (d != null) {
@@ -20,6 +21,16 @@ class PodcastService {
       if (File(candidate).existsSync()) return candidate;
       final parent = d.parent;
       d = parent.path == d.path ? null : parent;
+    }
+    // Fallback: check current directory
+    final cwd = Directory.current.path;
+    final cwdCandidate = '$cwd\\tools\\flutter_download_bridge.py';
+    if (File(cwdCandidate).existsSync()) return cwdCandidate;
+    // Fallback: check basePath
+    final base = ConfigService.instance.config.basePath;
+    if (base.isNotEmpty) {
+      final baseCandidate = '$base\\..\\tools\\flutter_download_bridge.py';
+      if (File(baseCandidate).existsSync()) return baseCandidate;
     }
     return '';
   }

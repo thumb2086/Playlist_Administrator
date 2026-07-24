@@ -44,6 +44,16 @@ class GroqService {
       final p = d.parent;
       d = p.path == d.path ? null : p;
     }
+    // Fallback: check current directory
+    final cwd = Directory.current.path;
+    final cwdCandidate = '$cwd\\tools\\flutter_download_bridge.py';
+    if (File(cwdCandidate).existsSync()) return cwdCandidate;
+    // Fallback: check basePath
+    final base = ConfigService.instance.config.basePath;
+    if (base.isNotEmpty) {
+      final baseCandidate = '$base\\..\\tools\\flutter_download_bridge.py';
+      if (File(baseCandidate).existsSync()) return baseCandidate;
+    }
     return '';
   }
 
