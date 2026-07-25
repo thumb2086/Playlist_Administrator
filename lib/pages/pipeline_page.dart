@@ -151,7 +151,12 @@ class _PipelinePageState extends State<PipelinePage> {
               _PButton('複製全部', Icons.copy_rounded, () {
                 final text = _logs.join('\n');
                 Clipboard.setData(ClipboardData(text: text));
-                if (mounted) setState(() {});
+                if (mounted) {
+                  setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('已複製'), duration: Duration(seconds: 1)),
+                  );
+                }
               }, false, color: AppColors.textSecondary),
           ]),
           const SizedBox(height: 20),

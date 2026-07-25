@@ -763,6 +763,8 @@ def cmd_youtube_subs(args):
             'subtitlesformat': 'srt',
             'outtmpl': srt_path.replace('.srt', '.%(ext)s'),
             'windowsfilenames': True,
+            'sleep_interval_requests': 3,
+            'extractor_args': {'youtube': {'sleep_interval': ['3']}},
         }
         if cookie_file:
             ydl_opts['cookiefile'] = cookie_file
