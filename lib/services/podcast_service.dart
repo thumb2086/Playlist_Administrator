@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../models/podcast_episode.dart';
 import '../models/podcast_search_result.dart';
+import 'bridge_service.dart';
 import 'config_service.dart';
 
 class PodcastService {
@@ -11,26 +13,6 @@ class PodcastService {
   PodcastService._();
 
   String get _pythonPath => 'python';
-
-  String get _bridgePath {
-    // Primary: tools/ next to the exe (installed/release layout)
-    final exeDir = File(Platform.resolvedExecutable).parent.path;
-    final exeCandidate = '$exeDir\\tools\\flutter_download_bridge.py';
-    if (File(exeCandidate).existsSync()) return exeCandidate;
-    // Walk-up from exe (development layout: exe deep in build/)
-    Directory? d = Directory(exeDir);
-    while (d != null) {
-      final candidate = '${d.path}\\tools\\flutter_download_bridge.py';
-      if (File(candidate).existsSync()) return candidate;
-      final parent = d.parent;
-      d = parent.path == d.path ? null : parent;
-    }
-    // Fallback: check current directory
-    final cwd = Directory.current.path;
-    final cwdCandidate = '$cwd\\tools\\flutter_download_bridge.py';
-    if (File(cwdCandidate).existsSync()) return cwdCandidate;
-    return '';
-  }
 
   String _podcastDir(String? podcastName) {
     final base = ConfigService.instance.config.basePath;
@@ -46,8 +28,7 @@ class PodcastService {
   String get _downloadPath => _podcastDir(null);
 
   Future<List<String>> _runPython(List<String> args) async {
-    final bridge = _bridgePath;
-    if (bridge.isEmpty) throw Exception('Base path not configured');
+    final bridge = await BridgeService.instance.bridgePath;
     final env = Map<String, String>.from(Platform.environment);
     env['PYTHONIOENCODING'] = 'utf-8';
     final proc = await Process.start(
@@ -109,9 +90,7 @@ class PodcastService {
     return result['audio_url'] as String?;
   }
 
-  /// Normalize podcast filename: same logic used by downloadEpisode
   static String normalizeFileName(String title) {
-    // Remove YouTube IDs [xxxxx], then sanitize illegal file chars
     return title
         .replaceAll(RegExp(r'\s*\[[\w-]{11}\]'), '')
         .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
@@ -122,11 +101,9 @@ class PodcastService {
     final ext = _guessExtension(audioUrl);
     final name = normalizeFileName(title);
 
-    // 1. Exact filename match in the correct podcast directory
     final podDir = podcastName != null ? _podcastDir(podcastName) : _downloadPath;
     if (File('$podDir\\$name.$ext').existsSync()) return true;
 
-    // 2. EP-number fallback: extract EP number from both title and existing files
     final titleEp = RegExp(r'EP(\d+)', caseSensitive: false).firstMatch(title);
     if (titleEp == null) return false;
     final epNum = titleEp.group(1)!;
@@ -139,13 +116,10 @@ class PodcastService {
       return searchDir.listSync().any((f) {
         if (f is! File) return false;
         final fname = f.uri.pathSegments.last;
-        // Skip preview episodes
-        if (fname.startsWith('【試聽】') || fname.startsWith('【')) return false;
-        // Extract EP number from existing file
+        if (fname.startsWith('\u3010\u8a66\u807d\u3011') || fname.startsWith('\u3010')) return false;
         final fileEp = RegExp(r'EP(\d+)', caseSensitive: false).firstMatch(fname);
         if (fileEp == null) return false;
         final fileEpInt = int.tryParse(fileEp.group(1)!);
-        // Compare numerically: EP1 == EP001 == EP01
         return fileEpInt == epNumInt;
       });
     } catch (_) {}
@@ -158,7 +132,6 @@ class PodcastService {
     return '$_downloadPath\\$safeName.$ext';
   }
 
-  /// Returns true if downloaded, false if skipped (already exists)
   Future<bool> downloadEpisode(
     String rssUrl,
     int index,
@@ -181,8 +154,7 @@ class PodcastService {
       return false;
     }
 
-    final bridge = _bridgePath;
-    if (bridge.isEmpty) throw Exception('Base path not configured');
+    final bridge = await BridgeService.instance.bridgePath;
     final env = Map<String, String>.from(Platform.environment);
     env['PYTHONIOENCODING'] = 'utf-8';
     final proc = await Process.start(
@@ -214,25 +186,22 @@ class PodcastService {
     return true;
   }
 
-  /// Download YouTube subtitles for a podcast episode instead of RSS audio
   Future<bool> downloadSubtitles(
     String episodeTitle,
     String podcastName, {
     required void Function(String log) onLog,
   }) async {
-    final bridge = _bridgePath;
-    if (bridge.isEmpty) throw Exception('Base path not configured');
-
+    final bridge = await BridgeService.instance.bridgePath;
     final query = '$episodeTitle $podcastName';
     final outDir = _podcastDir(podcastName);
     final safeName = normalizeFileName(episodeTitle);
-    final outputPath = '$outDir\\$safeName.mp3'; // placeholder ext, bridge outputs .srt
+    final outputPath = '$outDir\\$safeName.mp3';
 
     final env = Map<String, String>.from(Platform.environment);
     env['PYTHONIOENCODING'] = 'utf-8';
 
     if (await File(outputPath.replaceAll('.mp3', '.srt')).exists()) {
-      onLog('⏭️ 已有字幕，跳過');
+      onLog('\u23ed\ufe0f \u5df2\u6709\u5b57\u5e55\uff0c\u8df3\u904e');
       return false;
     }
 
@@ -252,9 +221,9 @@ class PodcastService {
         if (type == 'log') {
           onLog(json['message'] as String? ?? '');
         } else if (type == 'error') {
-          onLog('❌ ${json['message']}');
+          onLog('\u274c ${json['message']}');
         } else if (type == 'complete') {
-          onLog('✅ 字幕下載完成');
+          onLog('\u2705 \u5b57\u5e55\u4e0b\u8f09\u5b8c\u6210');
         }
       } catch (_) {
         onLog(line);
@@ -277,13 +246,10 @@ class PodcastService {
 
   String get downloadPath => _downloadPath;
 
-  /// Get the podcast directory for a specific podcast name.
   String podcastDir(String? podcastName) => _podcastDir(podcastName);
 
-  /// 取得 Podcast 下載目錄路徑（相對於 base_path）
   static String relativePodcastPath = 'podcast_downloads';
 
-  /// 透過 Apple Podcasts Search API 搜尋 podcast（免 API Key）
   Future<List<PodcastSearchResult>> searchPodcasts(String query) async {
     final url = Uri.parse(
         'https://itunes.apple.com/search?term=${Uri.encodeQueryComponent(query)}&media=podcast&limit=20');
@@ -291,7 +257,7 @@ class PodcastService {
       'User-Agent': 'PlaylistAdministrator/2.0',
     });
     if (resp.statusCode != 200) {
-      throw Exception('搜尋失敗 (${resp.statusCode})');
+      throw Exception('\u641c\u5c0b\u5931\u6557 (${resp.statusCode})');
     }
     final data = jsonDecode(resp.body) as Map<String, dynamic>;
     final results = data['results'] as List<dynamic>? ?? [];
