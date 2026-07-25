@@ -7,18 +7,12 @@ class BridgeService {
   static BridgeService get instance => _instance;
   BridgeService._();
 
-  String? _extractedPath;
-
   Future<String> get bridgePath async {
-    if (_extractedPath != null) return _extractedPath!;
-
     // Try 1: extract from Flutter assets (GUI mode)
     try {
       await rootBundle.loadString('AssetManifest.json');
       return await _extractFromAssets();
-    } catch (_) {
-      // Not in Flutter context (CLI / dart run)
-    }
+    } catch (_) {}
 
     // Try 2: exe-relative data/flutter_assets/assets/tools/ (release build)
     try {
@@ -29,15 +23,12 @@ class BridgeService {
       }
     } catch (_) {}
 
-    // Try 3: walk up from exe (dev layout: exe deep in build/)
+    // Try 3: walk up from exe (dev layout)
     try {
       Directory? d = Directory(File(Platform.resolvedExecutable).parent.path);
       while (d != null) {
         final candidate = '${d.path}\\tools\\flutter_download_bridge.py';
-        if (File(candidate).existsSync()) {
-          _extractedPath = candidate;
-          return candidate;
-        }
+        if (File(candidate).existsSync()) return candidate;
         final parent = d.parent;
         d = parent.path == d.path ? null : parent;
       }
@@ -46,10 +37,7 @@ class BridgeService {
     // Try 4: current directory
     final cwd = Directory.current.path;
     final cwdCandidate = '$cwd\\tools\\flutter_download_bridge.py';
-    if (File(cwdCandidate).existsSync()) {
-      _extractedPath = cwdCandidate;
-      return cwdCandidate;
-    }
+    if (File(cwdCandidate).existsSync()) return cwdCandidate;
 
     throw Exception('找不到 bridge script');
   }
@@ -57,13 +45,11 @@ class BridgeService {
   Future<String> _extractFromAssets() async {
     final tmpDir = Directory.systemTemp.path;
     final targetDir = '$tmpDir\\playlist_admin_tools';
-    final bridgeScript = '$targetDir\\flutter_download_bridge.py';
-
-    if (await File(bridgeScript).exists()) {
-      _extractedPath = bridgeScript;
-      return bridgeScript;
+    // Always re-extract to get latest files from embedded assets
+    if (await Directory(targetDir).exists()) {
+      await Directory(targetDir).delete(recursive: true);
     }
-
+    final bridgeScript = '$targetDir\\flutter_download_bridge.py';
     await Directory(targetDir).create(recursive: true);
     final manifest = await rootBundle.loadString('AssetManifest.json');
     final assets = (jsonDecode(manifest) as Map<String, dynamic>).keys
@@ -76,29 +62,22 @@ class BridgeService {
       await file.parent.create(recursive: true);
       await file.writeAsBytes(data.buffer.asUint8List());
     }
-
-    _extractedPath = bridgeScript;
     return bridgeScript;
   }
 
   Future<String> _copyFromDir(String sourceDir) async {
     final tmpDir = Directory.systemTemp.path;
     final targetDir = '$tmpDir\\playlist_admin_tools';
-    final bridgeScript = '$targetDir\\flutter_download_bridge.py';
-
-    if (await File(bridgeScript).exists()) {
-      _extractedPath = bridgeScript;
-      return bridgeScript;
+    if (await Directory(targetDir).exists()) {
+      await Directory(targetDir).delete(recursive: true);
     }
-
+    final bridgeScript = '$targetDir\\flutter_download_bridge.py';
     await Directory(targetDir).create(recursive: true);
     await for (final f in Directory(sourceDir).list()) {
       if (f is File) {
         await f.copy('$targetDir\\${f.uri.pathSegments.last}');
       }
     }
-
-    _extractedPath = bridgeScript;
     return bridgeScript;
   }
 }

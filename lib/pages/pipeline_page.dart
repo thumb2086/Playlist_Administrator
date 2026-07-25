@@ -146,11 +146,13 @@ class _PipelinePageState extends State<PipelinePage> {
                 _logs.clear();
                 setState(() {});
               }, _logs.isEmpty, color: AppColors.textMuted),
+            ],
+            if (_logs.isNotEmpty)
               _PButton('複製全部', Icons.copy_rounded, () {
                 final text = _logs.join('\n');
                 Clipboard.setData(ClipboardData(text: text));
-                _log('📋 已複製 ${_logs.length} 行到剪貼簿');
-              }, _logs.isEmpty, color: AppColors.textSecondary),
+                if (mounted) setState(() {});
+              }, false, color: AppColors.textSecondary),
             ],
           ]),
           const SizedBox(height: 20),
