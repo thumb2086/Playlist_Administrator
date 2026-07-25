@@ -77,6 +77,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _Toggle(t('settings.debug_mode'), c.debugMode, (v) { c.debugMode = v; _save(); setState(() {}); }),
           _Toggle(t('settings.metadata_enrich'), c.enableMetadataEnrichment, (v) { c.enableMetadataEnrichment = v; _save(); setState(() {}); }),
           _Toggle(t('settings.auto_update_check'), c.autoUpdateCheck, (v) { c.autoUpdateCheck = v; _save(); setState(() {}); }),
+          _Toggle('自動下載更新', c.autoDownloadUpdate, (v) { c.autoDownloadUpdate = v; _save(); setState(() {}); }),
         ]),
         const SizedBox(height: 12),
         _Section(t('settings.spotube'), [

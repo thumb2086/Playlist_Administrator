@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/config_service.dart';
 import '../services/i18n.dart';
 import '../services/update_service.dart';
 import '../services/version_checker.dart';
@@ -19,7 +20,10 @@ class _UpdateDialogState extends State<UpdateDialog> {
   void initState() {
     super.initState();
     _svc.addListener(_onChanged);
-    // Don't auto-download — wait for user to click "下載更新"
+    // Auto-start download if user enabled auto-download
+    if (ConfigService.instance.config.autoDownloadUpdate && _svc.state == UpdateState.idle) {
+      _svc.startDownload(widget.info);
+    }
   }
 
   @override
