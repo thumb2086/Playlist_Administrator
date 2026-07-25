@@ -121,10 +121,11 @@ class PodcastPipeline {
     }
 
     // Phase 2: Download SRT (concurrency 4, with rate-limit delay)
-    final needSrt = tasks.where((t) {
+    final needSrt = <_PodTask>[];
+    for (final t in tasks) {
       final srtPath = '$podDir\\${PodcastService.normalizeFileName(t.episode.title)}.srt';
-      return !File(srtPath).exists();
-    }).toList();
+      if (!await File(srtPath).exists()) needSrt.add(t);
+    }
     if (needSrt.isNotEmpty) {
       onLog('  🔍 下載 SRT 字幕: ${needSrt.length} 集 (×4 並行)');
       await _runBatch(needSrt, 4, (t, i, total) async {
@@ -144,8 +145,51 @@ class PodcastPipeline {
       onLog('  ⏭️ SRT 均已存在');
     }
 
-    // Phase 3: Groq transcription skipped (user disabled)
-    onLog('  ⏭️ Groq 逐字稿已跳過');
+    // Phase 3: Groq transcription for episodes without SRT (concurrency 1)
+    if (hasGroq) {
+      final needGroq = <_PodTask>[];
+      for (final t in tasks) {
+        final name = PodcastService.normalizeFileName(t.episode.title);
+        if (!await File('$podDir\\$name.srt').exists() && !await File('$podDir\\$name.txt').exists()) {
+          needGroq.add(t);
+        }
+      }
+      if (needGroq.isNotEmpty) {
+        onLog('  🎤 Groq 逐字稿: ${needGroq.length} 集 (×1 逐個)');
+        for (int i = 0; i < needGroq.length; i++) {
+          if (state.isCancelled) break;
+          await state.waitIfPaused();
+          if (state.isCancelled) break;
+          final t = needGroq[i];
+          final name = PodcastService.normalizeFileName(t.episode.title);
+          final audioPath = '$podDir\\$name.$ext';
+          final txtPath = '$podDir\\$name.txt';
+          if (!await File(audioPath).exists()) continue;
+          onLog('    [${i + 1}/${needGroq.length}] 🎤 $name');
+          try {
+            final text = await GroqService.instance.transcribeFile(
+              filePath: audioPath,
+              model: GroqService.instance.defaultModel,
+              language: 'zh',
+              onChunk: (chunk, pct) => onProgress((50 + (i + pct) / needGroq.length * 50).toInt(), 100, stepIndex),
+            );
+            await File(txtPath).writeAsString(text, flush: true);
+            onLog('      ✅ (${text.length} 字)');
+          } catch (e) {
+            onLog('      ❌ $e');
+          }
+        }
+      } else {
+        onLog('  ⏭️ Groq 無需處理');
+      }
+    } else {
+      final noSrt = <_PodTask>[];
+      for (final t in tasks) {
+        final name = PodcastService.normalizeFileName(t.episode.title);
+        if (!await File('$podDir\\$name.srt').exists()) noSrt.add(t);
+      }
+      if (noSrt.isNotEmpty) onLog('  ⚠️ ${noSrt.length} 集無 SRT 且未設定 Groq API Key');
+    }
 
     // Update cache
     for (final t in tasks) {
