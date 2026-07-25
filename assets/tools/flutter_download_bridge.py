@@ -739,6 +739,10 @@ def cmd_youtube_subs(args):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     srt_path = output_path.replace('.mp3', '').replace('.m4a', '').replace('.wav', '') + '.srt'
 
+    cookie_file = r'C:\Users\CPXru\Desktop\thumb\大拇哥實驗室\cookies.txt'
+    if not os.path.exists(cookie_file):
+        cookie_file = ''
+
     try:
         ydl_opts = {
             'quiet': True,
@@ -751,6 +755,8 @@ def cmd_youtube_subs(args):
             'outtmpl': srt_path.replace('.srt', '.%(ext)s'),
             'windowsfilenames': True,
         }
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([f'https://www.youtube.com/watch?v={video_id}'])
 

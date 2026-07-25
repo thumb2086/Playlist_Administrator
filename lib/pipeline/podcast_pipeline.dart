@@ -165,6 +165,8 @@ class PodcastPipeline {
       if (await File(srtPath).exists()) {
         status['srt'] = true;
         onLog('    ✅ 已有 SRT');
+        // Ensure TXT counterpart exists
+        await _srtToTxt(srtPath, txtPath);
       } else if (cache[key]?['srt'] == false) {
         onLog('    ⏭️ 先前已確認無 YT 字幕，跳過搜尋');
       } else {
@@ -179,6 +181,10 @@ class PodcastPipeline {
           );
         } catch (e) {
           onLog('    ⚠️ 字幕搜尋異常: $e');
+        }
+        // Convert newly downloaded SRT to TXT
+        if (await File(srtPath).exists()) {
+          await _srtToTxt(srtPath, txtPath);
         }
       }
 
@@ -222,5 +228,26 @@ class PodcastPipeline {
     final txtCount = cache.values.where((v) => v['txt'] == true).length;
     final errCount = cache.values.where((v) => v['status'] == 'error').length;
     onLog('  $podcastName 完成: 總處理 ${cache.length} 集 (SRT $srtCount, 逐字稿 $txtCount, 錯誤 $errCount)');
+  }
+
+  Future<void> _srtToTxt(String srtPath, String txtPath) async {
+    if (!await File(srtPath).exists()) return;
+    try {
+      final content = await File(srtPath).readAsString(encoding: utf8);
+      final lines = content.split('\n');
+      final textLines = <String>[];
+      String last = '';
+      for (final line in lines) {
+        final t = line.trim();
+        if (t.isEmpty) continue;
+        if (RegExp(r'^\d+$').hasMatch(t)) continue;
+        if (t.contains('-->')) continue;
+        final clean = t.replaceAll(RegExp(r'<[^>]+>'), '');
+        if (clean.isEmpty || clean == last) continue;
+        textLines.add(clean);
+        last = clean;
+      }
+      await File(txtPath).writeAsString(textLines.join('\n'), flush: true);
+    } catch (_) {}
   }
 }
