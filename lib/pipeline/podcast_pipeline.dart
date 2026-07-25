@@ -116,7 +116,7 @@ class PodcastPipeline {
       if (state.isCancelled) break;
 
       final batch = tasks.skip(i).take(4).toList();
-      await Future.wait(batch.map((t) => _processOne(t, podcastName, rssUrl, podDir, ext, hasGroq, cache, onLog)));
+      await Future.wait(batch.map((t) => _processOne(t, podcastName, rssUrl, podDir, ext, cache, onLog)));
 
       final done = (i + batch.length).clamp(0, total);
       onProgress(done * 100 ~/ total, 100, stepIndex);
@@ -124,16 +124,34 @@ class PodcastPipeline {
       onLog('  進度: $done/$total');
     }
 
-    // Save final cache
-    for (final t in tasks) {
-      final n = PodcastService.normalizeFileName(t.episode.title);
-      cache[t.key] = {
-        'srt': await File('$podDir\\$n.srt').exists(),
-        'txt': await File('$podDir\\$n.txt').exists(),
-        'status': 'ok',
-      };
+    // Post-processing: Groq for episodes without SRT (one at a time, doesn't block batches)
+    if (hasGroq) {
+      final needGroq = tasks.where((t) {
+        final n = PodcastService.normalizeFileName(t.episode.title);
+        return !File('$podDir\\$n.srt').existsSync() && !File('$podDir\\$n.txt').existsSync();
+      }).toList();
+      if (needGroq.isNotEmpty) {
+        onLog('  🎤 Groq 逐字稿: ${needGroq.length} 集');
+        for (int i = 0; i < needGroq.length; i++) {
+          if (state.isCancelled) break;
+          final t = needGroq[i];
+          final name = PodcastService.normalizeFileName(t.episode.title);
+          final audioPath = '$podDir\\$name.$ext';
+          final txtPath = '$podDir\\$name.txt';
+          if (!await File(audioPath).exists()) continue;
+          onLog('    [${i + 1}/${needGroq.length}] 🎤 $name');
+          try {
+            final text = await GroqService.instance.transcribeFile(
+              filePath: audioPath, model: GroqService.instance.defaultModel, language: 'zh',
+            );
+            await File(txtPath).writeAsString(text, flush: true);
+            onLog('      ✅ (${text.length} 字)');
+          } catch (e) {
+            onLog('      ❌ $e');
+          }
+        }
+      }
     }
-    _saveCache(cache);
 
     final srtCount = cache.values.where((v) => v['srt'] == true).length;
     final txtCount = cache.values.where((v) => v['txt'] == true).length;
@@ -163,7 +181,7 @@ class PodcastPipeline {
   }
 
   Future<void> _processOne(
-    _PodTask t, String podcastName, String rssUrl, String podDir, String ext, bool hasGroq,
+    _PodTask t, String podcastName, String rssUrl, String podDir, String ext,
     Map<String, Map<String, dynamic>> cache, void Function(String) onLog,
   ) async {
     final name = PodcastService.normalizeFileName(t.episode.title);
@@ -191,21 +209,6 @@ class PodcastPipeline {
       );
       if (await File(srtPath).exists()) {
         await _srtToTxt(srtPath, txtPath);
-      }
-    }
-
-    if (!await File(srtPath).exists() && !await File(txtPath).exists() && hasGroq) {
-      if (await File(audioPath).exists()) {
-        onLog('    🎤 Groq...');
-        try {
-          final text = await GroqService.instance.transcribeFile(
-            filePath: audioPath, model: GroqService.instance.defaultModel, language: 'zh',
-          );
-          await File(txtPath).writeAsString(text, flush: true);
-          onLog('    ✅ (${text.length} 字)');
-        } catch (e) {
-          onLog('    ❌ Groq 失敗');
-        }
       }
     }
 
