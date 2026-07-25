@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'widgets/dark_theme.dart';
 import 'pages/library_page.dart';
@@ -79,6 +80,8 @@ class _MainShellState extends State<MainShell> {
     I18N.instance.addListener(_rebuildNav);
     _updateSvc.addListener(_onUpdate);
     _checkForUpdates();
+    // Periodic check every 30 minutes while app is running
+    Timer.periodic(const Duration(minutes: 30), (_) => _checkForUpdates());
   }
 
   void _onUpdate() { if (mounted) setState(() {}); }
