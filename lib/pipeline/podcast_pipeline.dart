@@ -116,7 +116,10 @@ class PodcastPipeline {
       if (state.isCancelled) break;
 
       final batch = tasks.skip(i).take(4).toList();
-      await Future.wait(batch.map((t) => _processOne(t, podcastName, rssUrl, podDir, ext, cache, onLog)));
+      await Future.wait(batch.asMap().entries.map((e) async {
+        await Future.delayed(Duration(milliseconds: e.key * 1500));
+        return _processOne(e.value, podcastName, rssUrl, podDir, ext, cache, onLog);
+      }));
 
       final done = (i + batch.length).clamp(0, total);
       onProgress(done * 100 ~/ total, 100, stepIndex);
