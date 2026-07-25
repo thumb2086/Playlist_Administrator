@@ -39,13 +39,25 @@ class BridgeService {
     final cwdCandidate = '$cwd\\tools\\flutter_download_bridge.py';
     if (File(cwdCandidate).existsSync()) return cwdCandidate;
 
+    // Try 5: project root (walk up from exe looking for pubspec.yaml)
+    try {
+      Directory? d = Directory(File(Platform.resolvedExecutable).parent.path);
+      while (d != null) {
+        if (File('${d.path}\\pubspec.yaml').existsSync()) {
+          final candidate = '${d.path}\\tools\\flutter_download_bridge.py';
+          if (File(candidate).existsSync()) return candidate;
+        }
+        final parent = d.parent;
+        d = parent.path == d.path ? null : parent;
+      }
+    } catch (_) {}
+
     throw Exception('找不到 bridge script');
   }
 
   Future<String> _extractFromAssets() async {
     final tmpDir = Directory.systemTemp.path;
     final targetDir = '$tmpDir\\playlist_admin_tools';
-    // Always re-extract to get latest files from embedded assets
     if (await Directory(targetDir).exists()) {
       await Directory(targetDir).delete(recursive: true);
     }
