@@ -13,25 +13,6 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController _basePathCtrl, _workersCtrl, _ffmpegCtrl,
       _spotubeDlCtrl, _lyricsFolderCtrl;
 
-  void _rebuildAliases() {
-    final names = ConfigService.instance.config.searchNames;
-    // Sync controller count with data
-    while (_aliasKeys.length < names.length) {
-      _aliasKeys.add(TextEditingController());
-      _aliasVals.add(TextEditingController());
-    }
-    while (_aliasKeys.length > names.length) {
-      _aliasKeys.last.dispose(); _aliasKeys.removeLast();
-      _aliasVals.last.dispose(); _aliasVals.removeLast();
-    }
-    int i = 0;
-    for (final e in names.entries) {
-      _aliasKeys[i].text = e.key;
-      _aliasVals[i].text = e.value;
-      i++;
-    }
-  }
-
   void _onConfigChanged() { if (mounted) setState(() {}); }
 
   @override
