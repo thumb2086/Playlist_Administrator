@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import '../models/config_model.dart';
@@ -92,7 +93,7 @@ class PodcastPipeline {
     final episodes = result.episodes;
     onLog('  Feed: ${result.title} (${episodes.length} 集)');
 
-    // Build task list: episodes that need processing
+    // Build task list
     final tasks = <_PodTask>[];
     for (int i = 0; i < episodes.length; i++) {
       if (state.isCancelled) break;
@@ -107,88 +108,112 @@ class PodcastPipeline {
       onLog('  無新集數 (${cache.length} 集已處理過)');
       return;
     }
-    onLog('  需處理: ${tasks.length} 集');
+    onLog('  需處理: ${tasks.length} 集 (流水線 ×4⬇️ ×4🔍 ×1🎤)');
 
-    onLog('  需處理: ${tasks.length} 集 (×4 並行)');
-    final total = tasks.length;
-    const concurrency = 4;
+    // Shared queues
+    final audioQueue = Queue<_PodTask>();
+    final srtQueue = Queue<_PodTask>();
+    final groqQueue = Queue<_PodTask>();
+    for (final t in tasks) audioQueue.add(t);
 
-    for (int i = 0; i < total; i += concurrency) {
-      if (state.isCancelled) break;
-      await state.waitIfPaused();
-      if (state.isCancelled) break;
-
-      final batch = tasks.skip(i).take(concurrency).toList();
-
-      final futures = <Future<void>>[];
-      for (int j = 0; j < batch.length; j++) {
-        futures.add(_processOneEpisode(
-          batch[j], podcastName, rssUrl, podDir, ext, cache,
-        ));
+    int completed = 0;
+    void update() {
+      completed++;
+      onProgress(completed * 100 ~/ tasks.length, 100, stepIndex);
+      if (completed % 10 == 0 || completed == tasks.length) {
+        onLog('  進度: $completed/${tasks.length}');
       }
-      await Future.wait(futures);
-
-      final done = (i + batch.length).clamp(0, total);
-      onProgress(done * 100 ~/ total, 100, stepIndex);
-      _saveCache(cache);
-      onLog('  進度: $done/$total');
     }
 
-    // Groq post-processing: transcribe episodes without SRT (one at a time)
-    if (hasGroq) {
-      final needGroq = <_PodTask>[];
-      for (final t in tasks) {
+    Future<void> done(_PodTask t) async {
+      final name = PodcastService.normalizeFileName(t.episode.title);
+      cache[t.key] = {
+        'srt': await File('$podDir\\$name.srt').exists(),
+        'txt': await File('$podDir\\$name.txt').exists(),
+        'status': 'ok',
+      };
+      _saveCache(cache);
+      update();
+    }
+
+    Future<void> audioWorker() async {
+      while (true) {
+        if (state.isCancelled) break;
+        _PodTask? t;
+        try { t = audioQueue.removeFirst(); } catch (_) { break; }
         final name = PodcastService.normalizeFileName(t.episode.title);
-        if (!await File('$podDir\\$name.srt').exists() && !await File('$podDir\\$name.txt').exists()) {
-          needGroq.add(t);
-        }
-      }
-      if (needGroq.isNotEmpty) {
-        onLog('  🎤 Groq 逐字稿: ${needGroq.length} 集 (×1 不阻塞)');
-        for (int i = 0; i < needGroq.length; i++) {
-          if (state.isCancelled) break;
-          final t = needGroq[i];
-          final name = PodcastService.normalizeFileName(t.episode.title);
-          final audioPath = '$podDir\\$name.$ext';
-          final txtPath = '$podDir\\$name.txt';
-          if (!await File(audioPath).exists()) continue;
-          onLog('    [${i + 1}/${needGroq.length}] 🎤 $name');
+        if (!await File('$podDir\\$name.$ext').exists()) {
           try {
-            final text = await GroqService.instance.transcribeFile(
-              filePath: audioPath,
-              model: GroqService.instance.defaultModel,
-              language: 'zh',
+            await PodcastService.instance.downloadEpisode(rssUrl, t.index, (pct) {},
+              podcastName: podcastName,
             );
-            await File(txtPath).writeAsString(text, flush: true);
-            cache[t.key] = {'srt': false, 'txt': true, 'status': 'ok'};
-            _saveCache(cache);
-            onLog('      ✅ (${text.length} 字)');
           } catch (e) {
-            onLog('      ❌ $e');
+            cache[t.key] = {'srt': false, 'txt': false, 'status': 'error'};
+            _saveCache(cache);
+            update();
+            continue;
           }
         }
-      } else {
-        onLog('  ⏭️ Groq 無需處理');
+        srtQueue.add(t);
       }
     }
-  }
 
-  Future<void> _runBatch(List<_PodTask> tasks, int concurrency, Future<void> Function(_PodTask, int index, int total) fn) async {
-    final total = tasks.length;
-    for (int i = 0; i < total; i += concurrency) {
-      if (state.isCancelled) break;
-      await state.waitIfPaused();
-      if (state.isCancelled) break;
-      final batch = tasks.skip(i).take(concurrency).toList();
-      final futures = <Future<void>>[];
-      for (int j = 0; j < batch.length; j++) {
-        futures.add(fn(batch[j], i + j, total));
-      }
-      await Future.wait(futures);
-      if (i + concurrency < total) {
-        await Future.delayed(const Duration(milliseconds: 300));
+    Future<void> srtWorker() async {
+      while (true) {
+        if (state.isCancelled) break;
+        _PodTask? t;
+        try { t = srtQueue.removeFirst(); } catch (_) { break; }
+        final name = PodcastService.normalizeFileName(t.episode.title);
+        final srtPath = '$podDir\\$name.srt';
+        final txtPath = '$podDir\\$name.txt';
+        if (!await File(srtPath).exists()) {
+          await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
+            onLog: (msg) => onLog('    $msg'),
+          );
+          if (await File(srtPath).exists()) {
+            await _srtToTxt(srtPath, txtPath);
+          }
+        }
+        if (!await File(srtPath).exists() && !await File(txtPath).exists() && hasGroq) {
+          if (await File('$podDir\\$name.$ext').exists()) {
+            groqQueue.add(t);
+            continue;
+          }
+        }
+        await done(t);
       }
     }
+
+    Future<void> groqWorker() async {
+      while (true) {
+        if (state.isCancelled) break;
+        _PodTask? t;
+        try { t = groqQueue.removeFirst(); } catch (_) { break; }
+        final name = PodcastService.normalizeFileName(t.episode.title);
+        final audioPath = '$podDir\\$name.$ext';
+        final txtPath = '$podDir\\$name.txt';
+        if (await File(audioPath).exists() && !await File(txtPath).exists()) {
+          try {
+            final text = await GroqService.instance.transcribeFile(
+              filePath: audioPath, model: GroqService.instance.defaultModel, language: 'zh',
+            );
+            await File(txtPath).writeAsString(text, flush: true);
+          } catch (e) {}
+        }
+        await done(t);
+      }
+    }
+
+    final workers = <Future<void>>[];
+    for (int i = 0; i < 4; i++) workers.add(audioWorker());
+    for (int i = 0; i < 4; i++) workers.add(srtWorker());
+    if (hasGroq) workers.add(groqWorker());
+    await Future.wait(workers);
+
+    final srtCount = cache.values.where((v) => v['srt'] == true).length;
+    final txtCount = cache.values.where((v) => v['txt'] == true).length;
+    final errCount = cache.values.where((v) => v['status'] == 'error').length;
+    onLog('  $podcastName 完成: 總處理 ${cache.length} 集 (SRT $srtCount, 逐字稿 $txtCount, 錯誤 $errCount)');
   }
 
   Future<void> _srtToTxt(String srtPath, String txtPath) async {
@@ -210,42 +235,6 @@ class PodcastPipeline {
       }
       await File(txtPath).writeAsString(textLines.join('\n'), flush: true);
     } catch (_) {}
-  }
-
-  Future<void> _processOneEpisode(
-    _PodTask t, String podcastName, String rssUrl, String podDir, String ext,
-    Map<String, Map<String, dynamic>> cache,
-  ) async {
-    final name = PodcastService.normalizeFileName(t.episode.title);
-    final audioPath = '$podDir\\$name.$ext';
-    final srtPath = '$podDir\\$name.srt';
-    final txtPath = '$podDir\\$name.txt';
-
-    if (!await File(audioPath).exists()) {
-      try {
-        await PodcastService.instance.downloadEpisode(rssUrl, t.index, (pct) {},
-          podcastName: podcastName,
-        );
-      } catch (e) {
-        cache[t.key] = {'srt': false, 'txt': false, 'status': 'error'};
-        return;
-      }
-    }
-
-    if (!await File(srtPath).exists()) {
-      await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
-        onLog: (msg) => onLog('    $msg'),
-      );
-      if (await File(srtPath).exists()) {
-        await _srtToTxt(srtPath, txtPath);
-      }
-    }
-
-    cache[t.key] = {
-      'srt': await File(srtPath).exists(),
-      'txt': await File(txtPath).exists(),
-      'status': 'ok',
-    };
   }
 }
 
