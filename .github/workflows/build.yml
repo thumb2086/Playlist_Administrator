@@ -17,15 +17,16 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - uses: microsoft/setup-msbuild@v2
+
       - run: flutter pub get
 
       - run: flutter build windows --release
 
       - name: Prepare release bundle
         run: |
-          mkdir release_bundle
-          copy build\windows\x64\runner\Release\playlist_administrator.exe release_bundle\
-          copy build\windows\x64\runner\Release\tools\* release_bundle\tools\ 2>nul
+          mkdir release_bundle -Force
+          copy "build\windows\x64\runner\Release\playlist_administrator.exe" release_bundle\
           xcopy /E /I tools release_bundle\tools\
 
       - name: Upload artifact
