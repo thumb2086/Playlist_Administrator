@@ -159,7 +159,7 @@ class _Sidebar extends StatelessWidget {
   final List<_NavItemData> items;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
-  final _updateSvc = UpdateService.instance;
+  static final _updateSvc = UpdateService.instance;
   const _Sidebar({required this.items, required this.selectedIndex, required this.onSelected});
 
   @override
