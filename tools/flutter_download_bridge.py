@@ -701,9 +701,18 @@ def cmd_groq_transcribe(args):
             try: os.unlink(c)
             except: pass
 
+def _clean_query(text):
+    """Clean search query: remove special chars that break YouTube search."""
+    text = text.replace('_', ' ').replace('\u3010', '').replace('\u3011', '').replace('\uff5c', ' ')
+    text = text.replace('\uff08', ' ').replace('\uff09', ' ').replace('\u300a', '').replace('\u300b', '')
+    text = text.replace('[', ' ').replace(']', ' ').replace('"', '').replace('\'', '').replace('?', '')
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
 def cmd_youtube_subs(args):
     """Search YouTube and download Chinese subtitles for a podcast episode"""
-    query = args[0]
+    query = _clean_query(args[0])
     output_path = args[1] if len(args) > 1 else ''
     if not output_path:
         emit_json({'type': 'error', 'message': 'No output path'})

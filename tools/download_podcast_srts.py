@@ -21,7 +21,8 @@ def download_subs_single(audio_path, podcast_name):
     title = os.path.splitext(os.path.basename(audio_path))[0]
     # Clean up title for YouTube search
     search_title = re.sub(r'^EP\d+\s*[-–—]\s*', '', title).strip()
-    search_title = search_title.replace('_', ' ').replace('【', '').replace('】', '').replace('[', '').replace(']', '')
+    search_title = search_title.replace('_', ' ').replace('【', '').replace('】', '').replace('｜', ' ').replace('（', ' ').replace('）', ' ').replace('[', '').replace(']', '')
+    search_title = re.sub(r'\s+', ' ', search_title).strip()
     query = f'{search_title} {podcast_name}'
 
     cmd = [ytdl, '--cookies', cookies_file, f'ytsearch:{query}',
