@@ -9,6 +9,7 @@ import 'pages/player_page.dart';
 import 'pages/download_page.dart';
 import 'services/i18n.dart';
 import 'services/config_service.dart';
+import 'services/update_service.dart';
 import 'services/version_checker.dart';
 import 'widgets/update_dialog.dart';
 
@@ -57,6 +58,7 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
+  final _updateSvc = UpdateService.instance;
 
   late List<_NavItemData> _navItems;
 
@@ -75,8 +77,11 @@ class _MainShellState extends State<MainShell> {
     super.initState();
     _rebuildNav();
     I18N.instance.addListener(_rebuildNav);
+    _updateSvc.addListener(_onUpdate);
     _checkForUpdates();
   }
+
+  void _onUpdate() { if (mounted) setState(() {}); }
 
   void _checkForUpdates() {
     if (!VersionChecker.shouldCheck()) return;
@@ -239,6 +244,43 @@ class _Sidebar extends StatelessWidget {
             );
           }),
           const Spacer(),
+          if (_updateSvc.state == UpdateState.downloading)
+            GestureDetector(
+              onTap: () { _selectedIndex = 2; setState(() {}); },
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Column(children: [
+                  Row(children: [
+                    const Icon(Icons.system_update, size: 12, color: AppColors.accent),
+                    const SizedBox(width: 4),
+                    const Text('更新下載中', style: TextStyle(color: AppColors.accent, fontSize: 9)),
+                    const Spacer(),
+                    Text('${(_updateSvc.progress * 100).toStringAsFixed(0)}%',
+                        style: const TextStyle(color: AppColors.accent, fontSize: 9)),
+                  ]),
+                  const SizedBox(height: 4),
+                  ClipRRect(borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(value: _updateSvc.progress, minHeight: 3,
+                        backgroundColor: AppColors.surfaceLight,
+                        valueColor: const AlwaysStoppedAnimation(AppColors.accent)),
+                  ),
+                ]),
+              ),
+            ),
+          if (_updateSvc.state == UpdateState.ready)
+            GestureDetector(
+              onTap: _updateSvc.launchInstaller,
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+                decoration: BoxDecoration(color: AppColors.accentDim, borderRadius: BorderRadius.circular(8)),
+                child: Row(children: [
+                  const Icon(Icons.check_circle, size: 12, color: AppColors.accent),
+                  const SizedBox(width: 4),
+                  const Text('安裝更新', style: TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
           Container(
             margin: const EdgeInsets.all(16),
             padding: const EdgeInsets.all(12),

@@ -1,6 +1,6 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/i18n.dart';
+import '../services/update_service.dart';
 import '../services/version_checker.dart';
 import 'dark_theme.dart';
 
@@ -13,45 +13,46 @@ class UpdateDialog extends StatefulWidget {
 }
 
 class _UpdateDialogState extends State<UpdateDialog> {
-  bool _downloading = false;
-  double _progress = 0;
-  String? _savedPath;
+  final _svc = UpdateService.instance;
 
-  Future<void> _startDownload() async {
-    final url = widget.info.downloadUrl;
-    if (url == null) return;
-    setState(() { _downloading = true; _progress = 0; });
-    final path = await VersionChecker.downloadUpdate(url,
-      onProgress: (p) { if (mounted) setState(() => _progress = p); },
-    );
-    if (path != null && mounted) {
-      setState(() { _savedPath = path; _downloading = false; _progress = 1; });
-    } else if (mounted) {
-      setState(() => _downloading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('下載失敗，請稍後重試'), backgroundColor: AppColors.error),
-      );
-    }
-  }
-
-  void _launchInstaller() {
-    if (_savedPath != null && File(_savedPath!).existsSync()) {
-      Process.start(_savedPath!, []).ignore();
-      Navigator.of(context).pop();
+  @override
+  void initState() {
+    super.initState();
+    _svc.addListener(_onChanged);
+    if (_svc.state == UpdateState.idle) {
+      _svc.startDownload(widget.info);
     }
   }
 
   @override
+  void dispose() {
+    _svc.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  void _onChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isDownloading = _svc.state == UpdateState.downloading;
+    final isReady = _svc.state == UpdateState.ready;
+    final isError = _svc.state == UpdateState.error;
+    final progress = _svc.progress;
+
     return AlertDialog(
       backgroundColor: AppColors.card,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Column(children: [
-        Icon(_savedPath != null ? Icons.check_circle : Icons.new_releases_rounded,
-            color: _savedPath != null ? AppColors.accent : AppColors.accent, size: 40),
+        Icon(
+          isReady ? Icons.check_circle : (isError ? Icons.error : Icons.new_releases_rounded),
+          color: isReady ? AppColors.accent : (isError ? AppColors.error : AppColors.accent),
+          size: 40,
+        ),
         const SizedBox(height: 8),
         Text(
-          _savedPath != null ? '下載完成！' : '🎉 新版本可用！\nNew Version Available!',
+          isReady ? '下載完成！' : (isError ? '下載失敗' : '🎉 新版本可用！'),
           textAlign: TextAlign.center,
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
@@ -68,15 +69,20 @@ class _UpdateDialogState extends State<UpdateDialog> {
             const Text('最新版本: ', style: TextStyle(color: AppColors.accent, fontSize: 12)),
             Text(widget.info.latestVersion, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.accent)),
           ]),
-          if (_downloading) ...[
+          if (isDownloading) ...[
             const SizedBox(height: 14),
-            ClipRRect(borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(value: _progress, backgroundColor: AppColors.surfaceLight,
-                  valueColor: const AlwaysStoppedAnimation(AppColors.accent), minHeight: 6)),
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: progress),
+              duration: const Duration(milliseconds: 200),
+              builder: (ctx, v, _) => ClipRRect(borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(value: v, backgroundColor: AppColors.surfaceLight,
+                    valueColor: const AlwaysStoppedAnimation(AppColors.accent), minHeight: 6)),
+            ),
             const SizedBox(height: 6),
-            Text('${(_progress * 100).toStringAsFixed(0)}%', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+            Text('${(progress * 100).toStringAsFixed(0)}% 下載中…',
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
           ],
-          if (widget.info.releaseNotes != null && widget.info.releaseNotes!.isNotEmpty && _savedPath == null) ...[
+          if (!isReady && !isError && widget.info.releaseNotes != null && widget.info.releaseNotes!.isNotEmpty) ...[
             const SizedBox(height: 12),
             const Text('更新內容', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
             const SizedBox(height: 4),
@@ -91,37 +97,36 @@ class _UpdateDialogState extends State<UpdateDialog> {
         ]),
       ),
       actions: [
-        if (_savedPath == null) ...[
+        if (!isReady) ...[
           TextButton(
-            onPressed: () { VersionChecker.markSkipped(widget.info.latestVersion); Navigator.of(context).pop(); },
-            child: Text(t('common.skip'), style: const TextStyle(color: AppColors.textMuted)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('稍後提醒', style: TextStyle(color: AppColors.textSecondary)),
-          ),
-          Container(
-            decoration: BoxDecoration(gradient: const LinearGradient(colors: [AppColors.accent, Color(0xFF169C46)]), borderRadius: BorderRadius.circular(8)),
-            child: ElevatedButton(
-              onPressed: _downloading ? null : _startDownload,
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, shadowColor: Colors.transparent, foregroundColor: Colors.black),
-              child: Text(_downloading ? '下載中…' : '下載更新', style: const TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ),
-        ] else ...[
-          Container(
-            decoration: BoxDecoration(gradient: const LinearGradient(colors: [AppColors.accent, Color(0xFF169C46)]), borderRadius: BorderRadius.circular(8)),
-            child: ElevatedButton(
-              onPressed: _launchInstaller,
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, shadowColor: Colors.transparent, foregroundColor: Colors.black),
-              child: const Text('執行安裝', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
+            onPressed: isDownloading ? null : () {
+              VersionChecker.markSkipped(widget.info.latestVersion);
+              Navigator.of(context).pop();
+            },
+            child: Text(t('common.skip'), style: TextStyle(color: isDownloading ? AppColors.textMuted : AppColors.textMuted)),
           ),
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('稍後安裝', style: TextStyle(color: AppColors.textSecondary)),
+            onPressed: isDownloading ? null : () => Navigator.of(context).pop(),
+            child: Text('稍後提醒', style: TextStyle(color: isDownloading ? AppColors.textMuted : AppColors.textSecondary)),
           ),
         ],
+        Container(
+          decoration: isReady
+              ? BoxDecoration(gradient: const LinearGradient(colors: [AppColors.accent, Color(0xFF169C46)]), borderRadius: BorderRadius.circular(8))
+              : null,
+          child: ElevatedButton(
+            onPressed: isDownloading ? null : (isReady ? _svc.launchInstaller : () => Navigator.of(context).pop()),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isReady ? Colors.transparent : (isDownloading ? AppColors.surfaceLight : AppColors.accent),
+              shadowColor: Colors.transparent,
+              foregroundColor: isDownloading ? AppColors.textMuted : Colors.black,
+            ),
+            child: Text(
+              isDownloading ? '下載中…' : (isReady ? '執行安裝' : '背景執行'),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
       ],
     );
   }
