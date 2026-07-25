@@ -156,6 +156,7 @@ class _Sidebar extends StatelessWidget {
   final List<_NavItemData> items;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
+  final _updateSvc = UpdateService.instance;
   const _Sidebar({required this.items, required this.selectedIndex, required this.onSelected});
 
   @override
@@ -246,7 +247,7 @@ class _Sidebar extends StatelessWidget {
           const Spacer(),
           if (_updateSvc.state == UpdateState.downloading)
             GestureDetector(
-              onTap: () { _selectedIndex = 2; setState(() {}); },
+              onTap: () => onSelected(2),
               child: Container(
                 margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Column(children: [
