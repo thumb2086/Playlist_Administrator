@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../services/config_service.dart';
 import '../services/i18n.dart';
 import '../services/update_service.dart';
 import '../services/version_checker.dart';
@@ -20,10 +19,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
   void initState() {
     super.initState();
     _svc.addListener(_onChanged);
-    // Auto-start download if user enabled auto-download
-    if (ConfigService.instance.config.autoDownloadUpdate && _svc.state == UpdateState.idle) {
-      _svc.startDownload(widget.info);
-    }
+    // 不再在這裡自動下載 — app.dart 處理了
   }
 
   @override
@@ -116,15 +112,15 @@ class _UpdateDialogState extends State<UpdateDialog> {
           decoration: isReady
               ? BoxDecoration(gradient: const LinearGradient(colors: [AppColors.accent, Color(0xFF169C46)]), borderRadius: BorderRadius.circular(8))
               : null,
-          child: ElevatedButton(
-            onPressed: isDownloading ? null : (isReady ? _svc.launchInstaller : () => Navigator.of(context).pop()),
+          child:           ElevatedButton(
+            onPressed: isDownloading ? null : (isReady ? _svc.launchInstaller : () { _svc.startDownload(widget.info); Navigator.of(context).pop(); }),
             style: ElevatedButton.styleFrom(
               backgroundColor: isReady ? Colors.transparent : (isDownloading ? AppColors.surfaceLight : AppColors.accent),
               shadowColor: Colors.transparent,
               foregroundColor: isDownloading ? AppColors.textMuted : Colors.black,
             ),
             child: Text(
-              isDownloading ? '下載中…' : (isReady ? '執行安裝' : '背景執行'),
+              isDownloading ? '下載中…' : (isReady ? '執行安裝' : '背景下載'),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),

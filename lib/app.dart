@@ -60,6 +60,7 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
   final _updateSvc = UpdateService.instance;
+  BuildContext? _context;
 
   late List<_NavItemData> _navItems;
 
@@ -84,14 +85,29 @@ class _MainShellState extends State<MainShell> {
     Timer.periodic(const Duration(minutes: 30), (_) => _checkForUpdates());
   }
 
-  void _onUpdate() { if (mounted) setState(() {}); }
+  void _onUpdate() {
+    if (mounted) setState(() {});
+    if (_updateSvc.state == UpdateState.ready && mounted && _context != null) {
+      ScaffoldMessenger.maybeOf(_context!)?.showSnackBar(
+        SnackBar(
+          content: const Text('更新已下載完成，點擊側邊欄「安裝更新」'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(label: '安裝', onPressed: _updateSvc.launchInstaller),
+        ),
+      );
+    }
+  }
 
   void _checkForUpdates() {
     if (!VersionChecker.shouldCheck()) return;
     Future.delayed(const Duration(seconds: 3), () async {
       final info = await VersionChecker.checkForUpdate();
       if (!info.hasUpdate) return;
-      if (mounted) {
+      if (!mounted) return;
+      if (ConfigService.instance.config.autoDownloadUpdate) {
+        _updateSvc.startDownload(info);
+      } else {
         showDialog(context: context, builder: (_) => UpdateDialog(info: info));
       }
     });
@@ -119,6 +135,7 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    _context = context;
     return Scaffold(
       body: Row(
         children: [
