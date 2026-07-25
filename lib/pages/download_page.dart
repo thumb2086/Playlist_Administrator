@@ -593,18 +593,10 @@ class _SongDownloadTabState extends State<_SongDownloadTab> {
   int _mp3Total = 0;
   String _mp3CurrentSong = '';
 
-  // FLAC batch state
-  List<MissingFlacSong> _flacMissing = [];
-  bool _flacScanning = false;
-  bool _flacDownloading = false;
-  int _flacCurrent = 0;
-  int _flacTotal = 0;
-  String _flacCurrentSong = '';
-
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) { _scanMissing('mp3'); _scanMissing('flac'); });
+    WidgetsBinding.instance.addPostFrameCallback((_) { _scanMissing('mp3'); });
   }
 
   @override
@@ -643,45 +635,34 @@ class _SongDownloadTabState extends State<_SongDownloadTab> {
   }
 
   Future<void> _scanMissing(String format) async {
-    final isFlac = format == 'flac';
-    setState(() { if (isFlac) _flacScanning = true; else _mp3Scanning = true; });
+    setState(() { _mp3Scanning = true; });
     _log('🔍 掃描歌單中，尋找缺漏的 ${format.toUpperCase()}...');
     try {
       final songs = await DownloadService.instance.listMissing(format, onLog: _log);
-      if (mounted) setState(() {
-        if (isFlac) { _flacMissing = songs; _flacScanning = false; }
-        else { _mp3Missing = songs; _mp3Scanning = false; }
-      });
+      if (mounted) setState(() { _mp3Missing = songs; _mp3Scanning = false; });
       _log('📋 找到 ${songs.length} 首缺少 ${format.toUpperCase()}');
     } catch (e) {
       _log('❌ 掃描失敗: $e');
-      if (mounted) setState(() { if (isFlac) _flacScanning = false; else _mp3Scanning = false; });
+      if (mounted) setState(() { _mp3Scanning = false; });
     }
   }
 
   Future<void> _startBatch(String format) async {
-    final isFlac = format == 'flac';
-    final songs = isFlac ? _flacMissing : _mp3Missing;
+    final songs = _mp3Missing;
     if (songs.isEmpty) return;
-    setState(() {
-      if (isFlac) { _flacDownloading = true; _flacCurrent = 0; _flacTotal = songs.length; _flacCurrentSong = ''; }
-      else { _mp3Downloading = true; _mp3Current = 0; _mp3Total = songs.length; _mp3CurrentSong = ''; }
-    });
+    setState(() { _mp3Downloading = true; _mp3Current = 0; _mp3Total = songs.length; _mp3CurrentSong = ''; });
     try {
       await DownloadService.instance.downloadBatch(format,
         songs: songs,
         onLog: _log,
         onProgress: (current, total, song) {
-          if (mounted) setState(() {
-            if (isFlac) { _flacCurrent = current + 1; _flacTotal = total; _flacCurrentSong = song; }
-            else { _mp3Current = current + 1; _mp3Total = total; _mp3CurrentSong = song; }
-          });
+          if (mounted) setState(() { _mp3Current = current + 1; _mp3Total = total; _mp3CurrentSong = song; });
         },
       );
     } catch (e) {
       _log('❌ $format 批次下載異常: $e');
     }
-    if (mounted) setState(() { if (isFlac) _flacDownloading = false; else _mp3Downloading = false; });
+    if (mounted) setState(() { _mp3Downloading = false; });
     _scanMissing(format);
   }
 
@@ -717,10 +698,6 @@ class _SongDownloadTabState extends State<_SongDownloadTab> {
       // MP3 batch section
       _buildBatchSection('mp3', Icons.music_note_rounded, const Color(0xFF4FC3F7),
         _mp3Missing, _mp3Scanning, _mp3Downloading, _mp3Current, _mp3Total, _mp3CurrentSong),
-      const SizedBox(height: 12),
-      // FLAC batch section
-      _buildBatchSection('flac', Icons.music_video_rounded, const Color(0xFFEF5350),
-        _flacMissing, _flacScanning, _flacDownloading, _flacCurrent, _flacTotal, _flacCurrentSong),
       const SizedBox(height: 16),
       Text(t('download.log'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
       const SizedBox(height: 4),

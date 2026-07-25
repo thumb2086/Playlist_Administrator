@@ -19,9 +19,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
   void initState() {
     super.initState();
     _svc.addListener(_onChanged);
-    if (_svc.state == UpdateState.idle) {
-      _svc.startDownload(widget.info);
-    }
+    // Don't auto-download — wait for user to click "下載更新"
   }
 
   @override

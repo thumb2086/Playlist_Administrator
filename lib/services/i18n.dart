@@ -127,18 +127,13 @@ class I18N extends ChangeNotifier {
     'settings.metadata_enrich': 'Metadata 增強',
     'settings.auto_update_check': '自動檢查更新',
     'settings.spotube': 'Spotube 自動化',
-    'settings.spotube_exe': '執行檔路徑',
     'settings.spotube_dl_path': '下載路徑',
     'settings.exact_match': '精確檔名比對',
     'settings.convert_matched_only': '只轉換有匹配的歌',
     'settings.lyrics_section': '歌詞設定',
     'settings.lyrics_folder': '歌詞資料夾',
-    'settings.retroactive_lyrics': '回溯取得歌詞',
     'settings.save': '儲存設定',
     'settings.saved': '設定已儲存',
-    'settings.search_aliases': '搜尋別名',
-    'settings.no_aliases': '尚無別名，點擊下方新增',
-    'settings.add_alias': '新增別名',
 
     // Player
     'player.select_playlist': '請選擇播放清單',
@@ -292,12 +287,8 @@ class I18N extends ChangeNotifier {
     'settings.convert_matched_only': 'Convert Matched Only',
     'settings.lyrics_section': 'Lyrics',
     'settings.lyrics_folder': 'Lyrics Folder',
-    'settings.retroactive_lyrics': 'Retroactive Lyrics',
     'settings.save': 'Save',
     'settings.saved': 'Settings saved',
-    'settings.search_aliases': 'Search Aliases',
-    'settings.no_aliases': 'No aliases yet, tap Add below',
-    'settings.add_alias': 'Add Alias',
 
 
     // Player

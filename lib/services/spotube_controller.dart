@@ -3,6 +3,7 @@ import 'dart:ffi';
 import 'dart:io' hide sleep;
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
+import 'config_service.dart';
 
 int _enumFindSpotube(int hwnd, int param) {
   final len = GetWindowTextLength(hwnd) + 1;
@@ -344,8 +345,8 @@ class SpotubeController {
   }
 
   Future<int> moveDownloads() async {
-    final userProfile = Platform.environment['USERPROFILE'] ?? 'C:\\Users\\Default';
-    final src = '$userProfile\\Downloads\\Spotube';
+    final cfg = ConfigService.instance.config;
+    final src = cfg.resolvedSpotubeDownloadPath;
     final dst = '$libraryPath\\m4a';
     final srcDir = Directory(src);
     if (!await srcDir.exists()) return 0;

@@ -16,10 +16,8 @@ class AppConfig {
   String spotubeFolderName;
   String lyricsFolderName;
   bool autoUpdateCheck;
+  bool autoDownloadUpdate;
   bool enableRetroactiveLyrics;
-  bool retryFailedLyrics;
-  bool retryFailedFlac;
-  bool autoSyncOnAdd;
   String theme;
   String skippedVersion;
   bool setupCompleted;
@@ -48,10 +46,8 @@ class AppConfig {
     this.spotubeFolderName = 'spotube',
     this.lyricsFolderName = 'Lyrics',
     this.autoUpdateCheck = true,
+    this.autoDownloadUpdate = false,
     this.enableRetroactiveLyrics = false,
-    this.retryFailedLyrics = false,
-    this.retryFailedFlac = false,
-    this.autoSyncOnAdd = false,
     this.theme = 'dark',
     this.skippedVersion = '',
     this.setupCompleted = false,
@@ -98,6 +94,13 @@ class AppConfig {
   }
   String get lyricsPath => '$libraryPath${Platform.pathSeparator}$lyricsFolderName';
 
+  String get resolvedSpotubeDownloadPath {
+    if (spotubeDownloadPath.isNotEmpty) return spotubeDownloadPath;
+    final userProfile = Platform.environment['USERPROFILE'] ?? 'C:\\Users\\Default';
+    final folder = spotubeFolderName.isNotEmpty ? spotubeFolderName : 'spotube';
+    return '$userProfile\\Downloads\\$folder';
+  }
+
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
         basePath: json['base_path'] as String? ?? '',
         language: json['language'] as String? ?? 'zh-TW',
@@ -113,10 +116,8 @@ class AppConfig {
         spotubeFolderName: json['spotube_folder_name'] as String? ?? 'spotube',
         lyricsFolderName: json['lyrics_folder_name'] as String? ?? 'Lyrics',
         autoUpdateCheck: json['auto_update_check'] as bool? ?? true,
+        autoDownloadUpdate: json['auto_download_update'] as bool? ?? false,
         enableRetroactiveLyrics: json['enable_retroactive_lyrics'] as bool? ?? false,
-        retryFailedLyrics: json['retry_failed_lyrics'] as bool? ?? false,
-        retryFailedFlac: json['retry_failed_flac'] as bool? ?? false,
-        autoSyncOnAdd: json['auto_sync_on_add'] as bool? ?? false,
         theme: json['theme'] as String? ?? 'dark',
         skippedVersion: json['skipped_version'] as String? ?? '',
         setupCompleted: json['setup_completed'] as bool? ?? false,
@@ -147,10 +148,8 @@ class AppConfig {
         'spotube_folder_name': spotubeFolderName,
         'lyrics_folder_name': lyricsFolderName,
         'auto_update_check': autoUpdateCheck,
+        'auto_download_update': autoDownloadUpdate,
         'enable_retroactive_lyrics': enableRetroactiveLyrics,
-        'retry_failed_lyrics': retryFailedLyrics,
-        'retry_failed_flac': retryFailedFlac,
-        'auto_sync_on_add': autoSyncOnAdd,
         'theme': theme,
         'skipped_version': skippedVersion,
         'setup_completed': setupCompleted,
