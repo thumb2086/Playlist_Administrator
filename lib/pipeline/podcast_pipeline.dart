@@ -47,6 +47,11 @@ class PodcastPipeline {
     }
 
     await GroqService.instance.loadFromEnv();
+    // Also load from config if env didn't provide
+    if (GroqService.instance.apiKey == null || GroqService.instance.apiKey!.isEmpty) {
+      final cfgKey = ConfigService.instance.config.groqApiKey;
+      if (cfgKey.isNotEmpty) GroqService.instance.setApiKey(cfgKey);
+    }
     final hasGroq = GroqService.instance.apiKey != null &&
         GroqService.instance.apiKey!.isNotEmpty;
 
