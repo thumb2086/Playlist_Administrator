@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/config_service.dart';
 import '../services/i18n.dart';
 import '../services/chinese_converter.dart';
@@ -145,6 +146,11 @@ class _PipelinePageState extends State<PipelinePage> {
                 _logs.clear();
                 setState(() {});
               }, _logs.isEmpty, color: AppColors.textMuted),
+              _PButton('複製全部', Icons.copy_rounded, () {
+                final text = _logs.join('\n');
+                Clipboard.setData(ClipboardData(text: text));
+                _log('📋 已複製 ${_logs.length} 行到剪貼簿');
+              }, _logs.isEmpty, color: AppColors.textSecondary),
             ],
           ]),
           const SizedBox(height: 20),
