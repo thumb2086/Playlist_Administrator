@@ -750,7 +750,7 @@ def cmd_youtube_subs(args):
             'skip_download': True,
             'writesubtitles': True,
             'writeautomaticsub': True,
-            'subtitleslangs': ['zh-TW', 'zh-Hant', 'zh', 'en'],
+            'subtitleslangs': ['zh-TW', 'zh-Hant', 'zh', 'zh-Hans', 'en'],
             'subtitlesformat': 'srt',
             'outtmpl': srt_path.replace('.srt', '.%(ext)s'),
             'windowsfilenames': True,
