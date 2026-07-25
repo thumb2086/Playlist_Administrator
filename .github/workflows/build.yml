@@ -25,10 +25,10 @@ jobs:
         run: |
           mkdir release_bundle
           copy build\windows\x64\runner\Release\playlist_administrator.exe release_bundle\
+          copy build\windows\x64\runner\Release\tools\* release_bundle\tools\ 2>nul
           xcopy /E /I tools release_bundle\tools\
-          copy .env release_bundle\ 2>nul || echo no .env
 
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: playlist-administrator-windows
@@ -38,7 +38,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release_bundle\playlist_administrator.exe
-            release_bundle\tools\*
+          files: release_bundle\playlist_administrator.exe
           generate_release_notes: true
