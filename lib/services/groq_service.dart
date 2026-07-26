@@ -12,11 +12,32 @@ class GroqService {
 
   String _keysCsv = '';
   String _model = 'whisper-large-v3';
+  final List<int> _callTimes = [];
 
   void setApiKey(String csv) { _keysCsv = csv; }
   String? get apiKey => _keysCsv.isNotEmpty ? _keysCsv.split(',')[0].trim() : null;
   int get keyCount => _keysCsv.split(',').where((k) => k.trim().isNotEmpty).length;
   String get defaultModel => _model;
+
+  /// RPM data: [minute_offset, count] for last 60 minutes
+  List<List<int>> get rpmHistory {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 60000;
+    final counts = <int, int>{};
+    for (final t in _callTimes) {
+      final m = (now - t ~/ 60000).clamp(0, 59);
+      counts[m] = (counts[m] ?? 0) + 1;
+    }
+    final result = <List<int>>[];
+    for (int i = 59; i >= 0; i--) {
+      result.add([59 - i, counts[i] ?? 0]);
+    }
+    return result;
+  }
+
+  void _recordCall() {
+    _callTimes.add(DateTime.now().millisecondsSinceEpoch);
+    if (_callTimes.length > 5000) _callTimes.removeRange(0, _callTimes.length - 5000);
+  }
 
   Future<void> loadFromEnv() async {
     final f = File('.env');
@@ -41,6 +62,7 @@ class GroqService {
     required String filePath, required String model, String? language,
     void Function(String chunk, double pct)? onChunk,
   }) async {
+    _recordCall();
     if (_keysCsv.isEmpty) throw Exception('請先設定 Groq API Key');
     if (!File(filePath).existsSync()) throw Exception('檔案不存在: $filePath');
 

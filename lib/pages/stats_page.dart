@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/config_service.dart';
+import '../services/groq_service.dart';
 import '../services/i18n.dart';
 import '../services/history_recorder.dart';
 import '../widgets/dark_theme.dart';
@@ -151,6 +152,8 @@ class _StatsPageState extends State<StatsPage> {
           _ChartCard('總檔案數變化', total, _buildFileChart()),
           const SizedBox(height: 14),
           _ChartCard('歌曲完成度變化', _entries, _buildPlaylistChart()),
+          const SizedBox(height: 14),
+          _buildGroqRpmChart(),
           const SizedBox(height: 14),
         ],
         if (total > 0) ...[
@@ -478,6 +481,28 @@ class _StatsPageState extends State<StatsPage> {
         )).toList(),
       )),
     ]);
+  }
+
+  Widget _buildGroqRpmChart() {
+    final rpm = GroqService.instance.rpmHistory;
+    final maxRpm = rpm.fold<int>(0, (m, e) => e[1] > m ? e[1] : m);
+    if (maxRpm == 0) return const SizedBox.shrink();
+    return _ChartCard('Groq RPM (最近60分鐘)', maxRpm, SizedBox(
+      height: 140,
+      child: LineChart(LineChartData(
+        gridData: FlGridData(show: true, drawVerticalLine: false,
+          horizontalInterval: (maxRpm > 4 ? (maxRpm / 4).ceilToDouble() : 1)),
+        titlesData: FlTitlesData(leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 24, getTitlesWidget: (v, _) => Text('${v.toInt()}', style: const TextStyle(fontSize: 8, color: AppColors.textMuted)))),
+          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, interval: 10, getTitlesWidget: (v, _) => Text('${-60 + v.toInt()}', style: const TextStyle(fontSize: 8, color: AppColors.textMuted)))),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false))),
+        borderData: FlBorderData(show: false),
+        lineBarsData: [LineChartBarData(spots: rpm.map((e) => FlSpot(e[0].toDouble(), e[1].toDouble())).toList(),
+          isCurved: true, color: AppColors.accent, barWidth: 2, dotData: FlDotData(show: false),
+          belowBarData: BarAreaData(show: true, color: AppColors.accent.withValues(alpha: 0.15)))],
+        minY: 0,
+      )),
+    ));
   }
 }
 
