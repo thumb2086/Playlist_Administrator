@@ -153,9 +153,9 @@ class _StatsPageState extends State<StatsPage> {
           const SizedBox(height: 14),
           _ChartCard('歌曲完成度變化', _entries, _buildPlaylistChart()),
           const SizedBox(height: 14),
-          _buildGroqRpmChart(),
-          const SizedBox(height: 14),
         ],
+        _buildGroqRpmChart(),
+        const SizedBox(height: 14),
         if (total > 0) ...[
           Text(t('stats.format_distribution'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
@@ -486,10 +486,10 @@ class _StatsPageState extends State<StatsPage> {
   Widget _buildGroqRpmChart() {
     final rpm = GroqService.instance.rpmHistory;
     final maxRpm = rpm.fold<int>(0, (m, e) => e[1] > m ? e[1] : m);
-    if (maxRpm == 0) return const SizedBox.shrink();
     return _ChartCard('Groq RPM (最近60分鐘)', maxRpm, SizedBox(
       height: 140,
-      child: LineChart(LineChartData(
+      child: maxRpm == 0 ? const Center(child: Text('尚無 Groq 呼叫紀錄', style: TextStyle(color: AppColors.textMuted, fontSize: 11)))
+      : LineChart(LineChartData(
         gridData: FlGridData(show: true, drawVerticalLine: false,
           horizontalInterval: (maxRpm > 4 ? (maxRpm / 4).ceilToDouble() : 1)),
         titlesData: FlTitlesData(leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 24, getTitlesWidget: (v, _) => Text('${v.toInt()}', style: const TextStyle(fontSize: 8, color: AppColors.textMuted)))),

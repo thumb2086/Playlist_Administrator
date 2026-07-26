@@ -190,6 +190,7 @@ class PodcastPipeline {
 
     // Groq phase: run immediately if SRT not found
     if (hasGroq && !await File(srtPath).exists() && !await File(txtPath).exists()) {
+      if (state.isCancelled) { cache[t.key] = {'srt': false, 'txt': false, 'status': 'cancelled'}; return; }
       onLog('    🎤 $name');
       try {
         final text = await GroqService.instance.transcribeFile(
