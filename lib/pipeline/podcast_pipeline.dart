@@ -118,53 +118,13 @@ class PodcastPipeline {
       final batch = tasks.skip(i).take(4).toList();
       await Future.wait(batch.asMap().entries.map((e) async {
         await Future.delayed(Duration(milliseconds: e.key * 1500));
-        return _processOne(e.value, podcastName, rssUrl, podDir, ext, cache, onLog);
+        return _processOne(e.value, podcastName, rssUrl, podDir, ext, cache, onLog, hasGroq: hasGroq);
       }));
 
       final done = (i + batch.length).clamp(0, total);
       onProgress(done * 100 ~/ total, 100, stepIndex);
       _saveCache(cache);
       onLog('  進度: $done/$total');
-    }
-
-    // Post-processing: Groq for episodes without SRT (parallel with concurrency cap)
-    if (hasGroq) {
-      final needGroq = tasks.where((t) {
-        final n = PodcastService.normalizeFileName(t.episode.title);
-        return !File('$podDir\\$n.srt').existsSync() && !File('$podDir\\$n.txt').existsSync();
-      }).toList();
-      if (needGroq.isNotEmpty) {
-        final c = ConfigService.instance.config.groqConcurrency;
-        final concurrency = c < 1 ? 1 : (c > 8 ? 8 : c);
-        onLog('  🎤 Groq 逐字稿: ${needGroq.length} 集 (×$concurrency 並行)');
-        for (int i = 0; i < needGroq.length; i += concurrency) {
-          if (state.isCancelled) break;
-          await state.waitIfPaused();
-          final batch = needGroq.skip(i).take(concurrency).toList();
-          await Future.wait(batch.map((t) async {
-            if (state.isCancelled) return;
-            final name = PodcastService.normalizeFileName(t.episode.title);
-            final audioPath = '$podDir\\$name.$ext';
-            final txtPath = '$podDir\\$name.txt';
-            if (!await File(audioPath).exists()) return;
-            onLog('    🎤 $name');
-            try {
-              final text = await GroqService.instance.transcribeFile(
-                filePath: audioPath, model: 'whisper-large-v3-turbo', language: 'zh',
-              );
-              await File(txtPath).writeAsString(text, flush: true);
-              cache[t.key] = {'srt': false, 'txt': true, 'status': 'ok'};
-              onLog('      ✅ (${text.length} 字)');
-            } catch (e) {
-              onLog('      ❌ $e');
-              cache[t.key] = {'srt': false, 'txt': false, 'status': 'error'};
-            }
-          }));
-          final done = (i + batch.length).clamp(0, needGroq.length) as int;
-          _saveCache(cache);
-          onLog('  🎤 進度: $done/${needGroq.length}');
-        }
-      }
     }
 
     final srtCount = cache.values.where((v) => v['srt'] == true).length;
@@ -196,8 +156,9 @@ class PodcastPipeline {
 
   Future<void> _processOne(
     _PodTask t, String podcastName, String rssUrl, String podDir, String ext,
-    Map<String, Map<String, dynamic>> cache, void Function(String) onLog,
-  ) async {
+    Map<String, Map<String, dynamic>> cache, void Function(String) onLog, {
+    bool hasGroq = false,
+  }) async {
     final name = PodcastService.normalizeFileName(t.episode.title);
     final audioPath = '$podDir\\$name.$ext';
     final srtPath = '$podDir\\$name.srt';
@@ -216,12 +177,9 @@ class PodcastPipeline {
       }
     }
 
-    onLog('    🔍 $name');
-    if (!await File(srtPath).exists()) {
-      if (await File(txtPath).exists()) {
-        cache[t.key] = {'srt': false, 'txt': true, 'status': 'ok'};
-        return;
-      }
+    // SRT phase
+    if (!await File(srtPath).exists() && !await File(txtPath).exists()) {
+      onLog('    🔍 $name');
       await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
         onLog: (msg) => onLog('      $msg'),
       );
@@ -230,11 +188,27 @@ class PodcastPipeline {
       }
     }
 
-    cache[t.key] = {
-      'srt': await File(srtPath).exists(),
-      'txt': await File(txtPath).exists(),
-      'status': 'ok',
-    };
+    // Groq phase: run immediately if SRT not found
+    if (hasGroq && !await File(srtPath).exists() && !await File(txtPath).exists()) {
+      onLog('    🎤 $name');
+      try {
+        final text = await GroqService.instance.transcribeFile(
+          filePath: audioPath, model: 'whisper-large-v3-turbo', language: 'zh',
+        );
+        await File(txtPath).writeAsString(text, flush: true);
+        onLog('      ✅ (${text.length} 字)');
+        cache[t.key] = {'srt': false, 'txt': true, 'status': 'ok'};
+      } catch (e) {
+        onLog('      ❌ $e');
+        cache[t.key] = {'srt': false, 'txt': false, 'status': 'error'};
+      }
+    } else {
+      cache[t.key] = {
+        'srt': await File(srtPath).exists(),
+        'txt': await File(txtPath).exists(),
+        'status': 'ok',
+      };
+    }
   }
 }
 
