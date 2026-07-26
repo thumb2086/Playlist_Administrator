@@ -164,51 +164,78 @@ class PodcastPipeline {
     final srtPath = '$podDir\\$name.srt';
     final txtPath = '$podDir\\$name.txt';
 
-    onLog('  [${t.index}] ⬇️ $name');
+    // Download audio if missing
     if (!await File(audioPath).exists()) {
+      onLog('  [${t.index}] ⬇️ $name');
       try {
         await PodcastService.instance.downloadEpisode(rssUrl, t.index, (pct) {},
           podcastName: podcastName,
         );
       } catch (e) {
         onLog('    ❌ 下載失敗');
-        cache[t.key] = {'srt': false, 'txt': false, 'status': 'error'};
+        cache[t.key] = {'srt': false, 'txt': false, 'yt_status': 'error', 'status': 'error'};
         return;
       }
     }
 
-    // SRT phase
-    if (!await File(srtPath).exists() && !await File(txtPath).exists()) {
-      onLog('    🔍 $name');
-      await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
-        onLog: (msg) => onLog('      $msg'),
-      );
-      if (await File(srtPath).exists()) {
-        await _srtToTxt(srtPath, txtPath);
-      }
-    }
-
-    // Groq phase: run immediately if SRT not found
-    if (hasGroq && !await File(srtPath).exists() && !await File(txtPath).exists()) {
-      if (state.isCancelled) { cache[t.key] = {'srt': false, 'txt': false, 'status': 'cancelled'}; return; }
-      onLog('    🎤 $name');
-      try {
-        final text = await GroqService.instance.transcribeFile(
-          filePath: audioPath, model: 'whisper-large-v3-turbo', language: 'zh',
-        );
-        await File(txtPath).writeAsString(text, flush: true);
-        onLog('      ✅ (${text.length} 字)');
-        cache[t.key] = {'srt': false, 'txt': true, 'status': 'ok'};
-      } catch (e) {
-        onLog('      ❌ $e');
-        cache[t.key] = {'srt': false, 'txt': false, 'status': 'error'};
-      }
-    } else {
+    // Skip if already have result
+    if (await File(srtPath).exists() || await File(txtPath).exists()) {
       cache[t.key] = {
         'srt': await File(srtPath).exists(),
         'txt': await File(txtPath).exists(),
+        'yt_status': await File(srtPath).exists() ? 'found' : (cache[t.key]?['yt_status'] ?? ''),
         'status': 'ok',
       };
+      return;
+    }
+
+    // Check if YT was already searched and failed
+    final prevYt = cache[t.key]?['yt_status'] as String?;
+    final ytFailed = prevYt == 'not_found';
+
+    // Run YT search (if not previously failed) + Groq simultaneously
+    Future<bool> ytFuture = Future.value(false);
+    if (!ytFailed) {
+      ytFuture = PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
+        onLog: (msg) => onLog('      $msg'),
+      ).then((found) async {
+        if (found && await File(srtPath).exists()) {
+          await _srtToTxt(srtPath, txtPath);
+          return true;
+        }
+        return false;
+      });
+    }
+
+    Future<bool> groqFuture = Future.value(false);
+    if (hasGroq) {
+      groqFuture = GroqService.instance.transcribeFile(
+        filePath: audioPath, model: 'whisper-large-v3-turbo', language: 'zh',
+      ).then((text) async {
+        if (text.isNotEmpty && !await File(srtPath).exists() && !await File(txtPath).exists()) {
+          await File(txtPath).writeAsString(text, flush: true);
+          onLog('      ✅ (${text.length} 字)');
+          return true;
+        }
+        return false;
+      }).catchError((_) => false);
+    }
+
+    final ytOk = await ytFuture;
+    final groqOk = await groqFuture;
+
+    final hasSrt = await File(srtPath).exists();
+    final hasTxt = await File(txtPath).exists();
+
+    cache[t.key] = {
+      'srt': hasSrt,
+      'txt': hasTxt,
+      'yt_status': hasSrt ? 'found' : (hasTxt && ytFailed ? 'not_found' : (hasTxt ? 'skipped' : 'not_found')),
+      'status': hasSrt || hasTxt ? 'ok' : 'error',
+    };
+
+    if (!hasSrt && !hasTxt) {
+      onLog('    ❌ 無可用字幕');
     }
   }
 }
