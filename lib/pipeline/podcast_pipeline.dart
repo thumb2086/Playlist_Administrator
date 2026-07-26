@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import '../models/config_model.dart';
@@ -109,6 +110,22 @@ class PodcastPipeline {
     }
     onLog('  需處理: ${tasks.length} 集 (×4 並行)');
     final total = tasks.length;
+    final groqQueue = <_PodTask>[];
+    int groqActive = 0;
+    final groqLimit = ConfigService.instance.config.groqConcurrency.clamp(1, 8);
+
+    Future<void> _tryGroq() async {
+      while (groqActive < groqLimit && groqQueue.isNotEmpty && !state.isCancelled) {
+        final t = groqQueue.removeAt(0);
+        groqActive++;
+        // fire and forget: continue processing queue while this runs
+        unawaited(_runGroq(t, podcastName, podDir, ext, cache, onLog).then((_) {
+          groqActive--;
+          _saveCache(cache);
+          _tryGroq(); // kick next
+        }));
+      }
+    }
 
     for (int i = 0; i < total; i += 4) {
       if (state.isCancelled) break;
@@ -118,13 +135,22 @@ class PodcastPipeline {
       final batch = tasks.skip(i).take(4).toList();
       await Future.wait(batch.asMap().entries.map((e) async {
         await Future.delayed(Duration(milliseconds: e.key * 1500));
-        return _processOne(e.value, podcastName, rssUrl, podDir, ext, cache, onLog, hasGroq: hasGroq);
+        final needGroq = await _processOne(e.value, podcastName, rssUrl, podDir, ext, cache, onLog);
+        if (needGroq && hasGroq) {
+          groqQueue.add(e.value);
+          _tryGroq();
+        }
       }));
 
       final done = (i + batch.length).clamp(0, total);
       onProgress(done * 100 ~/ total, 100, stepIndex);
       _saveCache(cache);
       onLog('  進度: $done/$total');
+    }
+
+    // Wait for remaining Groq
+    while (groqActive > 0 && !state.isCancelled) {
+      await Future.delayed(const Duration(seconds: 1));
     }
 
     final srtCount = cache.values.where((v) => v['srt'] == true).length;
@@ -154,11 +180,10 @@ class PodcastPipeline {
     } catch (_) {}
   }
 
-  Future<void> _processOne(
+  Future<bool> _processOne(
     _PodTask t, String podcastName, String rssUrl, String podDir, String ext,
-    Map<String, Map<String, dynamic>> cache, void Function(String) onLog, {
-    bool hasGroq = false,
-  }) async {
+    Map<String, Map<String, dynamic>> cache, void Function(String) onLog,
+  ) async {
     final name = PodcastService.normalizeFileName(t.episode.title);
     final audioPath = '$podDir\\$name.$ext';
     final srtPath = '$podDir\\$name.srt';
@@ -174,61 +199,55 @@ class PodcastPipeline {
       } catch (e) {
         onLog('    ❌ 下載失敗');
         cache[t.key] = {'srt': false, 'txt': false, 'yt_status': '', 'status': 'error'};
-        return;
+        return false;
       }
     }
 
     // Skip if already have result
     if (await File(srtPath).exists() || await File(txtPath).exists()) {
-      cache[t.key] = {
-        'srt': await File(srtPath).exists(),
-        'txt': await File(txtPath).exists(),
-        'yt_status': await File(srtPath).exists() ? 'found' : (cache[t.key]?['yt_status'] ?? ''),
-        'status': 'ok',
-      };
-      return;
+      return false;
     }
 
     // YT search (skip if previously failed)
     final prevYt = cache[t.key]?['yt_status'] as String?;
-    bool ytFound = false;
     if (prevYt == 'not_found') {
       onLog('    ⏭️ $name (YT 上次已搜過)');
-    } else {
-      onLog('    🔍 $name');
-      final subOk = await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
-        onLog: (msg) => onLog('      $msg'),
+      cache[t.key] = {'srt': false, 'txt': false, 'yt_status': 'not_found', 'status': 'no_sub'};
+      return true; // need Groq
+    }
+
+    onLog('    🔍 $name');
+    await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
+      onLog: (msg) => onLog('      $msg'),
+    );
+    if (await File(srtPath).exists()) {
+      await _srtToTxt(srtPath, txtPath);
+      cache[t.key] = {'srt': true, 'txt': true, 'yt_status': 'found', 'status': 'ok'};
+      return false; // SRT found, no Groq needed
+    }
+    cache[t.key] = {'srt': false, 'txt': false, 'yt_status': 'not_found', 'status': 'no_sub'};
+    return true; // need Groq
+  }
+
+  Future<void> _runGroq(
+    _PodTask t, String podcastName, String podDir, String ext,
+    Map<String, Map<String, dynamic>> cache, void Function(String) onLog,
+  ) async {
+    final name = PodcastService.normalizeFileName(t.episode.title);
+    final audioPath = '$podDir\\$name.$ext';
+    final txtPath = '$podDir\\$name.txt';
+    if (!await File(audioPath).exists()) return;
+    if (await File(txtPath).exists()) return;
+    onLog('    🎤 $name');
+    try {
+      final text = await GroqService.instance.transcribeFile(
+        filePath: audioPath, model: 'whisper-large-v3-turbo', language: 'zh',
       );
-      if (subOk && await File(srtPath).exists()) {
-        await _srtToTxt(srtPath, txtPath);
-        ytFound = true;
-      }
-    }
-
-    // Groq (only if YT didn't find anything)
-    if (hasGroq && !ytFound && !await File(srtPath).exists() && !await File(txtPath).exists()) {
-      onLog('    🎤 $name');
-      try {
-        final text = await GroqService.instance.transcribeFile(
-          filePath: audioPath, model: 'whisper-large-v3-turbo', language: 'zh',
-        );
-        await File(txtPath).writeAsString(text, flush: true);
-        onLog('      ✅ (${text.length} 字)');
-      } catch (e) {
-        onLog('      ❌ $e');
-      }
-    }
-
-    final hasSrt = await File(srtPath).exists();
-    final hasTxt = await File(txtPath).exists();
-    cache[t.key] = {
-      'srt': hasSrt,
-      'txt': hasTxt,
-      'yt_status': ytFound ? 'found' : (prevYt == 'not_found' ? 'not_found' : (hasTxt ? 'skipped' : 'not_found')),
-      'status': hasSrt || hasTxt ? 'ok' : (hasGroq ? 'error' : 'no_sub'),
-    };
-    if (!hasSrt && !hasTxt) {
-      onLog('    ❌ 無可用字幕');
+      await File(txtPath).writeAsString(text, flush: true);
+      cache[t.key] = {'srt': false, 'txt': true, 'yt_status': 'not_found', 'status': 'ok'};
+      onLog('      ✅ (${text.length} 字)');
+    } catch (e) {
+      onLog('      ❌ $e');
     }
   }
 }
