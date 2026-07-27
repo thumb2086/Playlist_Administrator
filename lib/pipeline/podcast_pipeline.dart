@@ -211,6 +211,11 @@ class PodcastPipeline {
     // YT search (skip if previously failed)
     final prevYt = cache[t.key]?['yt_status'] as String?;
     if (prevYt == 'not_found') {
+      if (await File(srtPath).exists() || await File(txtPath).exists()) {
+        if (await File(srtPath).exists()) await _srtToTxt(srtPath, txtPath);
+        cache[t.key] = {'srt': await File(srtPath).exists(), 'txt': await File(txtPath).exists(), 'yt_status': 'found', 'status': 'ok'};
+        return false;
+      }
       onLog('    ⏭️ $name (YT 上次已搜過)');
       cache[t.key] = {'srt': false, 'txt': false, 'yt_status': 'not_found', 'status': 'no_sub'};
       return true; // need Groq
@@ -235,9 +240,10 @@ class PodcastPipeline {
   ) async {
     final name = PodcastService.normalizeFileName(t.episode.title);
     final audioPath = '$podDir\\$name.$ext';
+    final srtPath = '$podDir\\$name.srt';
     final txtPath = '$podDir\\$name.txt';
     if (!await File(audioPath).exists()) return;
-    if (await File(txtPath).exists()) return;
+    if (await File(srtPath).exists() || await File(txtPath).exists()) return;
     onLog('    🎤 $name');
     try {
       final text = await GroqService.instance.transcribeFile(
