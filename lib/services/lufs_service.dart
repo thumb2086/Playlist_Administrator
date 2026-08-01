@@ -265,6 +265,16 @@ class LufsService {
     }
   }
 
+  /// Cache the M4A LUFS value already measured by loudnorm during conversion.
+  /// No extra ffmpeg scan. Falls back to a full measurement if null.
+  void cacheConversionLufsFast(String m4aPath, String mp3Path, double? lufs) {
+    final m4aCache = _load('m4a');
+    if (!m4aCache.containsKey(m4aPath) && lufs != null) {
+      m4aCache[m4aPath] = lufs;
+      _save('m4a', m4aCache);
+    }
+  }
+
   /// Delete the mp3 LUFS cache to force a fresh measurement.
   void clearMp3Cache() {
     try { File(_cacheFile('mp3')).deleteSync(); } catch (_) {}

@@ -3,7 +3,10 @@ import 'dart:io';
 import 'metadata_reader.dart';
 
 class AudioConverter {
-  static Future<bool> convert({
+  /// Returns (success, inputLufs) where inputLufs is the Input Integrated
+  /// LUFS captured from loudnorm's own measurement during conversion —
+  /// no separate full-file scan needed.
+  static Future<(bool, double?)> convert({
     required String inputPath,
     required String outputPath,
     String format = 'mp3',
@@ -17,14 +20,14 @@ class AudioConverter {
     } else if (!await File(ffmpeg).exists()) {
       ffmpeg = 'ffmpeg'; // Fallback to PATH if configured path doesn't exist
     }
-    if (!await File(inputPath).exists()) return false;
+    if (!await File(inputPath).exists()) return (false, null);
 
     // Ensure output directory exists
     await File(outputPath).parent.create(recursive: true);
 
     if (inputPath.toLowerCase().endsWith('.$format')) {
       await File(inputPath).copy(outputPath);
-      return true;
+      return (true, null);
     }
 
     meta ??= await MetadataReader.read(inputPath);
@@ -33,11 +36,13 @@ class AudioConverter {
       '-y', '-i', inputPath,
       '-map_metadata', '0',
       '-id3v2_version', '3',
+      '-threads', '0',
     ];
 
     // Apply EBU R128 loudnorm to MP3 output (YouTube/Spotify standard -14 LUFS)
     if (format == 'mp3') {
-      args.addAll(['-af', 'loudnorm=I=-14:TP=-1:LRA=7']);
+      args.addAll(['-af', 'loudnorm=I=-14:TP=-1:LRA=7',
+        '-filter_threads', '0']);
     }
 
     args.addAll([
@@ -48,20 +53,31 @@ class AudioConverter {
 
     try {
       final proc = await Process.start(ffmpeg, args, runInShell: false);
+      // MUST drain stdout/stderr or ffmpeg blocks forever when pipe buffer fills.
+      // Capture stderr to parse loudnorm's own LUFS measurement.
+      proc.stdout.drain<void>();
+      final stderrBuf = <int>[];
+      proc.stderr.listen(stderrBuf.addAll);
       // Poll for cancellation while ffmpeg runs, kill immediately if cancelled.
       while (true) {
         if (isCancelled?.call() ?? false) {
           proc.kill(ProcessSignal.sigkill);
-          return false;
+          return (false, null);
         }
         final exited = await proc.exitCode.timeout(
           const Duration(milliseconds: 250),
           onTimeout: () => -1,
         );
-        if (exited != -1) return exited == 0;
+        if (exited != -1) {
+          if (exited != 0) return (false, null);
+          final stderr = String.fromCharCodes(stderrBuf);
+          final m = RegExp(r'Input Integrated:\s+([-\d.]+)').firstMatch(stderr);
+          final lufs = m != null ? double.tryParse(m.group(1)!) : null;
+          return (true, lufs);
+        }
       }
     } catch (_) {
-      return false;
+      return (false, null);
     }
   }
 }

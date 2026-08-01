@@ -166,8 +166,10 @@ class PipelineOrchestrator {
     if (tasks.isEmpty) { progress(100); return; }
 
     // Worker pool: keep N conversions running at all times.
-    // ffmpeg loudnorm is single-threaded per file, so parallel = cores.
-    final concurrency = (Platform.numberOfProcessors).clamp(4, 32);
+    // Each ffmpeg uses -threads 0 (auto, multi-threaded), so cap concurrency
+    // at physical cores to avoid oversubscription.
+    final physicalCores = (Platform.numberOfProcessors ~/ 2).clamp(2, 16);
+    final concurrency = physicalCores;
     int converted = 0;
     int done = 0;
     var next = 0;
@@ -183,7 +185,7 @@ class PipelineOrchestrator {
 
         final t = tasks[idx];
         final fname = File(t.src).uri.pathSegments.last;
-        final ok = await AudioConverter.convert(
+        final (ok, lufs) = await AudioConverter.convert(
           inputPath: t.src,
           outputPath: t.dest,
           ffmpegPath: config.ffmpegPath.isNotEmpty ? config.ffmpegPath : 'ffmpeg',
@@ -194,8 +196,9 @@ class PipelineOrchestrator {
         done++;
         if (ok) {
           converted++;
-          await LufsService.instance.cacheConversionLufs(t.src, t.dest,
-              isCancelled: () => state.isCancelled);
+          // loudnorm measured the whole file during conversion — cache it directly,
+          // no second full-file scan. Fast path only; never blocks the worker.
+          LufsService.instance.cacheConversionLufsFast(t.src, t.dest, lufs);
         }
         onLog('  [$done/${tasks.length}] ${ok ? '✅' : '❌'} $fname');
         progress(done / tasks.length * 100);
