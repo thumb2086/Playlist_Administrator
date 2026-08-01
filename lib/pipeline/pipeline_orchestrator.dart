@@ -119,6 +119,8 @@ class PipelineOrchestrator {
     final tasks = <_ConvertTask>[];
     int skipped = 0;
 
+    final totalM4a = m4aFiles.length;
+    int scanned = 0;
     for (final m4a in m4aFiles) {
       await state.waitIfPaused();
       if (state.isCancelled) return;
@@ -127,6 +129,10 @@ class PipelineOrchestrator {
       final existing = await index.findMp3ForM4a(m4a, useMtime: true);
       if (existing != null) {
         skipped++;
+        scanned++;
+        if (scanned % 200 == 0 || scanned == totalM4a) {
+          onLog('  比對: $scanned/$totalM4a (待轉檔 ${tasks.length}，跳過 $skipped)');
+        }
         continue;
       }
 
@@ -137,6 +143,10 @@ class PipelineOrchestrator {
       final metaMatch = await index.findMp3ForM4a(m4a, useMtime: true, cachedMeta: meta);
       if (metaMatch != null) {
         skipped++;
+        scanned++;
+        if (scanned % 200 == 0 || scanned == totalM4a) {
+          onLog('  比對: $scanned/$totalM4a (待轉檔 ${tasks.length}，跳過 $skipped)');
+        }
         continue;
       }
 
@@ -145,6 +155,11 @@ class PipelineOrchestrator {
       final dest = '${config.mp3Path}\\$mp3Name';
 
       tasks.add(_ConvertTask(m4a, dest, stem, meta));
+
+      scanned++;
+      if (scanned % 200 == 0 || scanned == totalM4a) {
+        onLog('  比對: $scanned/$totalM4a (待轉檔 ${tasks.length}，跳過 $skipped)');
+      }
     }
 
     onLog('待轉檔: ${tasks.length}, 跳過: $skipped');
@@ -152,6 +167,7 @@ class PipelineOrchestrator {
 
     const batchSize = 50;
     int converted = 0;
+    int processed = 0;
     for (int i = 0; i < tasks.length; i += batchSize) {
       if (state.isCancelled) return;
       await state.waitIfPaused();
@@ -159,12 +175,17 @@ class PipelineOrchestrator {
       final batch = tasks.skip(i).take(batchSize).toList();
       final futures = <Future<bool>>[];
       for (final t in batch) {
+        final fname = File(t.src).uri.pathSegments.last;
         futures.add(AudioConverter.convert(
           inputPath: t.src,
           outputPath: t.dest,
           ffmpegPath: config.ffmpegPath.isNotEmpty ? config.ffmpegPath : 'ffmpeg',
           meta: t.meta,
-        ));
+        ).then((ok) {
+          processed++;
+          onLog('  [${i + processed}/${tasks.length}] ${ok ? '✅' : '❌'} $fname');
+          return ok;
+        }));
       }
       final results = await Future.wait(futures);
       for (int j = 0; j < batch.length; j++) {
