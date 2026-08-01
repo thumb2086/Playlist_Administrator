@@ -81,8 +81,8 @@ class _MainShellState extends State<MainShell> {
     I18N.instance.addListener(_rebuildNav);
     _updateSvc.addListener(_onUpdate);
     _checkForUpdates();
-    // Periodic check every 30 minutes while app is running
-    Timer.periodic(const Duration(minutes: 30), (_) => _checkForUpdates());
+    // Periodic check every 10 minutes while app is running
+    Timer.periodic(const Duration(minutes: 10), (_) => _checkForUpdates());
   }
 
   void _onUpdate() {
@@ -104,6 +104,7 @@ class _MainShellState extends State<MainShell> {
     Future.delayed(const Duration(seconds: 3), () async {
       final info = await VersionChecker.checkForUpdate();
       if (!info.hasUpdate) return;
+      if (!VersionChecker.isNewerThanSkipped(info.latestVersion)) return;
       if (!mounted) return;
       if (ConfigService.instance.config.autoDownloadUpdate) {
         _updateSvc.startDownload(info);

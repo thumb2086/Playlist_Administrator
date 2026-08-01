@@ -119,7 +119,7 @@ class PodcastPipeline {
         final t = groqQueue.removeAt(0);
         groqActive++;
         // fire and forget: continue processing queue while this runs
-        unawaited(_runGroq(t, podcastName, podDir, ext, cache, onLog).then((_) {
+        unawaited(_runGroq(t, podcastName, podDir, ext, cache, onLog, state).then((_) {
           groqActive--;
           _saveCache(cache);
           _tryGroq(); // kick next
@@ -237,7 +237,9 @@ class PodcastPipeline {
   Future<void> _runGroq(
     _PodTask t, String podcastName, String podDir, String ext,
     Map<String, Map<String, dynamic>> cache, void Function(String) onLog,
+    PipelineState state,
   ) async {
+    if (state.isCancelled) return;
     final name = PodcastService.normalizeFileName(t.episode.title);
     final audioPath = '$podDir\\$name.$ext';
     final srtPath = '$podDir\\$name.srt';

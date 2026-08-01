@@ -49,11 +49,14 @@ class VersionChecker {
   static bool shouldCheck() {
     final cfg = ConfigService.instance.config;
     if (!cfg.autoUpdateCheck) return false;
-    final skipped = cfg.skippedVersion;
-    if (skipped.isNotEmpty) {
-      if (_isNewer(skipped, currentVersion)) return false;
-    }
     return true;
+  }
+
+  /// True if [latest] is newer than the version the user previously skipped.
+  static bool isNewerThanSkipped(String latest) {
+    final skipped = ConfigService.instance.config.skippedVersion;
+    if (skipped.isEmpty) return true;
+    return _isNewer(latest, skipped);
   }
 
   static void markSkipped(String version) {

@@ -111,6 +111,7 @@ class LufsService {
     void Function(int done, int total)? onProgress,
     int concurrency = 8,
     double tolerance = 2.0,
+    bool Function()? isCancelled,
   }) async {
     final config = ConfigService.instance.config;
     final lib = config.libraryPath;
@@ -158,12 +159,14 @@ class LufsService {
 
     // Process with concurrency
     for (int i = 0; i < total; i += concurrency) {
+      if (isCancelled?.call() ?? false) break;
       final batch = needsNormalize.skip(i).take(concurrency).toList();
       final futures = <Future<void>>[];
       for (final path in batch) {
-        futures.add(_normalizeOne(path, ffmpeg, target, cache, onLog));
+        futures.add(_normalizeOne(path, ffmpeg, target, cache, onLog, isCancelled: isCancelled));
       }
       await Future.wait(futures);
+      if (isCancelled?.call() ?? false) break;
       done += batch.length;
       onProgress?.call(done, total);
 
@@ -175,12 +178,17 @@ class LufsService {
     }
 
     _save('mp3', cache);
-    onLog('完成: $done 個檔案已統一至 $target LUFS');
+    if (isCancelled?.call() ?? false) {
+      onLog('LUFS 已取消（已處理 $done 檔）');
+    } else {
+      onLog('完成: $done 個檔案已統一至 $target LUFS');
+    }
   }
 
   /// Run loudnorm normalization in one pass and capture input LUFS from stderr.
   Future<void> _normalizeOne(String absPath, String ffmpeg, double target,
-      Map<String, double> cache, void Function(String) onLog) async {
+      Map<String, double> cache, void Function(String) onLog,
+      {bool Function()? isCancelled}) async {
     if (!await File(absPath).exists()) return;
 
     final base = absPath.substring(0, absPath.lastIndexOf('.'));
@@ -188,11 +196,14 @@ class LufsService {
     final name = absPath.split('\\').last;
 
     try {
-      final result = await Process.run(ffmpeg, [
+      final proc = await Process.start(ffmpeg, [
         '-y', '-i', absPath,
         '-af', 'loudnorm=I=$target:TP=-1:LRA=7',
         '-c:a', 'libmp3lame', '-q:a', '2', tmp,
       ]);
+
+      final result = await _runWithCancel(proc, isCancelled);
+      if (result == null) return; // cancelled
 
       if (result.exitCode != 0 || !await File(tmp).exists()) {
         onLog('  ❌ $name normalize 失敗');
@@ -218,14 +229,38 @@ class LufsService {
     }
   }
 
+  /// Run a process while polling for cancellation; returns null if cancelled.
+  Future<ProcessResult?> _runWithCancel(Process proc, bool Function()? isCancelled) async {
+    final stderrBuf = <int>[];
+    final outBuf = <int>[];
+    proc.stderr.listen(stderrBuf.addAll);
+    proc.stdout.listen(outBuf.addAll);
+    while (true) {
+      if (isCancelled?.call() ?? false) {
+        proc.kill(ProcessSignal.sigkill);
+        return null;
+      }
+      final exited = await proc.exitCode.timeout(
+        const Duration(milliseconds: 250),
+        onTimeout: () => -1,
+      );
+      if (exited != -1) {
+        return ProcessResult(proc.pid, exited,
+            String.fromCharCodes(outBuf), String.fromCharCodes(stderrBuf));
+      }
+    }
+  }
+
   /// Measure and cache an M4A file's LUFS.
   /// MP3 cache is intentionally NOT written here: conversion already applies
   /// loudnorm to -14, and Step 6 (Measure LUFS) records real values when it
   /// normalizes playlist MP3s.
-  Future<void> cacheConversionLufs(String m4aPath, String mp3Path) async {
+  Future<void> cacheConversionLufs(String m4aPath, String mp3Path,
+      {bool Function()? isCancelled}) async {
     final m4aCache = _load('m4a');
     if (!m4aCache.containsKey(m4aPath)) {
-      await _measureOne(m4aPath, m4aCache, (v) { m4aCache[m4aPath] = v; });
+      await _measureOne(m4aPath, m4aCache, (v) { m4aCache[m4aPath] = v; },
+          isCancelled: isCancelled);
       _save('m4a', m4aCache);
     }
   }
@@ -286,14 +321,17 @@ class LufsService {
     onLog('[$fmt] 測量完成，共 ${cache.length} 個檔案');
   }
 
-  Future<void> _measureOne(String path, Map<String, double> cache, void Function(double) onResult) async {
+  Future<void> _measureOne(String path, Map<String, double> cache,
+      void Function(double) onResult, {bool Function()? isCancelled}) async {
     final ffmpeg = await _resolveFfmpeg();
     try {
-      final result = await Process.run(ffmpeg, [
+      final proc = await Process.start(ffmpeg, [
         '-i', path,
         '-af', 'loudnorm=print_format=json',
         '-f', 'null', '-', '-hide_banner', '-y',
       ]);
+      final result = await _runWithCancel(proc, isCancelled);
+      if (result == null) { onResult(-14.0); return; }
       if (result.exitCode != 0) { onResult(-14.0); return; }
 
       final stderr = result.stderr as String? ?? '';

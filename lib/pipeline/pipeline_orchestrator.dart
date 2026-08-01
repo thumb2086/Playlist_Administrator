@@ -165,41 +165,44 @@ class PipelineOrchestrator {
     onLog('待轉檔: ${tasks.length}, 跳過: $skipped');
     if (tasks.isEmpty) { progress(100); return; }
 
-    const batchSize = 50;
+    // Worker pool: keep N conversions running at all times.
+    // ffmpeg loudnorm is single-threaded per file, so parallel = cores.
+    final concurrency = (Platform.numberOfProcessors).clamp(4, 32);
     int converted = 0;
-    int processed = 0;
-    for (int i = 0; i < tasks.length; i += batchSize) {
-      if (state.isCancelled) return;
-      await state.waitIfPaused();
+    int done = 0;
+    var next = 0;
 
-      final batch = tasks.skip(i).take(batchSize).toList();
-      final futures = <Future<bool>>[];
-      for (final t in batch) {
+    Future<void> worker() async {
+      while (true) {
+        if (state.isCancelled) return;
+        await state.waitIfPaused();
+        if (state.isCancelled) return;
+
+        final idx = next++;
+        if (idx >= tasks.length) return;
+
+        final t = tasks[idx];
         final fname = File(t.src).uri.pathSegments.last;
-        futures.add(AudioConverter.convert(
+        final ok = await AudioConverter.convert(
           inputPath: t.src,
           outputPath: t.dest,
           ffmpegPath: config.ffmpegPath.isNotEmpty ? config.ffmpegPath : 'ffmpeg',
           meta: t.meta,
-        ).then((ok) {
-          processed++;
-          onLog('  [${i + processed}/${tasks.length}] ${ok ? '✅' : '❌'} $fname');
-          return ok;
-        }));
-      }
-      final results = await Future.wait(futures);
-      for (int j = 0; j < batch.length; j++) {
-        if (results[j]) {
-          // Capture M4A LUFS (uses cache if available) and mark MP3 at -14
-          await LufsService.instance.cacheConversionLufs(batch[j].src, batch[j].dest);
+          isCancelled: () => state.isCancelled,
+        );
+        if (state.isCancelled) return;
+        done++;
+        if (ok) {
+          converted++;
+          await LufsService.instance.cacheConversionLufs(t.src, t.dest,
+              isCancelled: () => state.isCancelled);
         }
+        onLog('  [$done/${tasks.length}] ${ok ? '✅' : '❌'} $fname');
+        progress(done / tasks.length * 100);
       }
-      converted += results.where((r) => r).length;
-
-      final pct = (i + batch.length) / tasks.length * 100;
-      progress(pct);
-      onLog('  進度: ${i + batch.length}/${tasks.length}');
     }
+
+    await Future.wait(List.generate(concurrency, (_) => worker()));
 
     onLog('轉檔完成: $converted 個');
   }
@@ -475,6 +478,7 @@ class PipelineOrchestrator {
         },
         concurrency: 8,
         tolerance: 2.0,
+        isCancelled: () => state.isCancelled,
       );
     } catch (e) {
       onLog('LUFS 異常: $e');

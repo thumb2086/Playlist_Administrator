@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'metadata_reader.dart';
 
@@ -8,6 +9,7 @@ class AudioConverter {
     String format = 'mp3',
     String? ffmpegPath,
     TrackMetadata? meta,
+    bool Function()? isCancelled,
   }) async {
     String ffmpeg = ffmpegPath ?? 'ffmpeg';
     if (!ffmpeg.contains('\\') && !ffmpeg.contains('/')) {
@@ -45,8 +47,19 @@ class AudioConverter {
     ]);
 
     try {
-      final result = await Process.run(ffmpeg, args);
-      return result.exitCode == 0;
+      final proc = await Process.start(ffmpeg, args, runInShell: false);
+      // Poll for cancellation while ffmpeg runs, kill immediately if cancelled.
+      while (true) {
+        if (isCancelled?.call() ?? false) {
+          proc.kill(ProcessSignal.sigkill);
+          return false;
+        }
+        final exited = await proc.exitCode.timeout(
+          const Duration(milliseconds: 250),
+          onTimeout: () => -1,
+        );
+        if (exited != -1) return exited == 0;
+      }
     } catch (_) {
       return false;
     }
