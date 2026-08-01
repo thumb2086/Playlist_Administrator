@@ -84,6 +84,7 @@ class GroqService {
     );
 
     final lastLine = Completer<String>();
+    final stderrBuf = <String>[];
 
     proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
       (line) {
@@ -111,6 +112,7 @@ class GroqService {
       (line) {
         final t = line.trim();
         if (t.isNotEmpty) {
+          stderrBuf.add(t);
           debugPrint('[Groq] stderr: $t');
         }
       },
@@ -125,9 +127,7 @@ class GroqService {
     // Check stderr for clues
     final procExit = await proc.exitCode;
     if (procExit != 0) {
-      // Try to read remaining stderr
-      final errBuf = await proc.stderr.transform(utf8.decoder).transform(const LineSplitter()).toList();
-      final errMsg = errBuf.where((l) => l.trim().isNotEmpty).join('\n');
+      final errMsg = stderrBuf.join('\n');
       throw Exception('Python exit $procExit: ${errMsg.isNotEmpty ? errMsg.substring(0, errMsg.length.clamp(0, 200)) : "no output"}');
     }
     throw Exception('未收到 Groq 回應');
