@@ -218,17 +218,16 @@ class LufsService {
     }
   }
 
-  /// Measure and cache an M4A file's LUFS, then set the MP3 cache to -14.
-  /// Used by the conversion step: M4A → MP3 with loudnorm, so output is always -14.
+  /// Measure and cache an M4A file's LUFS.
+  /// MP3 cache is intentionally NOT written here: conversion already applies
+  /// loudnorm to -14, and Step 6 (Measure LUFS) records real values when it
+  /// normalizes playlist MP3s.
   Future<void> cacheConversionLufs(String m4aPath, String mp3Path) async {
     final m4aCache = _load('m4a');
     if (!m4aCache.containsKey(m4aPath)) {
       await _measureOne(m4aPath, m4aCache, (v) { m4aCache[m4aPath] = v; });
       _save('m4a', m4aCache);
     }
-    final mp3Cache = _load('mp3');
-    mp3Cache[mp3Path] = -14.0;
-    _save('mp3', mp3Cache);
   }
 
   /// Delete the mp3 LUFS cache to force a fresh measurement.
