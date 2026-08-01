@@ -19,11 +19,13 @@ class PipelinePage extends StatefulWidget {
 class _PipelinePageState extends State<PipelinePage> {
   final _logs = <String>[];
   final _scrollCtrl = ScrollController();
-  PipelineState _state = PipelineState();
-  bool _running = false;
-  double _progress = 0;
-  int _currentStep = 0;
-  bool _isPodcast = false;
+  PipelineState _musicState = PipelineState();
+  PipelineState _podcastState = PipelineState();
+  bool _musicRunning = false;
+  bool _podcastRunning = false;
+  double _musicProgress = 0;
+  double _podcastProgress = 0;
+  int _musicStep = 0;
 
   late List<String> _stepLabels;
 
@@ -67,9 +69,9 @@ class _PipelinePageState extends State<PipelinePage> {
   }
 
   Future<void> _run({int fromStep = 0, int? toStep}) async {
-    if (_running) return;
-    setState(() { _running = true; _progress = 0; _currentStep = fromStep; _isPodcast = false; });
-    _state = PipelineState();
+    if (_musicRunning) return;
+    setState(() { _musicRunning = true; _musicProgress = 0; _musicStep = fromStep; });
+    _musicState = PipelineState();
     _log(t('pipeline.starting'));
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
@@ -80,23 +82,23 @@ class _PipelinePageState extends State<PipelinePage> {
         config: ConfigService.instance.config,
         onLog: _log,
         onProgress: (c, t, stepIdx) {
-          try { if (mounted) setState(() { _progress = t > 0 ? c / t : 0.0; _currentStep = stepIdx; }); } catch (_) {}
+          try { if (mounted) setState(() { _musicProgress = t > 0 ? c / t : 0.0; _musicStep = stepIdx; }); } catch (_) {}
         },
-        state: _state,
+        state: _musicState,
       );
       await orch.run(fromStep: fromStep, toStep: toStep);
       HistoryRecorder.record().ignore();
     } catch (e) {
       _log('  ❌ Pipeline 執行錯誤: $e');
     } finally {
-      if (mounted) setState(() { _running = false; _progress = 0; });
+      if (mounted) setState(() { _musicRunning = false; _musicProgress = 0; });
     }
   }
 
   Future<void> _runPodcast() async {
-    if (_running) return;
-    setState(() { _running = true; _progress = 0; _currentStep = 0; _isPodcast = true; });
-    _state = PipelineState();
+    if (_podcastRunning) return;
+    setState(() { _podcastRunning = true; _podcastProgress = 0; });
+    _podcastState = PipelineState();
     _log('Podcast Pipeline 啟動中…');
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
@@ -106,15 +108,15 @@ class _PipelinePageState extends State<PipelinePage> {
       final pipeline = PodcastPipeline(
         onLog: _log,
         onProgress: (c, t, stepIdx) {
-          try { if (mounted) setState(() { _progress = t > 0 ? c / t : 0.0; _currentStep = stepIdx; }); } catch (_) {}
+          try { if (mounted) setState(() { _podcastProgress = t > 0 ? c / t : 0.0; }); } catch (_) {}
         },
-        state: _state,
+        state: _podcastState,
       );
       await pipeline.run();
     } catch (e) {
       _log('  ❌ Podcast Pipeline 錯誤: $e');
     } finally {
-      if (mounted) setState(() { _running = false; _progress = 0; _isPodcast = false; });
+      if (mounted) setState(() { _podcastRunning = false; _podcastProgress = 0; });
     }
   }
 
@@ -126,28 +128,40 @@ class _PipelinePageState extends State<PipelinePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Wrap(spacing: 8, runSpacing: 8, children: [
-            _PButton(t('pipeline.run_all'), Icons.play_arrow_rounded, () => _run(), _running, isPrimary: true),
-            _PButton(t('pipeline.run_convert'), Icons.transform, () => _run(fromStep: 0, toStep: 1), _running),
-            _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1, toStep: 2), _running),
-            _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2, toStep: 3), _running),
-            _PButton(t('pipeline.run_podcast'), Icons.podcasts, _runPodcast, _running, color: const Color(0xFFCE93D8)),
-            if (_running) ...[
+            _PButton(t('pipeline.run_all'), Icons.play_arrow_rounded, () => _run(), _musicRunning, isPrimary: true),
+            _PButton(t('pipeline.run_convert'), Icons.transform, () => _run(fromStep: 0, toStep: 1), _musicRunning),
+            _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1, toStep: 2), _musicRunning),
+            _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2, toStep: 3), _musicRunning),
+            _PButton(t('pipeline.run_podcast'), Icons.podcasts, _runPodcast, _podcastRunning, color: const Color(0xFFCE93D8)),
+            if (_musicRunning) ...[
               _PButton(t('pipeline.pause'), Icons.pause_rounded, () {
-                _state.pause();
+                _musicState.pause();
                 _log('Pipeline 已暫停');
                 setState(() {});
               }, false, color: Colors.orange),
               _PButton(t('pipeline.cancel'), Icons.stop_rounded, () {
-                _state.cancel();
+                _musicState.cancel();
                 _log('正在取消 Pipeline…');
                 setState(() {});
               }, false, color: AppColors.error),
+            ],
+            if (_podcastRunning) ...[
+              _PButton(t('pipeline.pause'), Icons.pause_rounded, () {
+                _podcastState.pause();
+                _log('Podcast Pipeline 已暫停');
+                setState(() {});
+              }, false, color: Colors.orange),
+              _PButton(t('pipeline.cancel'), Icons.stop_rounded, () {
+                _podcastState.cancel();
+                _log('正在取消 Podcast Pipeline…');
+                setState(() {});
+              }, false, color: AppColors.error),
+            ],
+            if (_logs.isNotEmpty) ...[
               _PButton(t('pipeline.clear_log'), Icons.delete_outline_rounded, () {
                 _logs.clear();
                 setState(() {});
-              }, _logs.isEmpty, color: AppColors.textMuted),
-            ],
-            if (_logs.isNotEmpty)
+              }, false, color: AppColors.textMuted),
               _PButton('複製全部', Icons.copy_rounded, () {
                 final text = _logs.join('\n');
                 Clipboard.setData(ClipboardData(text: text));
@@ -158,33 +172,56 @@ class _PipelinePageState extends State<PipelinePage> {
                   );
                 }
               }, false, color: AppColors.textSecondary),
+            ],
           ]),
           const SizedBox(height: 20),
           AnimatedSize(duration: const Duration(milliseconds: 300), curve: Curves.easeOut,
-            child: (_running || _progress > 0) ? Column(children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: _progress, backgroundColor: AppColors.surfaceLight,
-                  valueColor: const AlwaysStoppedAnimation(AppColors.accent), minHeight: 7,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(children: [
-                Text('${_isPodcast ? 'Podcast' : _stepLabels[_currentStep]}  (${(_progress * 100).toStringAsFixed(0)}%)',
-                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-                const Spacer(),
-                if (_running)
-                  const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
-              ]),
-            ]) : const SizedBox.shrink(),
+            child: (_musicRunning || _musicProgress > 0 || _podcastRunning || _podcastProgress > 0)
+                ? Column(children: [
+                    if (_musicRunning || _musicProgress > 0) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: _musicProgress, backgroundColor: AppColors.surfaceLight,
+                          valueColor: const AlwaysStoppedAnimation(AppColors.accent), minHeight: 7,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Text('${_stepLabels[_musicStep]}  (${(_musicProgress * 100).toStringAsFixed(0)}%)',
+                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                        const Spacer(),
+                        if (_musicRunning)
+                          const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
+                      ]),
+                      const SizedBox(height: 16),
+                    ],
+                    if (_podcastRunning || _podcastProgress > 0) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: _podcastProgress, backgroundColor: AppColors.surfaceLight,
+                          valueColor: const AlwaysStoppedAnimation(Color(0xFFCE93D8)), minHeight: 7,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Text('Podcast  (${(_podcastProgress * 100).toStringAsFixed(0)}%)',
+                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                        const Spacer(),
+                        if (_podcastRunning)
+                          const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
+                      ]),
+                    ],
+                  ])
+                : const SizedBox.shrink(),
           ),
-          if (_running || _progress > 0) const SizedBox(height: 16),
-          if (!_isPodcast)
+          if (_musicRunning || _musicProgress > 0 || _podcastRunning || _podcastProgress > 0) const SizedBox(height: 16),
+          if (_musicRunning || _musicProgress > 0)
             Row(
               children: List.generate(_stepLabels.length, (i) {
-                final active = i == _currentStep && _running;
-                final done = i < _currentStep;
+                final active = i == _musicStep && _musicRunning;
+                final done = i < _musicStep;
                 return Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 3),
@@ -207,7 +244,7 @@ class _PipelinePageState extends State<PipelinePage> {
                 );
               }),
             ),
-          if (_isPodcast && _running)
+          if (_podcastRunning)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text('Podcast Pipeline 執行中…',
