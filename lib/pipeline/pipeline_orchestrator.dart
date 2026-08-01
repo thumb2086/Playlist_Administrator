@@ -10,7 +10,6 @@ import '../services/snapshot_manager.dart';
 import '../services/file_renamer.dart';
 import '../services/playlist_parser.dart';
 import '../services/lufs_service.dart';
-import '../services/subtitle_service.dart';
 
 class PipelineOrchestrator {
   final AppConfig config;
@@ -33,7 +32,6 @@ class PipelineOrchestrator {
       ('Organize unsorted songs', 10.0),
       ('Enrich metadata', 10.0),
       ('Measure LUFS', 10.0),
-      ('Download SRT subtitles', 5.0),
     ];
 
     final end = toStep ?? steps.length;
@@ -76,7 +74,6 @@ class PipelineOrchestrator {
       case 3: await _stepUnsorted(progress); break;
       case 4: await _stepMetadata(progress); break;
       case 5: await _stepMeasureLufs(progress); break;
-      case 6: await _stepDownloadSrt(progress); break;
     }
   }
 
@@ -460,22 +457,6 @@ class PipelineOrchestrator {
       );
     } catch (e) {
       onLog('LUFS 異常: $e');
-    }
-    progress(100);
-  }
-
-  Future<void> _stepDownloadSrt(void Function(double) progress) async {
-    try {
-      final svc = SubtitleService.instance;
-      await svc.downloadSrtForPlaylistMp3s(
-        onLog: onLog,
-        onProgress: (done, total) {
-          progress(total > 0 ? done / total * 100 : 0);
-        },
-        concurrency: 4,
-      );
-    } catch (e) {
-      onLog('SRT 下載異常: $e');
     }
     progress(100);
   }
