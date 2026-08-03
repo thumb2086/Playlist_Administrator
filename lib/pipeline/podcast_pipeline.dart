@@ -205,6 +205,12 @@ class PodcastPipeline {
 
     // Skip if already have result
     if (await File(srtPath).exists() || await File(txtPath).exists()) {
+      // SRT exists but TXT missing (e.g. subtitles grabbed by external tool):
+      // convert now so the transcript is available.
+      if (await File(srtPath).exists() && !await File(txtPath).exists()) {
+        await _srtToTxt(srtPath, txtPath);
+        cache[t.key] = {'srt': true, 'txt': await File(txtPath).exists(), 'yt_status': 'found', 'status': 'ok'};
+      }
       return false;
     }
 
