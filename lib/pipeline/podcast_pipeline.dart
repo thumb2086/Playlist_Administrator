@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import '../models/config_model.dart';
 import '../models/podcast_episode.dart';
 import '../models/pipeline_step.dart';
 import '../services/config_service.dart';
@@ -108,7 +107,7 @@ class PodcastPipeline {
       onLog('  無新集數 (${cache.length} 集已處理過)');
       return;
     }
-    onLog('  需處理: ${tasks.length} 集 (×4 並行)');
+    onLog('  需處理: ${tasks.length} 集 (×8 並行)');
     final total = tasks.length;
     final groqQueue = <_PodTask>[];
     int groqActive = 0;
@@ -127,15 +126,16 @@ class PodcastPipeline {
       }
     }
 
-    for (int i = 0; i < total; i += 4) {
+    for (int i = 0; i < total; i += 8) {
       if (state.isCancelled) break;
       await state.waitIfPaused();
       if (state.isCancelled) break;
 
-      final batch = tasks.skip(i).take(4).toList();
+      final batch = tasks.skip(i).take(8).toList();
       await Future.wait(batch.asMap().entries.map((e) async {
-        await Future.delayed(Duration(milliseconds: e.key * 1500));
         final needGroq = await _processOne(e.value, podcastName, rssUrl, podDir, ext, cache, onLog);
+        // Save immediately after each episode so progress is never lost.
+        _saveCache(cache);
         if (needGroq && hasGroq) {
           groqQueue.add(e.value);
           _tryGroq();
@@ -144,7 +144,6 @@ class PodcastPipeline {
 
       final done = (i + batch.length).clamp(0, total);
       onProgress(done * 100 ~/ total, 100, stepIndex);
-      _saveCache(cache);
       onLog('  進度: $done/$total');
     }
 
@@ -228,6 +227,9 @@ class PodcastPipeline {
     }
 
     onLog('    🔍 $name');
+    // Stagger only real YT searches (0~700ms) to avoid rate limit,
+    // never delay episodes that skip instantly.
+    await Future.delayed(Duration(milliseconds: (t.index % 8) * 100));
     await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
       onLog: (msg) => onLog('      $msg'),
     );
