@@ -130,7 +130,7 @@ class PodcastPipeline {
       onLog('  無新集數 (${alreadyHave} 集已處理過)');
       return;
     }
-    onLog('  需處理: ${tasks.length} 集 (×8 並行)');
+    onLog('  需處理: ${tasks.length} 集 (×4 並行)');
     final total = tasks.length;
     final groqQueue = <_PodTask>[];
     int groqActive = 0;
@@ -149,12 +149,12 @@ class PodcastPipeline {
       }
     }
 
-    for (int i = 0; i < total; i += 8) {
+    for (int i = 0; i < total; i += 4) {
       if (state.isCancelled) break;
       await state.waitIfPaused();
       if (state.isCancelled) break;
 
-      final batch = tasks.skip(i).take(8).toList();
+      final batch = tasks.skip(i).take(4).toList();
       await Future.wait(batch.asMap().entries.map((e) async {
         final needGroq = await _processOne(e.value, podcastName, rssUrl, podDir, ext, cache, onLog);
         // Save immediately after each episode so progress is never lost.
@@ -250,9 +250,9 @@ class PodcastPipeline {
     }
 
     onLog('    🔍 $name');
-    // Stagger only real YT searches (0~700ms) to avoid rate limit,
+    // Stagger only real YT searches (0~1.2s) to avoid rate limit,
     // never delay episodes that skip instantly.
-    await Future.delayed(Duration(milliseconds: (t.index % 8) * 100));
+    await Future.delayed(Duration(milliseconds: (t.index % 4) * 300));
     await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
       onLog: (msg) => onLog('      $msg'),
     );
@@ -287,6 +287,9 @@ class PodcastPipeline {
       onLog('      ✅ (${text.length} 字)');
     } catch (e) {
       onLog('      ❌ $e');
+      // Record failure so the episode is retried on next run instead of
+      // being treated as done.
+      cache[t.key] = {'srt': false, 'txt': false, 'yt_status': 'not_found', 'status': 'error'};
     }
   }
 }
