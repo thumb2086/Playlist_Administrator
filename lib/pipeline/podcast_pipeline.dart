@@ -280,7 +280,7 @@ class PodcastPipeline {
     onLog('    🎤 $name');
     try {
       final text = await GroqService.instance.transcribeFile(
-        filePath: audioPath, model: 'whisper-large-v3-turbo', language: 'zh',
+        filePath: audioPath, model: 'whisper-large-v3', language: 'zh',
       );
       await File(txtPath).writeAsString(text, flush: true);
       cache[t.key] = {'srt': false, 'txt': true, 'yt_status': 'not_found', 'status': 'ok'};
