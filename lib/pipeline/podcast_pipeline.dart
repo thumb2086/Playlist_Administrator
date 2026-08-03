@@ -92,19 +92,42 @@ class PodcastPipeline {
     final episodes = result.episodes;
     onLog('  Feed: ${result.title} (${episodes.length} 集)');
 
-    // Build task list
+    // Build task list — check disk synchronously so episodes that already
+    // have srt/txt are resolved instantly (no network, no batch waiting).
+    // Only episodes truly missing files enter the parallel batch.
     final tasks = <_PodTask>[];
+    int alreadyHave = 0;
     for (int i = 0; i < episodes.length; i++) {
       if (state.isCancelled) break;
       final ep = episodes[i];
       final key = '$podcastName|${ep.title}';
+      final name = PodcastService.normalizeFileName(ep.title);
+      final srtPath = '$podDir\\$name.srt';
+      final txtPath = '$podDir\\$name.txt';
+      final hasSrt = File(srtPath).existsSync();
+      final hasTxt = File(txtPath).existsSync();
+      if (hasSrt || hasTxt) {
+        // Backfill missing txt right here (fast, local).
+        if (hasSrt && !hasTxt) {
+          await _srtToTxt(srtPath, txtPath);
+        }
+        cache[key] = {
+          'srt': hasSrt,
+          'txt': hasTxt || await File(txtPath).existsSync(),
+          'yt_status': hasSrt ? 'found' : (cache[key]?['yt_status'] ?? ''),
+          'status': 'ok',
+        };
+        alreadyHave++;
+        continue;
+      }
       if (!cache.containsKey(key) || (cache[key]!['srt'] != true && cache[key]!['txt'] != true)) {
         tasks.add(_PodTask(index: i, episode: ep, key: key));
       }
     }
+    _saveCache(cache);
 
     if (tasks.isEmpty) {
-      onLog('  無新集數 (${cache.length} 集已處理過)');
+      onLog('  無新集數 (${alreadyHave} 集已處理過)');
       return;
     }
     onLog('  需處理: ${tasks.length} 集 (×8 並行)');
