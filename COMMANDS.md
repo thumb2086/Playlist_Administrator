@@ -221,7 +221,18 @@ flutter build windows --debug
 
 ### 版本標籤
 
+發版只推 tag 即可，**不需**更新 pubspec.yaml 或任何檔案，
+GitHub Actions 會自動從 tag 讀取版本號填入編譯：
+
 ```bash
-git tag v2.0.2-beta.59
-git push origin v2.0.2-beta.59
+# 1. 先 commit 程式碼修正（不用動版本號）
+git commit -am "修復 xxx"
+
+# 2. 直接打 tag 並推送
+git tag v2.6.66
+git push origin v2.6.66
 ```
+
+- tag 名稱格式：`vX.Y.Z`（例如 `v2.6.66`）
+- 推送後 CI 會自動：`flutter build windows --release --dart-define=APP_VERSION=<版本號>` → Inno Setup 打包 → 上傳 GitHub Release
+- `pubspec.yaml` 的 `version` 欄位僅供分支推播（非 tag）時備用，發版流程可忽略
