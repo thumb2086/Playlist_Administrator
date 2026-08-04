@@ -76,10 +76,6 @@ class BridgeService {
     final targetDir = '$tmpDir\\playlist_admin_tools';
     final bridgeScript = '$targetDir\\flutter_download_bridge.py';
 
-    if (await File(bridgeScript).exists()) {
-      return _extractedPath = bridgeScript;
-    }
-
     await Directory(targetDir).create(recursive: true);
     final manifest = await rootBundle.loadString('AssetManifest.json');
     final assets = (jsonDecode(manifest) as Map<String, dynamic>).keys
@@ -90,7 +86,9 @@ class BridgeService {
       final data = await rootBundle.load(asset);
       final file = File('$targetDir\\$relative');
       await file.parent.create(recursive: true);
-      await file.writeAsBytes(data.buffer.asUint8List());
+      // Always overwrite: the temp cache may hold a stale bridge from an
+      // older app version, which silently kept old (buggy) behavior.
+      await file.writeAsBytes(data.buffer.asUint8List(), flush: true);
     }
     return _extractedPath = bridgeScript;
   }
@@ -100,13 +98,10 @@ class BridgeService {
     final targetDir = '$tmpDir\\playlist_admin_tools';
     final bridgeScript = '$targetDir\\flutter_download_bridge.py';
 
-    if (await File(bridgeScript).exists()) {
-      return _extractedPath = bridgeScript;
-    }
-
     await Directory(targetDir).create(recursive: true);
     await for (final f in Directory(sourceDir).list()) {
       if (f is File) {
+        // Always overwrite, see _extractFromAssets.
         await f.copy('$targetDir\\${f.uri.pathSegments.last}');
       }
     }
