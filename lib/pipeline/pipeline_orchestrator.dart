@@ -154,6 +154,19 @@ class PipelineOrchestrator {
       final mp3Name = '$stem.mp3';
       final dest = '${config.mp3Path}\\$mp3Name';
 
+      // 4. Direct disk check: the in-memory index may be stale (built before
+      // this run converted files), so trust the filesystem over the index.
+      final destFile = File(dest);
+      if (await destFile.exists() &&
+          destFile.lastModifiedSync().compareTo(File(m4a).lastModifiedSync()) >= 0) {
+        skipped++;
+        scanned++;
+        if (scanned % 200 == 0 || scanned == totalM4a) {
+          onLog('  比對: $scanned/$totalM4a (待轉檔 ${tasks.length}，跳過 $skipped)');
+        }
+        continue;
+      }
+
       tasks.add(_ConvertTask(m4a, dest, stem, meta));
 
       scanned++;

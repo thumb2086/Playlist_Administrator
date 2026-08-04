@@ -268,6 +268,9 @@ class LibraryIndex {
         if (entity is File) {
           final low = entity.path.toLowerCase();
           if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac')) {
+            // Podcast audio is NOT part of the music library: excluding it
+            // prevents M4As from being fuzzy-matched against podcast files.
+            if (low.contains('podcast_downloads') || low.contains('podcast_rag')) continue;
             result.add(entity.path);
           }
         }
