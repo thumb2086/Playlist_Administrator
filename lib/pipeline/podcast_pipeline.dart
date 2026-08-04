@@ -6,6 +6,7 @@ import '../models/pipeline_step.dart';
 import '../services/config_service.dart';
 import '../services/podcast_service.dart';
 import '../services/groq_service.dart';
+import '../version.dart';
 
 class PodcastPipeline {
   final void Function(String) onLog;
@@ -46,6 +47,10 @@ class PodcastPipeline {
       return;
     }
 
+    final _stamp = DateTime.now().toString().substring(0, 19);
+    final _ver = appVersion.startsWith('v') ? appVersion : 'v$appVersion';
+    onLog('$_stamp  Playlist Administrator $_ver');
+
     await GroqService.instance.loadFromEnv();
     // Also load from config if env didn't provide
     if (GroqService.instance.apiKey == null || GroqService.instance.apiKey!.isEmpty) {
@@ -64,7 +69,8 @@ class PodcastPipeline {
       await state.waitIfPaused();
 
       final sub = subEntries[si];
-      onLog('\n--- [${si + 1}/${subEntries.length}] ${sub.key} ---');
+      final ts = DateTime.now().toString().substring(0, 19);
+      onLog('\n$ts --- [${si + 1}/${subEntries.length}] ${sub.key} ---');
 
       try {
         await _processPodcast(sub.key, sub.value, hasGroq, stepIndex);
