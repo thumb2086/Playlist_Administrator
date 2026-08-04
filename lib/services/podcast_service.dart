@@ -93,9 +93,11 @@ class PodcastService {
   }
 
   static String normalizeFileName(String title) {
+    // `&` etc. are cmd.exe metacharacters: with runInShell: true an unquoted
+    // arg is truncated at them, silently corrupting every saved filename.
     return title
         .replaceAll(RegExp(r'\s*\[[\w-]{11}\]'), '')
-        .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
+        .replaceAll(RegExp(r'[<>:"/\\|?*&^%!()]'), '_')
         .trim();
   }
 
