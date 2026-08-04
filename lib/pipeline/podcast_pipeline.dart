@@ -294,8 +294,9 @@ class PodcastPipeline {
     } catch (e) {
       onLog('      ❌ $e');
       // Record failure so the episode is retried on next run instead of
-      // being treated as done.
-      cache[t.key] = {'srt': false, 'txt': false, 'yt_status': 'not_found', 'status': 'error'};
+      // being treated as done. Keep yt_status='' so YouTube (free) is
+      // retried before spending Groq credits again.
+      cache[t.key] = {'srt': false, 'txt': false, 'yt_status': '', 'status': 'error'};
     }
   }
 }
