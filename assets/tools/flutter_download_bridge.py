@@ -572,6 +572,12 @@ def cmd_groq_transcribe(args):
         result = subprocess.run(cmd, capture_output=True, timeout=610)
         os.unlink(body_file.name)
         out = result.stdout.decode('utf-8', errors='replace')
+        if not out.strip():
+            # curl errors (e.g. connection failure) go to stderr; without
+            # an HTTP response, sc=0 and the caller must treat this as a
+            # transient retryable failure.
+            err = result.stderr.decode('utf-8', errors='replace').strip()
+            return (0, err or 'curl no response')
         # Find final status line and body (skip 100 Continue + proxy header)
         lines = out.split('\r\n')
         sc = 0
@@ -638,7 +644,10 @@ def cmd_groq_transcribe(args):
                         return
                     break
 
-                if sc in (429, 500, 502, 503):
+                if sc in (429, 500, 502, 503) or sc == 0:
+                    # sc=0: no HTTP response at all (connection reset /
+                    # timeout / proxy hiccup) — retry like other transient
+                    # failures instead of failing the episode immediately.
                     emit_json({'type': 'log', 'message': 'HTTP ' + str(sc) + ', retry ' + str(attempt+1) + '/' + str(len(keys)+2)})
                     time.sleep(5 + attempt * 3)
                     continue
@@ -674,6 +683,8 @@ def cmd_groq_transcribe(args):
                     err_msg += 'HTTP ' + str(last_status) + ' - ' + j.get('error', {}).get('message', last_body[:100])
                 except:
                     err_msg += 'HTTP ' + str(last_status) + ' (' + last_body[:100] + ')'
+            elif last_body:
+                err_msg += 'no HTTP response: ' + last_body[:100]
             else:
                 err_msg += 'unknown error (no response)'
             err_msg += ' [' + str(file_size // 1024) + 'KB]'
@@ -764,7 +775,10 @@ def cmd_youtube_subs(args):
 
     # Step 2: Download subtitles
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    srt_path = output_path.replace('.mp3', '').replace('.m4a', '').replace('.wav', '') + '.srt'
+    # Replace only the final extension. String-wide .replace('.wav', '')
+    # would also strip '.wav' from the podcast folder name (e.g.
+    # "科技浪 Tech.wav") and save the SRT into a wrong directory.
+    srt_path = os.path.splitext(output_path)[0] + '.srt'
 
     cookie_file = r'C:\Users\CPXru\Desktop\thumb\大拇哥實驗室\cookies.txt'
     if not os.path.exists(cookie_file):

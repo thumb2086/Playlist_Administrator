@@ -102,14 +102,14 @@ class PodcastPipeline {
       final ep = episodes[i];
       final key = '$podcastName|${ep.title}';
       final name = PodcastService.normalizeFileName(ep.title);
-      final srtPath = '$podDir\\$name.srt';
+      final srtPath = _findSrt(podDir, name);
       final txtPath = '$podDir\\$name.txt';
-      final hasSrt = File(srtPath).existsSync();
+      final hasSrt = srtPath != null;
       final hasTxt = File(txtPath).existsSync();
       if (hasSrt || hasTxt) {
         // Backfill missing txt right here (fast, local).
         if (hasSrt && !hasTxt) {
-          await _srtToTxt(srtPath, txtPath);
+          await _srtToTxt(srtPath!, txtPath);
         }
         cache[key] = {
           'srt': hasSrt,
@@ -181,6 +181,26 @@ class PodcastPipeline {
     onLog('  $podcastName 完成: 總處理 ${cache.length} 集 (SRT $srtCount, 逐字稿 $txtCount, 錯誤 $errCount)');
   }
 
+  /// Resolve the actual SRT file for an episode. yt-dlp may save
+  /// subtitles as `name.srt` or with a language suffix such as
+  /// `name.zh-TW.srt` / `name.zh-Hans.srt`. Returns null when none exists.
+  String? _findSrt(String podDir, String name) {
+    final plain = '$podDir\\$name.srt';
+    if (File(plain).existsSync()) return plain;
+    final dir = Directory(podDir);
+    if (!dir.existsSync()) return null;
+    try {
+      final prefix = '$name.';
+      for (final f in dir.listSync()) {
+        final fn = f.uri.pathSegments.last;
+        if (fn.startsWith(prefix) && fn.toLowerCase().endsWith('.srt')) {
+          return f.path;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<void> _srtToTxt(String srtPath, String txtPath) async {
     if (!await File(srtPath).exists()) return;
     try {
@@ -208,7 +228,7 @@ class PodcastPipeline {
   ) async {
     final name = PodcastService.normalizeFileName(t.episode.title);
     final audioPath = '$podDir\\$name.$ext';
-    final srtPath = '$podDir\\$name.srt';
+    final srtPath = _findSrt(podDir, name);
     final txtPath = '$podDir\\$name.txt';
 
     // Download audio if missing
@@ -226,10 +246,10 @@ class PodcastPipeline {
     }
 
     // Skip if already have result
-    if (await File(srtPath).exists() || await File(txtPath).exists()) {
+    if (srtPath != null || await File(txtPath).exists()) {
       // SRT exists but TXT missing (e.g. subtitles grabbed by external tool):
       // convert now so the transcript is available.
-      if (await File(srtPath).exists() && !await File(txtPath).exists()) {
+      if (srtPath != null && !await File(txtPath).exists()) {
         await _srtToTxt(srtPath, txtPath);
         cache[t.key] = {'srt': true, 'txt': await File(txtPath).exists(), 'yt_status': 'found', 'status': 'ok'};
       }
@@ -239,9 +259,9 @@ class PodcastPipeline {
     // YT search (skip if previously failed)
     final prevYt = cache[t.key]?['yt_status'] as String?;
     if (prevYt == 'not_found') {
-      if (await File(srtPath).exists() || await File(txtPath).exists()) {
-        if (await File(srtPath).exists()) await _srtToTxt(srtPath, txtPath);
-        cache[t.key] = {'srt': await File(srtPath).exists(), 'txt': await File(txtPath).exists(), 'yt_status': 'found', 'status': 'ok'};
+      if (srtPath != null || await File(txtPath).exists()) {
+        if (srtPath != null) await _srtToTxt(srtPath, txtPath);
+        cache[t.key] = {'srt': srtPath != null, 'txt': await File(txtPath).exists(), 'yt_status': 'found', 'status': 'ok'};
         return false;
       }
       onLog('    ⏭️ $name (YT 上次已搜過)');
@@ -256,8 +276,9 @@ class PodcastPipeline {
     final subResult = await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
       onLog: (msg) => onLog('      $msg'),
     );
-    if (subResult == PodcastSubtitleResult.found && await File(srtPath).exists()) {
-      await _srtToTxt(srtPath, txtPath);
+    final srtAfter = _findSrt(podDir, name);
+    if (subResult == PodcastSubtitleResult.found && srtAfter != null) {
+      await _srtToTxt(srtAfter, txtPath);
       cache[t.key] = {'srt': true, 'txt': true, 'yt_status': 'found', 'status': 'ok'};
       return false; // SRT found, no Groq needed
     }
@@ -279,10 +300,10 @@ class PodcastPipeline {
     if (state.isCancelled) return;
     final name = PodcastService.normalizeFileName(t.episode.title);
     final audioPath = '$podDir\\$name.$ext';
-    final srtPath = '$podDir\\$name.srt';
+    final srtPath = _findSrt(podDir, name);
     final txtPath = '$podDir\\$name.txt';
     if (!await File(audioPath).exists()) return;
-    if (await File(srtPath).exists() || await File(txtPath).exists()) return;
+    if (srtPath != null || await File(txtPath).exists()) return;
     onLog('    🎤 $name');
     try {
       final text = await GroqService.instance.transcribeFile(
