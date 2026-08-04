@@ -17,8 +17,10 @@ class PipelinePage extends StatefulWidget {
 }
 
 class _PipelinePageState extends State<PipelinePage> {
-  final _logs = <String>[];
-  final _scrollCtrl = ScrollController();
+  final _musicLogs = <String>[];
+  final _podcastLogs = <String>[];
+  final _musicScrollCtrl = ScrollController();
+  final _podcastScrollCtrl = ScrollController();
   PipelineState _musicState = PipelineState();
   PipelineState _podcastState = PipelineState();
   bool _musicRunning = false;
@@ -39,7 +41,8 @@ class _PipelinePageState extends State<PipelinePage> {
   @override
   void dispose() {
     I18N.instance.removeListener(_rebuildStepLabels);
-    _scrollCtrl.dispose();
+    _musicScrollCtrl.dispose();
+    _podcastScrollCtrl.dispose();
     super.dispose();
   }
 
@@ -57,12 +60,20 @@ class _PipelinePageState extends State<PipelinePage> {
     });
   }
 
-  void _log(String msg) { if (mounted) setState(() { _logs.add(msg); }); _autoScroll(); }
+  void _musicLog(String msg) {
+    if (mounted) setState(() { _musicLogs.add(msg); });
+    _autoScroll(_musicScrollCtrl);
+  }
 
-  void _autoScroll() {
+  void _podcastLog(String msg) {
+    if (mounted) setState(() { _podcastLogs.add(msg); });
+    _autoScroll(_podcastScrollCtrl);
+  }
+
+  void _autoScroll(ScrollController ctrl) {
     Future.delayed(const Duration(milliseconds: 50), () {
-      if (_scrollCtrl.hasClients) {
-        _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent,
+      if (ctrl.hasClients) {
+        ctrl.animateTo(ctrl.position.maxScrollExtent,
             duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
       }
     });
@@ -72,15 +83,15 @@ class _PipelinePageState extends State<PipelinePage> {
     if (_musicRunning) return;
     setState(() { _musicRunning = true; _musicProgress = 0; _musicStep = fromStep; });
     _musicState = PipelineState();
-    _log(t('pipeline.starting'));
+    _musicLog(t('pipeline.starting'));
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
     try {
-      try { await ChineseConverter.instance.load(); } catch (e) { _log('注意: 中文轉換器載入失敗: $e'); }
+      try { await ChineseConverter.instance.load(); } catch (e) { _musicLog('注意: 中文轉換器載入失敗: $e'); }
 
       final orch = PipelineOrchestrator(
         config: ConfigService.instance.config,
-        onLog: _log,
+        onLog: _musicLog,
         onProgress: (c, t, stepIdx) {
           try { if (mounted) setState(() { _musicProgress = t > 0 ? c / t : 0.0; _musicStep = stepIdx; }); } catch (_) {}
         },
@@ -89,7 +100,7 @@ class _PipelinePageState extends State<PipelinePage> {
       await orch.run(fromStep: fromStep, toStep: toStep);
       HistoryRecorder.record().ignore();
     } catch (e) {
-      _log('  ❌ Pipeline 執行錯誤: $e');
+      _musicLog('  ❌ Pipeline 執行錯誤: $e');
     } finally {
       if (mounted) setState(() { _musicRunning = false; _musicProgress = 0; });
     }
@@ -99,14 +110,14 @@ class _PipelinePageState extends State<PipelinePage> {
     if (_podcastRunning) return;
     setState(() { _podcastRunning = true; _podcastProgress = 0; });
     _podcastState = PipelineState();
-    _log('Podcast Pipeline 啟動中…');
+    _podcastLog('Podcast Pipeline 啟動中…');
     await Future<void>.delayed(const Duration(milliseconds: 50));
 
     try {
-      try { await ChineseConverter.instance.load(); } catch (e) { _log('注意: 中文轉換器載入失敗: $e'); }
+      try { await ChineseConverter.instance.load(); } catch (e) { _podcastLog('注意: 中文轉換器載入失敗: $e'); }
 
       final pipeline = PodcastPipeline(
-        onLog: _log,
+        onLog: _podcastLog,
         onProgress: (c, t, stepIdx) {
           try { if (mounted) setState(() { _podcastProgress = t > 0 ? c / t : 0.0; }); } catch (_) {}
         },
@@ -114,14 +125,67 @@ class _PipelinePageState extends State<PipelinePage> {
       );
       await pipeline.run();
     } catch (e) {
-      _log('  ❌ Podcast Pipeline 錯誤: $e');
+      _podcastLog('  ❌ Podcast Pipeline 錯誤: $e');
     } finally {
       if (mounted) setState(() { _podcastRunning = false; _podcastProgress = 0; });
     }
   }
 
+  Widget _buildLogPanel({
+    required List<String> logs,
+    required ScrollController scrollCtrl,
+    required String title,
+    required Color accentColor,
+    bool empty = false,
+  }) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+              child: Text(title, style: TextStyle(
+                color: accentColor, fontSize: 12, fontWeight: FontWeight.w600)),
+          ),
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF080808),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: logs.isEmpty
+                  ? Center(child: Text(empty ? '' : t('pipeline.log_placeholder'),
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 12)))
+                  : SelectionArea(child: ListView.builder(
+                      controller: scrollCtrl,
+                      padding: const EdgeInsets.all(10),
+                      itemCount: logs.length,
+                      itemBuilder: (ctx, i) {
+                        final line = logs[i];
+                        Color? color;
+                        if (line.contains('❌')) { color = Colors.red[300]; }
+                        else if (line.contains('✅') || line.contains('完成')) { color = accentColor; }
+                        else if (line.contains('---')) { color = Colors.cyan[300]; }
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 1),
+                          child: Text(line, style: TextStyle(fontSize: 11, fontFamily: 'Consolas',
+                              color: color ?? AppColors.textMuted, height: 1.4)),
+                        );
+                      },
+                    )),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final hasLogs = _musicLogs.isNotEmpty || _podcastLogs.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       child: Column(
@@ -136,34 +200,35 @@ class _PipelinePageState extends State<PipelinePage> {
             if (_musicRunning) ...[
               _PButton(t('pipeline.pause'), Icons.pause_rounded, () {
                 _musicState.pause();
-                _log('Pipeline 已暫停');
+                _musicLog('Pipeline 已暫停');
                 setState(() {});
               }, false, color: Colors.orange),
               _PButton(t('pipeline.cancel'), Icons.stop_rounded, () {
                 _musicState.cancel();
-                _log('正在取消 Pipeline…');
+                _musicLog('正在取消 Pipeline…');
                 setState(() {});
               }, false, color: AppColors.error),
             ],
             if (_podcastRunning) ...[
               _PButton(t('pipeline.pause'), Icons.pause_rounded, () {
                 _podcastState.pause();
-                _log('Podcast Pipeline 已暫停');
+                _podcastLog('Podcast Pipeline 已暫停');
                 setState(() {});
               }, false, color: Colors.orange),
               _PButton(t('pipeline.cancel'), Icons.stop_rounded, () {
                 _podcastState.cancel();
-                _log('正在取消 Podcast Pipeline…');
+                _podcastLog('正在取消 Podcast Pipeline…');
                 setState(() {});
               }, false, color: AppColors.error),
             ],
-            if (_logs.isNotEmpty) ...[
+            if (hasLogs) ...[
               _PButton(t('pipeline.clear_log'), Icons.delete_outline_rounded, () {
-                _logs.clear();
+                _musicLogs.clear();
+                _podcastLogs.clear();
                 setState(() {});
               }, false, color: AppColors.textMuted),
               _PButton('複製全部', Icons.copy_rounded, () {
-                final text = _logs.join('\n');
+                final text = [..._musicLogs, '', '--- Podcast ---', '', ..._podcastLogs].join('\n');
                 Clipboard.setData(ClipboardData(text: text));
                 if (mounted) {
                   setState(() {});
@@ -252,32 +317,19 @@ class _PipelinePageState extends State<PipelinePage> {
             ),
           const SizedBox(height: 16),
           Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xFF080808),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: _logs.isEmpty
-                  ? Center(child: Text(t('pipeline.log_placeholder'), style: const TextStyle(color: AppColors.textMuted, fontSize: 12)))
-                  : SelectionArea(child: ListView.builder(
-                      controller: _scrollCtrl,
-                      padding: const EdgeInsets.all(10),
-                      itemCount: _logs.length,
-                      itemBuilder: (ctx, i) {
-                        final line = _logs[i];
-                        Color? color;
-                        if (line.contains('❌')) { color = Colors.red[300]; }
-                        else if (line.contains('✅') || line.contains('完成')) { color = AppColors.accent; }
-                        else if (line.contains('---')) { color = Colors.cyan[300]; }
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 1),
-                          child: Text(line, style: TextStyle(fontSize: 11, fontFamily: 'Consolas',
-                              color: color ?? AppColors.textMuted, height: 1.4)),
-                        );
-                      },
-                    )),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLogPanel(
+                  logs: _musicLogs, scrollCtrl: _musicScrollCtrl,
+                  title: '🎵 音樂 Pipeline', accentColor: AppColors.accent,
+                ),
+                const SizedBox(width: 12),
+                _buildLogPanel(
+                  logs: _podcastLogs, scrollCtrl: _podcastScrollCtrl,
+                  title: '🎙️ Podcast Pipeline', accentColor: const Color(0xFFCE93D8),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
