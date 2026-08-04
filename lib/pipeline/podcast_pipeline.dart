@@ -253,15 +253,21 @@ class PodcastPipeline {
     // Stagger only real YT searches (0~1.2s) to avoid rate limit,
     // never delay episodes that skip instantly.
     await Future.delayed(Duration(milliseconds: (t.index % 4) * 300));
-    await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
+    final subResult = await PodcastService.instance.downloadSubtitles(t.episode.title, podcastName,
       onLog: (msg) => onLog('      $msg'),
     );
-    if (await File(srtPath).exists()) {
+    if (subResult == PodcastSubtitleResult.found && await File(srtPath).exists()) {
       await _srtToTxt(srtPath, txtPath);
       cache[t.key] = {'srt': true, 'txt': true, 'yt_status': 'found', 'status': 'ok'};
       return false; // SRT found, no Groq needed
     }
-    cache[t.key] = {'srt': false, 'txt': false, 'yt_status': 'not_found', 'status': 'no_sub'};
+    if (subResult == PodcastSubtitleResult.notFound) {
+      cache[t.key] = {'srt': false, 'txt': false, 'yt_status': 'not_found', 'status': 'no_sub'};
+    } else {
+      // Transient failure (network / rate limit): do NOT burn not_found
+      // into the cache, so YouTube is retried on a later run.
+      cache[t.key] = {'srt': false, 'txt': false, 'yt_status': '', 'status': 'no_sub'};
+    }
     return true; // need Groq
   }
 
@@ -280,7 +286,7 @@ class PodcastPipeline {
     onLog('    🎤 $name');
     try {
       final text = await GroqService.instance.transcribeFile(
-        filePath: audioPath, model: 'whisper-large-v3', language: 'zh',
+        filePath: audioPath, model: GroqService.instance.defaultModel, language: 'zh',
       );
       await File(txtPath).writeAsString(text, flush: true);
       cache[t.key] = {'srt': false, 'txt': true, 'yt_status': 'not_found', 'status': 'ok'};

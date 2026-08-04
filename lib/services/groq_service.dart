@@ -11,7 +11,7 @@ class GroqService {
   GroqService._();
 
   String _keysCsv = '';
-  String _model = 'whisper-large-v3';
+  String _model = 'whisper-large-v3-turbo';
   final List<int> _callTimes = [];
 
   void setApiKey(String csv) { _keysCsv = csv; }

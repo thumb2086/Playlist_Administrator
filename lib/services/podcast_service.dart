@@ -7,6 +7,8 @@ import '../models/podcast_search_result.dart';
 import 'bridge_service.dart';
 import 'config_service.dart';
 
+enum PodcastSubtitleResult { found, notFound, failed }
+
 class PodcastService {
   static PodcastService? _instance;
   static PodcastService get instance => _instance ??= PodcastService._();
@@ -186,7 +188,7 @@ class PodcastService {
     return true;
   }
 
-  Future<bool> downloadSubtitles(
+  Future<PodcastSubtitleResult> downloadSubtitles(
     String episodeTitle,
     String podcastName, {
     required void Function(String log) onLog,
@@ -202,7 +204,7 @@ class PodcastService {
 
     if (await File(outputPath.replaceAll('.mp3', '.srt')).exists()) {
       onLog('\u23ed\ufe0f \u5df2\u6709\u5b57\u5e55\uff0c\u8df3\u904e');
-      return false;
+      return PodcastSubtitleResult.found;
     }
 
     final proc = await Process.start(
@@ -213,6 +215,9 @@ class PodcastService {
       environment: env,
     );
 
+    // Default to failed: if the bridge never confirms an outcome
+    // (crash / no output), the episode is retried on a later run.
+    var result = PodcastSubtitleResult.failed;
     await proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).forEach((line) {
       if (line.trim().isEmpty) return;
       try {
@@ -222,15 +227,20 @@ class PodcastService {
           onLog(json['message'] as String? ?? '');
         } else if (type == 'error') {
           onLog('\u274c ${json['message']}');
+          result = PodcastSubtitleResult.failed;
+        } else if (type == 'not_found') {
+          onLog('\u274c ${json['message']}');
+          result = PodcastSubtitleResult.notFound;
         } else if (type == 'complete') {
           onLog('\u2705 \u5b57\u5e55\u4e0b\u8f09\u5b8c\u6210');
+          result = PodcastSubtitleResult.found;
         }
       } catch (_) {
         onLog(line);
       }
     });
     await proc.exitCode;
-    return true;
+    return result;
   }
 
   String _guessExtension(String url) {

@@ -450,7 +450,7 @@ def cmd_groq_transcribe(args):
     """Transcribe audio via curl.exe + ffmpeg chunking"""
     audio_path = args[0]
     api_keys_csv = args[1]
-    model = args[2] if len(args) > 2 else 'whisper-large-v3'
+    model = args[2] if len(args) > 2 else 'whisper-large-v3-turbo'
     language = args[3] if len(args) > 3 else 'zh'
 
     import os, time, subprocess, json, tempfile, io, shutil
@@ -736,7 +736,7 @@ def cmd_youtube_subs(args):
         vids = re.findall(r'watch\?v=([a-zA-Z0-9_-]{11})', r.text)
         unique = list(dict.fromkeys(vids))
         if not unique:
-            emit_json({'type': 'error', 'message': '找不到符合的 YouTube 影片'})
+            emit_json({'type': 'not_found', 'message': '找不到符合的 YouTube 影片'})
             return
         video_id = unique[0]
         emit_json({'type': 'log', 'message': f'  ✅ 找到影片: https://youtube.com/watch?v={video_id}'})
@@ -763,6 +763,8 @@ def cmd_youtube_subs(args):
             'subtitlesformat': 'srt',
             'outtmpl': srt_path.replace('.srt', '.%(ext)s'),
             'windowsfilenames': True,
+            'sleep_interval_requests': 3,
+            'extractor_args': {'youtube': {'sleep_interval': ['3']}},
         }
         if cookie_file:
             ydl_opts['cookiefile'] = cookie_file
@@ -789,7 +791,7 @@ def cmd_youtube_subs(args):
             emit_json({'type': 'log', 'message': f'  ✅ 字幕已儲存: {srt_path}'})
             emit_json({'type': 'complete', 'path': srt_path})
         else:
-            emit_json({'type': 'error', 'message': '下載字幕失敗（無可用字幕）'})
+            emit_json({'type': 'not_found', 'message': '下載字幕失敗（無可用字幕）'})
     except Exception as e:
         emit_json({'type': 'error', 'message': f'下載字幕異常: {e}'})
 
