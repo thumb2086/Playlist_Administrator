@@ -67,6 +67,8 @@ class SpotifyScraper {
         if (f is File) {
           final low = f.path.toLowerCase();
           if (!low.endsWith('.mp3')) continue;
+          // Podcast audio is not part of the music library.
+          if (low.contains('podcast_downloads') || low.contains('podcast_rag')) continue;
           final stem = File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
           if (!mp3.containsKey(stem)) mp3[stem] = f.path;
         }

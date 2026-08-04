@@ -9,6 +9,8 @@ class LibraryIndex {
   Map<String, FileInfo> _fileInfoMap = {};
   int _mp3Count = 0;
   int _m4aCount = 0;
+  int _podcastMp3Count = 0;
+  int _podcastOtherCount = 0;
   bool _built = false;
 
   static String _cacheDir() {
@@ -26,6 +28,8 @@ class LibraryIndex {
 
   int get mp3Count => _mp3Count;
   int get m4aCount => _m4aCount;
+  int get podcastMp3Count => _podcastMp3Count;
+  int get podcastOtherCount => _podcastOtherCount;
   bool get isBuilt => _built;
 
   static void invalidateCache() { _cache = null; _cacheKey = null; _cachedFingerprint = null; }
@@ -90,7 +94,7 @@ class LibraryIndex {
     // Check static in-memory cache first
     if (_cache != null && _cacheKey == _resolvePath(libraryPath)) {
       _copyFrom(_cache!);
-      log('MP3: $_mp3Count, M4A: $_m4aCount (記憶體快取)');
+      log('MP3: $_mp3Count, M4A: $_m4aCount (記憶體快取)${_podcastSummary()}');
       return;
     }
 
@@ -157,7 +161,7 @@ class LibraryIndex {
     }
 
     if (changedStems.isEmpty && _cachedFingerprint != null) {
-      log('MP3: $_mp3Count, M4A: $_m4aCount (無變動，載入快取索引)');
+      log('MP3: $_mp3Count, M4A: $_m4aCount (無變動，載入快取索引)${_podcastSummary()}');
       final cached = _loadMetaIndex(libraryPath);
       if (cached != null) {
         _metadataIndex = <List<String>, List<String>>{};
@@ -173,7 +177,7 @@ class LibraryIndex {
     }
 
     // Build metadata index (only for new/changed mp3s, plus unchanged from cache)
-    log('MP3: $_mp3Count, M4A: $_m4aCount');
+    log('MP3: $_mp3Count, M4A: $_m4aCount${_podcastSummary()}');
     log('建立檔名索引…');
 
     if (changedStems.isNotEmpty) {
@@ -256,7 +260,17 @@ class LibraryIndex {
     _fileInfoMap = other._fileInfoMap;
     _mp3Count = other._mp3Count;
     _m4aCount = other._m4aCount;
+    _podcastMp3Count = other._podcastMp3Count;
+    _podcastOtherCount = other._podcastOtherCount;
     _built = true;
+  }
+
+  String _podcastSummary() {
+    final parts = <String>[
+      if (_podcastMp3Count > 0) 'Podcast MP3 $_podcastMp3Count',
+      if (_podcastOtherCount > 0) 'Podcast 其他 $_podcastOtherCount',
+    ];
+    return parts.isEmpty ? '' : ' (${parts.join(', ')})';
   }
 
   Future<List<String>> _walkDir(String path) async {
@@ -270,7 +284,15 @@ class LibraryIndex {
           if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac')) {
             // Podcast audio is NOT part of the music library: excluding it
             // prevents M4As from being fuzzy-matched against podcast files.
-            if (low.contains('podcast_downloads') || low.contains('podcast_rag')) continue;
+            // Track it separately so podcast stats stay visible.
+            if (low.contains('podcast_downloads') || low.contains('podcast_rag')) {
+              if (low.endsWith('.mp3')) {
+                _podcastMp3Count++;
+              } else {
+                _podcastOtherCount++;
+              }
+              continue;
+            }
             result.add(entity.path);
           }
         }
