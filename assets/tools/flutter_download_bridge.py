@@ -470,9 +470,13 @@ def cmd_groq_transcribe(args):
     ffmpeg_path = shutil.which('ffmpeg')
 
     try:
+        # Always convert to flac when ffmpeg is available. Groq returns
+        # HTTP 502 when the declared Content-Type (audio/flac) doesn't
+        # match the actual file format, so small files that were uploaded
+        # as raw mp3 always failed.
         if ffmpeg_path and os.path.exists(audio_path):
-            size_mb = os.path.getsize(audio_path) / (1024*1024)
-            if size_mb > 5:
+            ext = os.path.splitext(audio_path)[1].lower()
+            if ext != '.flac':
                 emit_json({'type': 'progress', 'percent': 5, 'message': 'Compressing...'})
                 tmp = tempfile.NamedTemporaryFile(suffix='.flac', delete=False)
                 tmp.close()
@@ -528,7 +532,7 @@ def cmd_groq_transcribe(args):
             w(language + '\r\n')
         w('--' + boundary + '\r\n')
         w('Content-Disposition: form-data; name="file"; filename="' + os.path.basename(fpath) + '"\r\n')
-        w('Content-Type: audio/flac\r\n\r\n')
+        w('Content-Type: ' + _content_type(fpath) + '\r\n\r\n')
         with open(fpath, 'rb') as fh:
             body_buf.write(fh.read())
         w('\r\n--' + boundary + '--\r\n')
@@ -700,6 +704,20 @@ def cmd_groq_transcribe(args):
         if c != audio_path and c != temp_file:
             try: os.unlink(c)
             except: pass
+
+def _content_type(fpath):
+    """Map file extension to a MIME type. Must match the actual bytes
+    sent, otherwise Groq returns HTTP 502 service_unavailable."""
+    ext = os.path.splitext(fpath)[1].lower()
+    return {
+        '.flac': 'audio/flac',
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg',
+        '.m4a': 'audio/mp4',
+        '.mp4': 'audio/mp4',
+    }.get(ext, 'audio/flac')
+
 
 def _clean_query(text):
     """Clean search query: remove special chars that break YouTube search."""
