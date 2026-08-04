@@ -101,9 +101,7 @@ class _SpotubePageState extends State<SpotubePage> {
       },
       child: Focus(
         autofocus: true,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
@@ -164,7 +162,6 @@ class _SpotubePageState extends State<SpotubePage> {
         )),
         const SizedBox(height: 16),
           ]),
-        ),
       ),
     );
   }

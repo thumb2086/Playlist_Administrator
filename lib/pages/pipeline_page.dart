@@ -227,16 +227,26 @@ class _PipelinePageState extends State<PipelinePage> {
                 _podcastLogs.clear();
                 setState(() {});
               }, false, color: AppColors.textMuted),
-              _PButton('複製全部', Icons.copy_rounded, () {
-                final text = [..._musicLogs, '', '--- Podcast ---', '', ..._podcastLogs].join('\n');
-                Clipboard.setData(ClipboardData(text: text));
-                if (mounted) {
-                  setState(() {});
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('已複製'), duration: Duration(seconds: 1)),
-                  );
-                }
-              }, false, color: AppColors.textSecondary),
+              if (_musicLogs.isNotEmpty)
+                _PButton('複製音樂', Icons.copy_rounded, () {
+                  Clipboard.setData(ClipboardData(text: _musicLogs.join('\n')));
+                  if (mounted) {
+                    setState(() {});
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('已複製'), duration: Duration(seconds: 1)),
+                    );
+                  }
+                }, false, color: AppColors.textSecondary),
+              if (_podcastLogs.isNotEmpty)
+                _PButton('複製 Podcast', Icons.copy_rounded, () {
+                  Clipboard.setData(ClipboardData(text: _podcastLogs.join('\n')));
+                  if (mounted) {
+                    setState(() {});
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('已複製'), duration: Duration(seconds: 1)),
+                    );
+                  }
+                }, false, color: AppColors.textSecondary),
             ],
           ]),
           const SizedBox(height: 20),
