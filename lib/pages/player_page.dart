@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
 import '../services/i18n.dart';
 import '../services/lrc_parser.dart';
+import '../services/metadata_reader.dart';
 import '../services/spotube_controller.dart';
 import '../widgets/dark_theme.dart';
 
@@ -17,11 +19,14 @@ class PlayerPage extends StatefulWidget {
 class _PlayerPageState extends State<PlayerPage> {
   final _player = AudioPlayer();
   final _playlistCtrl = ScrollController();
+  final _searchCtrl = TextEditingController();
 
   List<String> _songs = [];
+  List<String> _filteredSongs = [];
   int _currentIndex = -1;
   bool _isPlaying = false;
   bool _shuffle = false;
+  bool _loop = true;
   double _volume = 0.7;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -33,6 +38,8 @@ class _PlayerPageState extends State<PlayerPage> {
   StreamSubscription? _positionSub;
 
   final Map<String, List<LrcLine>> _lyricsCache = {};
+  final Map<String, Uint8List?> _artworkCache = {};
+  Uint8List? _currentArtwork;
 
   @override
   void initState() {
@@ -48,6 +55,7 @@ class _PlayerPageState extends State<PlayerPage> {
     _player.onDurationChanged.listen((d) {
       if (mounted) setState(() => _duration = d);
     });
+    _searchCtrl.addListener(_onSearchChanged);
   }
 
   @override
@@ -56,7 +64,38 @@ class _PlayerPageState extends State<PlayerPage> {
     _positionTimer?.cancel();
     _player.dispose();
     _playlistCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged() {
+    final q = _searchCtrl.text.trim().toLowerCase();
+    setState(() {
+      if (q.isEmpty) {
+        _filteredSongs = List.from(_songs);
+      } else {
+        _filteredSongs = _songs.where((s) {
+          final name = File(s).uri.pathSegments.last.toLowerCase();
+          return name.contains(q);
+        }).toList();
+      }
+    });
+  }
+
+  void _scrollToCurrent() {
+    if (_currentIndex < 0 || _currentIndex >= _songs.length) return;
+    final song = _songs[_currentIndex];
+    final idx = _filteredSongs.indexOf(song);
+    if (idx < 0) return;
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_playlistCtrl.hasClients) {
+        _playlistCtrl.animateTo(
+          (idx * 40.0).clamp(0.0, _playlistCtrl.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   Future<void> _loadPlaylist(String name) async {
@@ -78,20 +117,16 @@ class _PlayerPageState extends State<PlayerPage> {
     for (final line in lines) {
       final trimmed = line.trim();
       if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
-      // Try direct file path first
       if (File(trimmed).existsSync()) { songs.add(trimmed); continue; }
-      // Try libraryPath + filename
       final fname = File(trimmed).uri.pathSegments.last;
       String resolved = '$lib\\$fname';
       if (await File(resolved).exists()) { songs.add(resolved); continue; }
-      // Try with extensions
       bool found = false;
       for (final ext in ['.mp3', '.m4a', '.flac']) {
         if (await File('$resolved$ext').exists()) { songs.add('$resolved$ext'); found = true; break; }
         if (await File('$lib\\mp3\\$fname$ext').exists()) { songs.add('$lib\\mp3\\$fname$ext'); found = true; break; }
       }
       if (found) continue;
-      // Try reversed: "Artist - Title" vs "Title - Artist"
       final stem = fname.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
       if (stem.contains(' - ')) {
         final parts = stem.split(' - ');
@@ -102,7 +137,6 @@ class _PlayerPageState extends State<PlayerPage> {
             if (await File('$lib\\mp3\\$rev$ext').exists()) { songs.add('$lib\\mp3\\$rev$ext'); break; }
           }
         }
-        // Title-only fallback (different artist version)
         final titlePart = parts[0].trim().toLowerCase();
         if (titlePart.length >= 2) {
           final mp3Dir = Directory('$lib\\mp3');
@@ -127,8 +161,10 @@ class _PlayerPageState extends State<PlayerPage> {
 
     setState(() {
       _songs = songs;
+      _filteredSongs = List.from(songs);
       _currentIndex = 0;
       _statusText = '已載入 ${songs.length} 首歌曲';
+      _searchCtrl.clear();
     });
     _play(songs[0]);
   }
@@ -137,14 +173,30 @@ class _PlayerPageState extends State<PlayerPage> {
     try {
       await _player.stop();
       await _player.play(DeviceFileSource(path));
+      final stem = File(path).uri.pathSegments.last;
       setState(() {
         _isPlaying = true;
         _currentLyric = '';
+        _currentArtwork = _artworkCache[stem];
       });
       _loadLyrics(path);
+      _loadArtwork(path, stem);
+      _scrollToCurrent();
     } catch (e) {
       setState(() => _statusText = '播放錯誤: $e');
     }
+  }
+
+  Future<void> _loadArtwork(String path, String stem) async {
+    if (_artworkCache.containsKey(stem)) {
+      setState(() => _currentArtwork = _artworkCache[stem]);
+      return;
+    }
+    try {
+      final meta = await MetadataReader.read(path);
+      _artworkCache[stem] = meta.artwork;
+      if (mounted) setState(() => _currentArtwork = meta.artwork);
+    } catch (_) {}
   }
 
   Future<void> _loadLyrics(String songPath) async {
@@ -215,27 +267,24 @@ class _PlayerPageState extends State<PlayerPage> {
     return '${m}:${s.toString().padLeft(2, '0')}';
   }
 
+  String _songName(String path) => File(path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+
   @override
   Widget build(BuildContext context) {
     final currentSong = _currentIndex >= 0 && _currentIndex < _songs.length ? _songs[_currentIndex] : null;
-    final currentName = currentSong != null
-        ? File(currentSong).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '')
-        : '';
+    final currentName = currentSong != null ? _songName(currentSong) : '';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       child: Row(children: [
-        // Playlist selector (left)
         Expanded(flex: 3, child: _buildPlaylistPanel()),
         const SizedBox(width: 16),
-        // Player (right)
         Expanded(flex: 5, child: _buildPlayerPanel(currentName, currentSong)),
       ]),
     );
   }
 
   Widget _buildPlaylistPanel() {
-    final plDir = Directory(ConfigService.instance.config.playlistsPath);
     return Container(
       decoration: BoxDecoration(
         color: AppColors.card, borderRadius: BorderRadius.circular(14),
@@ -244,39 +293,111 @@ class _PlayerPageState extends State<PlayerPage> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Row(children: [
-            const Text('播放清單', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            const Spacer(),
-            Text(_statusText, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          child: Column(children: [
+            Row(children: [
+              const Text('播放清單', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text(_statusText, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+            ]),
+            if (_songs.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 32,
+                child: TextField(
+                  controller: _searchCtrl,
+                  decoration: InputDecoration(
+                    hintText: '搜尋歌曲…',
+                    prefixIcon: const Icon(Icons.search, size: 16),
+                    suffixIcon: _searchCtrl.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 14),
+                            onPressed: () { _searchCtrl.clear(); },
+                          )
+                        : null,
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
           ]),
         ),
         const Divider(height: 1),
-        Expanded(
-          child: FutureBuilder<List<String>>(
-            future: _listPlaylists(plDir),
-            builder: (ctx, snap) {
-              if (!snap.hasData) return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-              final items = snap.data!;
-              if (items.isEmpty) return Center(child: Text(t('library.empty_title'), style: const TextStyle(color: AppColors.textMuted)));
-              return ListView.builder(
-                controller: _playlistCtrl,
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                itemCount: items.length,
-                itemBuilder: (ctx, i) => ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.playlist_play_rounded, color: AppColors.accent, size: 18),
-                  title: Text(items[i], style: const TextStyle(fontSize: 13)),
-                  onTap: () => _loadPlaylist(items[i]),
-                ),
-              );
-            },
+        if (_songs.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Text(
+              _searchCtrl.text.isEmpty
+                  ? '${_songs.length} 首歌曲'
+                  : '搜尋結果: ${_filteredSongs.length}/${_songs.length}',
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+            ),
           ),
+        Expanded(
+          child: _songs.isEmpty
+              ? _buildPlaylistSelector()
+              : _buildSongList(),
         ),
       ]),
     );
   }
 
+  Widget _buildPlaylistSelector() {
+    final plDir = Directory(ConfigService.instance.config.playlistsPath);
+    return FutureBuilder<List<String>>(
+      future: _listPlaylists(plDir),
+      builder: (ctx, snap) {
+        if (!snap.hasData) return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+        final items = snap.data!;
+        if (items.isEmpty) return Center(child: Text(t('library.empty_title'), style: const TextStyle(color: AppColors.textMuted)));
+        return ListView.builder(
+          controller: _playlistCtrl,
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          itemCount: items.length,
+          itemBuilder: (ctx, i) => ListTile(
+            dense: true,
+            leading: const Icon(Icons.playlist_play_rounded, color: AppColors.accent, size: 18),
+            title: Text(items[i], style: const TextStyle(fontSize: 13)),
+            onTap: () => _loadPlaylist(items[i]),
+          ),
+        );
+      },
+    );
+  }
 
+  Widget _buildSongList() {
+    return ListView.builder(
+      controller: _playlistCtrl,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemCount: _filteredSongs.length,
+      itemBuilder: (ctx, i) {
+        final song = _filteredSongs[i];
+        final isCurrent = _songs.indexOf(song) == _currentIndex;
+        return ListTile(
+          dense: true,
+          leading: isCurrent
+              ? Icon(_isPlaying ? Icons.volume_up_rounded : Icons.pause_rounded, color: AppColors.accent, size: 16)
+              : Text('${i + 1}', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+          title: Text(
+            _songName(song),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: isCurrent ? FontWeight.w600 : FontWeight.normal,
+              color: isCurrent ? AppColors.accent : AppColors.text,
+            ),
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+          ),
+          onTap: () {
+            final idx = _songs.indexOf(song);
+            setState(() => _currentIndex = idx);
+            _play(song);
+          },
+        );
+      },
+    );
+  }
 
   Future<List<String>> _listPlaylists(Directory dir) async {
     if (!await dir.exists()) return [];
@@ -297,7 +418,6 @@ class _PlayerPageState extends State<PlayerPage> {
         border: Border.all(color: AppColors.border),
       ),
       child: Column(children: [
-        // Song info
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
           child: Row(children: [
@@ -307,7 +427,10 @@ class _PlayerPageState extends State<PlayerPage> {
                 color: AppColors.surfaceLight,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 36),
+              clipBehavior: Clip.antiAlias,
+              child: _currentArtwork != null
+                  ? Image.memory(_currentArtwork!, fit: BoxFit.cover)
+                  : const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 36),
             ),
             const SizedBox(width: 16),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -321,7 +444,6 @@ class _PlayerPageState extends State<PlayerPage> {
           ]),
         ),
         const SizedBox(height: 8),
-        // Progress
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(children: [
@@ -347,7 +469,6 @@ class _PlayerPageState extends State<PlayerPage> {
           ]),
         ),
         const SizedBox(height: 8),
-        // Controls
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           IconButton(
             onPressed: _prev,
@@ -355,7 +476,7 @@ class _PlayerPageState extends State<PlayerPage> {
           ),
           const SizedBox(width: 8),
           Container(
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: AppColors.accent, shape: BoxShape.circle,
             ),
             child: IconButton(
@@ -370,13 +491,18 @@ class _PlayerPageState extends State<PlayerPage> {
             icon: const Icon(Icons.skip_next_rounded, color: AppColors.text, size: 28),
           ),
         ]),
-        // Shuffle + Volume
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Row(children: [
             IconButton(
               onPressed: () => setState(() => _shuffle = !_shuffle),
               icon: Icon(Icons.shuffle_rounded, color: _shuffle ? AppColors.accent : AppColors.textMuted, size: 20),
+            ),
+            IconButton(
+              onPressed: () => setState(() => _loop = !_loop),
+              icon: Icon(_loop ? Icons.repeat_rounded : Icons.repeat_one_rounded,
+                  color: _loop ? AppColors.accent : AppColors.textMuted, size: 20),
+              tooltip: _loop ? '循環播放' : '單曲循環',
             ),
             const SizedBox(width: 8),
             Icon(Icons.volume_up_rounded, color: AppColors.textMuted, size: 16),
@@ -393,7 +519,6 @@ class _PlayerPageState extends State<PlayerPage> {
             ),
           ]),
         ),
-        // Lyrics offset
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Text('歌詞偏移:', style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
           IconButton(
@@ -413,7 +538,6 @@ class _PlayerPageState extends State<PlayerPage> {
           ),
         ]),
         const SizedBox(height: 4),
-        // Lyrics display
         Expanded(
           child: Container(
             margin: const EdgeInsets.fromLTRB(16, 4, 16, 16),
