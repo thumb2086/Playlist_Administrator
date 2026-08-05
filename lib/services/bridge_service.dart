@@ -35,12 +35,21 @@ class BridgeService {
       }
     } catch (_) {}
 
+    // Always check source tree for fresh bridge (dev mode or portable install)
     try {
-      Directory? d = Directory(File(Platform.resolvedExecutable).parent.path);
+      Directory? d = Directory(Platform.resolvedExecutable).parent;
       while (d != null) {
         final candidate = '${d.path}\\tools\\flutter_download_bridge.py';
         if (File(candidate).existsSync()) {
-          return _extractedPath = candidate;
+          // Auto-update temp cache if source is newer
+          final tmpDir = Directory.systemTemp.path;
+          final cached = File('$tmpDir\\playlist_admin_tools\\flutter_download_bridge.py');
+          if (!cached.existsSync() ||
+              File(candidate).lastModifiedSync().isAfter(cached.lastModifiedSync())) {
+            await Directory(tmpDir).create(recursive: true);
+            await File(candidate).copy(cached.path);
+          }
+          return _extractedPath = cached.path;
         }
         final parent = d.parent;
         d = parent.path == d.path ? null : parent;
@@ -54,7 +63,7 @@ class BridgeService {
     }
 
     try {
-      Directory? d = Directory(File(Platform.resolvedExecutable).parent.path);
+      Directory? d = Directory(Platform.resolvedExecutable).parent;
       while (d != null) {
         if (File('${d.path}\\pubspec.yaml').existsSync()) {
           final candidate = '${d.path}\\tools\\flutter_download_bridge.py';
