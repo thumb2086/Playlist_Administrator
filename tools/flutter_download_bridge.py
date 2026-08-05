@@ -470,13 +470,13 @@ def cmd_groq_transcribe(args):
     ffmpeg_path = shutil.which('ffmpeg')
 
     try:
-        # Always convert to flac when ffmpeg is available. Groq returns
-        # HTTP 502 when the declared Content-Type (audio/flac) doesn't
-        # match the actual file format, so small files that were uploaded
-        # as raw mp3 always failed.
+        # Convert to flac only for small files. For large files (>20MB),
+        # skip conversion and chunk the original MP3 directly — FLAC is
+        # lossless and actually LARGER than MP3, defeating the purpose.
         if ffmpeg_path and os.path.exists(audio_path):
+            file_size = os.path.getsize(audio_path)
             ext = os.path.splitext(audio_path)[1].lower()
-            if ext != '.flac':
+            if ext != '.flac' and file_size <= 20 * 1024 * 1024:
                 emit_json({'type': 'progress', 'percent': 5, 'message': 'Compressing...'})
                 tmp = tempfile.NamedTemporaryFile(suffix='.flac', delete=False)
                 tmp.close()
@@ -488,7 +488,10 @@ def cmd_groq_transcribe(args):
                 if r.returncode == 0 and os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 0:
                     file_to_send = tmp.name
                     temp_file = tmp.name
-    except: pass
+                else:
+                    emit_json({'type': 'log', 'message': f'FLAC conversion failed, using original'})
+    except Exception as e:
+        emit_json({'type': 'log', 'message': f'FLAC conversion error: {e}'})
 
     # Chunk: split if > 20MB after conversion
     chunk_files = [file_to_send]
@@ -504,13 +507,32 @@ def cmd_groq_transcribe(args):
                 base = os.path.basename(file_to_send).rsplit('.', 1)[0]
                 tmpdir = tempfile.gettempdir()
                 chunks = []
-                for s in range(0, int(duration), 600):
+                chunk_sec = 300  # 5 minutes per chunk for safety
+                for s in range(0, int(duration), chunk_sec):
                     cp = os.path.join(tmpdir, f'chunk_{base}_{len(chunks)}.flac')
-                    subprocess.run([ffmpeg_path, '-y', '-i', file_to_send, '-ss', str(s), '-t', '600',
+                    subprocess.run([ffmpeg_path, '-y', '-i', file_to_send, '-ss', str(s), '-t', str(chunk_sec),
                         '-ar', '16000', '-ac', '1', '-c:a', 'flac', cp], capture_output=True, timeout=180)
-                    chunks.append(cp)
+                    if os.path.exists(cp) and os.path.getsize(cp) > 0:
+                        # If chunk still > 20MB, split further into 60s pieces
+                        if os.path.getsize(cp) > 20 * 1024 * 1024:
+                            sub_dur = subprocess.run([fp, '-v', 'error', '-show_entries', 'format=duration',
+                                '-of', 'default=noprint_wrappers=1:nokey=1', cp],
+                                capture_output=True, text=True, timeout=30)
+                            sub_total = float(sub_dur.stdout.strip()) if sub_dur.stdout.strip() else chunk_sec
+                            os.unlink(cp)
+                            for ss in range(0, int(sub_total), 60):
+                                sp = os.path.join(tmpdir, f'chunk_{base}_{len(chunks)}.flac')
+                                subprocess.run([ffmpeg_path, '-y', '-i', file_to_send,
+                                    '-ss', str(s + ss), '-t', '60',
+                                    '-ar', '16000', '-ac', '1', '-c:a', 'flac', sp],
+                                    capture_output=True, timeout=180)
+                                if os.path.exists(sp) and os.path.getsize(sp) > 0:
+                                    chunks.append(sp)
+                        else:
+                            chunks.append(cp)
                 if chunks: chunk_files = chunks
-        except: pass
+        except Exception as e:
+            emit_json({'type': 'log', 'message': f'Split failed: {e}'})
 
     def upload_file(fpath, try_key):
         """Upload a single file via curl, return (status, body)"""
@@ -606,6 +628,10 @@ def cmd_groq_transcribe(args):
 
     results = []
     for ci, cf in enumerate(chunk_files):
+        # Safety: skip chunks that are still too large
+        if os.path.exists(cf) and os.path.getsize(cf) > 24 * 1024 * 1024:
+            emit_json({'type': 'log', 'message': f'Chunk {ci+1} too large ({os.path.getsize(cf)//1024//1024}MB), skipping'})
+            continue
         if len(chunk_files) > 1:
             emit_json({'type': 'progress', 'percent': 10 + ci * 80 // len(chunk_files),
                 'message': 'Chunk ' + str(ci+1) + '/' + str(len(chunk_files)) + '...'})
