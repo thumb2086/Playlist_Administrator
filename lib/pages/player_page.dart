@@ -81,7 +81,7 @@ class _PlayerPageState extends State<PlayerPage> {
       if (q.isEmpty) {
         _filteredSongs = List.from(_songs);
         _playQueue = List.from(_songs);
-        _queueIndex = _currentIndex >= 0 && _currentIndex < _songs.length ? _currentIndex : 0;
+        _queueIndex = _queueIndex >= 0 && _queueIndex < _songs.length ? _queueIndex : 0;
       } else {
         _filteredSongs = _songs.where((s) {
           final name = File(s).uri.pathSegments.last.toLowerCase();
@@ -175,7 +175,7 @@ class _PlayerPageState extends State<PlayerPage> {
       _songs = songs;
       _filteredSongs = List.from(songs);
       _playQueue = List.from(songs);
-      _currentIndex = 0;
+      _queueIndex = 0;
       _queueIndex = 0;
       _statusText = '已載入 ${songs.length} 首歌曲';
       _searchCtrl.clear();
@@ -195,7 +195,7 @@ class _PlayerPageState extends State<PlayerPage> {
         _currentLyric = '';
         _currentArtwork = _artworkCache[stem];
         _queueIndex = qIdx >= 0 ? qIdx : 0;
-        _currentIndex = sIdx >= 0 ? sIdx : _currentIndex;
+        _queueIndex = sIdx >= 0 ? sIdx : _queueIndex;
       });
       _loadLyrics(path);
       _loadArtwork(path, stem);
@@ -266,7 +266,7 @@ class _PlayerPageState extends State<PlayerPage> {
     }
     final path = _playQueue[next];
     final sIdx = _songs.indexOf(path);
-    setState(() { _queueIndex = next; _currentIndex = sIdx >= 0 ? sIdx : _currentIndex; });
+    setState(() { _queueIndex = next; _queueIndex = sIdx >= 0 ? sIdx : _queueIndex; });
     _play(path);
   }
 
@@ -275,7 +275,7 @@ class _PlayerPageState extends State<PlayerPage> {
     final prev = (_queueIndex - 1 + _playQueue.length) % _playQueue.length;
     final path = _playQueue[prev];
     final sIdx = _songs.indexOf(path);
-    setState(() { _queueIndex = prev; _currentIndex = sIdx >= 0 ? sIdx : _currentIndex; });
+    setState(() { _queueIndex = prev; _queueIndex = sIdx >= 0 ? sIdx : _queueIndex; });
     _play(path);
   }
 
@@ -415,7 +415,7 @@ class _PlayerPageState extends State<PlayerPage> {
             _playQueue = List.from(_filteredSongs);
             final idx = _playQueue.indexOf(song);
             final sIdx = _songs.indexOf(song);
-            setState(() { _queueIndex = idx >= 0 ? idx : 0; _currentIndex = sIdx >= 0 ? sIdx : _currentIndex; });
+            setState(() { _queueIndex = idx >= 0 ? idx : 0; _queueIndex = sIdx >= 0 ? sIdx : _queueIndex; });
             _play(song);
           },
         );
