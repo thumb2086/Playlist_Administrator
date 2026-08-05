@@ -23,7 +23,8 @@ class _PlayerPageState extends State<PlayerPage> {
 
   List<String> _songs = [];
   List<String> _filteredSongs = [];
-  int _currentIndex = -1;
+  List<String> _playQueue = [];
+  int _queueIndex = -1;
   bool _isPlaying = false;
   bool _shuffle = false;
   bool _loop = true;
@@ -79,18 +80,23 @@ class _PlayerPageState extends State<PlayerPage> {
     setState(() {
       if (q.isEmpty) {
         _filteredSongs = List.from(_songs);
+        _playQueue = List.from(_songs);
+        _queueIndex = _currentIndex >= 0 && _currentIndex < _songs.length ? _currentIndex : 0;
       } else {
         _filteredSongs = _songs.where((s) {
           final name = File(s).uri.pathSegments.last.toLowerCase();
           return name.contains(q);
         }).toList();
+        _playQueue = List.from(_filteredSongs);
+        _queueIndex = 0;
+        if (_playQueue.isNotEmpty) _play(_playQueue[0]);
       }
     });
   }
 
   void _scrollToCurrent() {
-    if (_currentIndex < 0 || _currentIndex >= _songs.length) return;
-    final song = _songs[_currentIndex];
+    if (_queueIndex < 0 || _queueIndex >= _playQueue.length) return;
+    final song = _playQueue[_queueIndex];
     final idx = _filteredSongs.indexOf(song);
     if (idx < 0) return;
     Future.delayed(const Duration(milliseconds: 100), () {
@@ -168,7 +174,9 @@ class _PlayerPageState extends State<PlayerPage> {
     setState(() {
       _songs = songs;
       _filteredSongs = List.from(songs);
+      _playQueue = List.from(songs);
       _currentIndex = 0;
+      _queueIndex = 0;
       _statusText = '已載入 ${songs.length} 首歌曲';
       _searchCtrl.clear();
     });
@@ -180,10 +188,14 @@ class _PlayerPageState extends State<PlayerPage> {
       await _player.stop();
       await _player.play(DeviceFileSource(path));
       final stem = File(path).uri.pathSegments.last;
+      final qIdx = _playQueue.indexOf(path);
+      final sIdx = _songs.indexOf(path);
       setState(() {
         _isPlaying = true;
         _currentLyric = '';
         _currentArtwork = _artworkCache[stem];
+        _queueIndex = qIdx >= 0 ? qIdx : 0;
+        _currentIndex = sIdx >= 0 ? sIdx : _currentIndex;
       });
       _loadLyrics(path);
       _loadArtwork(path, stem);
@@ -245,22 +257,26 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   void _next() {
-    if (_songs.isEmpty) return;
+    if (_playQueue.isEmpty) return;
     int next;
     if (_shuffle) {
-      next = (_currentIndex + 1 + (DateTime.now().millisecondsSinceEpoch % (_songs.length - 1))) % _songs.length;
+      next = (_queueIndex + 1 + (DateTime.now().millisecondsSinceEpoch % (_playQueue.length - 1))) % _playQueue.length;
     } else {
-      next = (_currentIndex + 1) % _songs.length;
+      next = (_queueIndex + 1) % _playQueue.length;
     }
-    setState(() => _currentIndex = next);
-    _play(_songs[next]);
+    final path = _playQueue[next];
+    final sIdx = _songs.indexOf(path);
+    setState(() { _queueIndex = next; _currentIndex = sIdx >= 0 ? sIdx : _currentIndex; });
+    _play(path);
   }
 
   void _prev() {
-    if (_songs.isEmpty) return;
-    final prev = (_currentIndex - 1 + _songs.length) % _songs.length;
-    setState(() => _currentIndex = prev);
-    _play(_songs[prev]);
+    if (_playQueue.isEmpty) return;
+    final prev = (_queueIndex - 1 + _playQueue.length) % _playQueue.length;
+    final path = _playQueue[prev];
+    final sIdx = _songs.indexOf(path);
+    setState(() { _queueIndex = prev; _currentIndex = sIdx >= 0 ? sIdx : _currentIndex; });
+    _play(path);
   }
 
   void _seek(double value) {
@@ -277,7 +293,7 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final currentSong = _currentIndex >= 0 && _currentIndex < _songs.length ? _songs[_currentIndex] : null;
+    final currentSong = _queueIndex >= 0 && _queueIndex < _playQueue.length ? _playQueue[_queueIndex] : null;
     final currentName = currentSong != null ? _songName(currentSong) : '';
 
     return Padding(
@@ -380,7 +396,7 @@ class _PlayerPageState extends State<PlayerPage> {
       itemCount: _filteredSongs.length,
       itemBuilder: (ctx, i) {
         final song = _filteredSongs[i];
-        final isCurrent = _songs.indexOf(song) == _currentIndex;
+        final isCurrent = _playQueue.isNotEmpty && _queueIndex >= 0 && _queueIndex < _playQueue.length && _playQueue[_queueIndex] == song;
         return ListTile(
           dense: true,
           leading: isCurrent
@@ -396,8 +412,10 @@ class _PlayerPageState extends State<PlayerPage> {
             maxLines: 1, overflow: TextOverflow.ellipsis,
           ),
           onTap: () {
-            final idx = _songs.indexOf(song);
-            setState(() => _currentIndex = idx);
+            _playQueue = List.from(_filteredSongs);
+            final idx = _playQueue.indexOf(song);
+            final sIdx = _songs.indexOf(song);
+            setState(() { _queueIndex = idx >= 0 ? idx : 0; _currentIndex = sIdx >= 0 ? sIdx : _currentIndex; });
             _play(song);
           },
         );
@@ -444,7 +462,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 4),
-              Text(_currentIndex >= 0 ? '${_currentIndex + 1}/${_songs.length}' : '',
+              Text(_queueIndex >= 0 ? '${_queueIndex + 1}/${_playQueue.length}' : '',
                   style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
             ])),
           ]),
