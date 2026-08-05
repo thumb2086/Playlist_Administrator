@@ -46,7 +46,13 @@ class _PlayerPageState extends State<PlayerPage> {
     super.initState();
     _statusText = t('spotube.status_ready');
     I18N.instance.addListener(() { if (mounted) setState(() {}); });
-    _player.onPlayerComplete.listen((_) => _next());
+    _player.onPlayerComplete.listen((_) {
+      if (_loop || _shuffle) {
+        _next();
+      } else {
+        setState(() => _isPlaying = false);
+      }
+    });
     _positionSub = _player.onPositionChanged.listen((p) {
       if (!mounted) return;
       setState(() => _position = p);
