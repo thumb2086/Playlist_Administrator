@@ -33,7 +33,8 @@ class MetadataReader {
       Uint8List? artwork;
       if (streams != null) {
         for (final s in streams) {
-          if (s is Map<String, dynamic> && s['codec_type'] == 'image') {
+          if (s is Map<String, dynamic> &&
+              (s['codec_type'] == 'image' || s['codec_type'] == 'video')) {
             artwork = await _extractArtwork(filePath);
             break;
           }

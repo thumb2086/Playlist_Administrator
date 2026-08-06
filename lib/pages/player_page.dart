@@ -35,6 +35,8 @@ class _PlayerPageState extends State<PlayerPage> {
   double _lyricsOffset = 0.0;
   String _currentLyric = '';
   String _statusText = '';
+  String _selectedPlaylistName = '';
+  List<String> _playlistNames = [];
   Timer? _positionTimer;
   StreamSubscription? _positionSub;
 
@@ -63,6 +65,13 @@ class _PlayerPageState extends State<PlayerPage> {
       if (mounted) setState(() => _duration = d);
     });
     _searchCtrl.addListener(_onSearchChanged);
+    _refreshPlaylistNames();
+  }
+
+  Future<void> _refreshPlaylistNames() async {
+    final plDir = Directory(ConfigService.instance.config.playlistsPath);
+    final names = await _listPlaylists(plDir);
+    if (mounted) setState(() => _playlistNames = names);
   }
 
   @override
@@ -177,6 +186,7 @@ class _PlayerPageState extends State<PlayerPage> {
       _playQueue = List.from(songs);
       _queueIndex = 0;
       _queueIndex = 0;
+      _selectedPlaylistName = name;
       _statusText = '已載入 ${songs.length} 首歌曲';
       _searchCtrl.clear();
     });
@@ -317,7 +327,35 @@ class _PlayerPageState extends State<PlayerPage> {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Column(children: [
             Row(children: [
-              const Text('播放清單', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              if (_songs.isNotEmpty && _selectedPlaylistName.isNotEmpty)
+                PopupMenuButton<String>(
+                  onSelected: (name) { if (name != _selectedPlaylistName) _loadPlaylist(name); },
+                  offset: const Offset(0, 24),
+                  constraints: const BoxConstraints(maxWidth: 260),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.playlist_play_rounded, size: 16, color: AppColors.accent),
+                    const SizedBox(width: 4),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 180),
+                      child: Text(_selectedPlaylistName,
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis, maxLines: 1),
+                    ),
+                    const Icon(Icons.arrow_drop_down, size: 18),
+                  ]),
+                  itemBuilder: (ctx) => _playlistNames
+                      .map((n) => PopupMenuItem<String>(
+                            value: n,
+                            child: Text(n, style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: n == _selectedPlaylistName ? FontWeight.bold : FontWeight.normal,
+                              color: n == _selectedPlaylistName ? AppColors.accent : null,
+                            )),
+                          ))
+                      .toList(),
+                )
+              else
+                const Text('播放清單', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
               const Spacer(),
               Text(_statusText, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
             ]),

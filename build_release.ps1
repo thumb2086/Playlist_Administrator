@@ -1,5 +1,10 @@
 $ErrorActionPreference = 'Stop'
 
+# Keep the asset copy of the bridge in sync before building — the release
+# EXE bundles assets\tools\flutter_download_bridge.py. Building with a stale
+# copy silently reintroduces bugs (e.g. missing large-audio chunking).
+Copy-Item -Path "$PSScriptRoot\tools\flutter_download_bridge.py" -Destination "$PSScriptRoot\assets\tools\flutter_download_bridge.py" -Force
+
 Write-Host "Building release..."
 flutter build windows --release
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
