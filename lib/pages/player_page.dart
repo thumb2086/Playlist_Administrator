@@ -22,6 +22,7 @@ class _PlayerPageState extends State<PlayerPage> {
   final _searchCtrl = TextEditingController();
 
   List<String> _songs = [];
+  List<String> _displaySongs = [];
   List<String> _filteredSongs = [];
   List<String> _playQueue = [];
   int _queueIndex = -1;
@@ -35,7 +36,7 @@ class _PlayerPageState extends State<PlayerPage> {
   double _lyricsOffset = 0.0;
   String _currentLyric = '';
   String _statusText = '';
-  String _selectedPlaylistName = '';
+  String _displayPlaylistName = '';
   List<String> _playlistNames = [];
   Timer? _positionTimer;
   StreamSubscription? _positionSub;
@@ -88,17 +89,12 @@ class _PlayerPageState extends State<PlayerPage> {
     final q = _searchCtrl.text.trim().toLowerCase();
     setState(() {
       if (q.isEmpty) {
-        _filteredSongs = List.from(_songs);
-        _playQueue = List.from(_songs);
-        _queueIndex = _queueIndex >= 0 && _queueIndex < _songs.length ? _queueIndex : 0;
+        _filteredSongs = List.from(_displaySongs);
       } else {
-        _filteredSongs = _songs.where((s) {
+        _filteredSongs = _displaySongs.where((s) {
           final name = File(s).uri.pathSegments.last.toLowerCase();
           return name.contains(q);
         }).toList();
-        _playQueue = List.from(_filteredSongs);
-        _queueIndex = 0;
-        if (_playQueue.isNotEmpty) _play(_playQueue[0]);
       }
     });
   }
@@ -119,7 +115,7 @@ class _PlayerPageState extends State<PlayerPage> {
     });
   }
 
-  Future<void> _loadPlaylist(String name) async {
+  Future<void> _loadPlaylist(String name, {bool browseOnly = false}) async {
     final plPath = '${ConfigService.instance.config.playlistsPath}\\$name.m3u8';
     final file = File(plPath);
     if (!await file.exists()) {
@@ -181,16 +177,18 @@ class _PlayerPageState extends State<PlayerPage> {
     }
 
     setState(() {
-      _songs = songs;
+      _displaySongs = songs;
       _filteredSongs = List.from(songs);
-      _playQueue = List.from(songs);
-      _queueIndex = 0;
-      _queueIndex = 0;
-      _selectedPlaylistName = name;
+      _displayPlaylistName = name;
       _statusText = '已載入 ${songs.length} 首歌曲';
       _searchCtrl.clear();
+      if (!browseOnly) {
+        _songs = songs;
+        _playQueue = List.from(songs);
+        _queueIndex = 0;
+      }
     });
-    _play(songs[0]);
+    if (!browseOnly && songs.isNotEmpty) _play(songs[0]);
   }
 
   Future<void> _play(String path) async {
@@ -327,9 +325,9 @@ class _PlayerPageState extends State<PlayerPage> {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Column(children: [
             Row(children: [
-              if (_songs.isNotEmpty && _selectedPlaylistName.isNotEmpty)
+              if (_displaySongs.isNotEmpty && _displayPlaylistName.isNotEmpty)
                 PopupMenuButton<String>(
-                  onSelected: (name) { if (name != _selectedPlaylistName) _loadPlaylist(name); },
+                  onSelected: (name) { if (name != _displayPlaylistName) _loadPlaylist(name, browseOnly: true); },
                   offset: const Offset(0, 24),
                   constraints: const BoxConstraints(maxWidth: 260),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -337,7 +335,7 @@ class _PlayerPageState extends State<PlayerPage> {
                     const SizedBox(width: 4),
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 180),
-                      child: Text(_selectedPlaylistName,
+                      child: Text(_displayPlaylistName,
                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                           overflow: TextOverflow.ellipsis, maxLines: 1),
                     ),
@@ -348,8 +346,8 @@ class _PlayerPageState extends State<PlayerPage> {
                             value: n,
                             child: Text(n, style: TextStyle(
                               fontSize: 13,
-                              fontWeight: n == _selectedPlaylistName ? FontWeight.bold : FontWeight.normal,
-                              color: n == _selectedPlaylistName ? AppColors.accent : null,
+                              fontWeight: n == _displayPlaylistName ? FontWeight.bold : FontWeight.normal,
+                              color: n == _displayPlaylistName ? AppColors.accent : null,
                             )),
                           ))
                       .toList(),
@@ -359,7 +357,7 @@ class _PlayerPageState extends State<PlayerPage> {
               const Spacer(),
               Text(_statusText, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
             ]),
-            if (_songs.isNotEmpty) ...[
+            if (_displaySongs.isNotEmpty) ...[
               const SizedBox(height: 8),
               SizedBox(
                 height: 32,
@@ -385,18 +383,18 @@ class _PlayerPageState extends State<PlayerPage> {
           ]),
         ),
         const Divider(height: 1),
-        if (_songs.isNotEmpty)
+        if (_displaySongs.isNotEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Text(
               _searchCtrl.text.isEmpty
-                  ? '${_songs.length} 首歌曲'
-                  : '搜尋結果: ${_filteredSongs.length}/${_songs.length}',
+                  ? '${_displaySongs.length} 首歌曲'
+                  : '搜尋結果: ${_filteredSongs.length}/${_displaySongs.length}',
               style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
             ),
           ),
         Expanded(
-          child: _songs.isEmpty
+          child: _displaySongs.isEmpty
               ? _buildPlaylistSelector()
               : _buildSongList(),
         ),
@@ -450,10 +448,10 @@ class _PlayerPageState extends State<PlayerPage> {
             maxLines: 1, overflow: TextOverflow.ellipsis,
           ),
           onTap: () {
+            _songs = List.from(_displaySongs);
             _playQueue = List.from(_filteredSongs);
             final idx = _playQueue.indexOf(song);
-            final sIdx = _songs.indexOf(song);
-            setState(() { _queueIndex = idx >= 0 ? idx : 0; _queueIndex = sIdx >= 0 ? sIdx : _queueIndex; });
+            setState(() { _queueIndex = idx >= 0 ? idx : 0; });
             _play(song);
           },
         );
