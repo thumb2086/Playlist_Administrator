@@ -376,7 +376,9 @@ class PipelineOrchestrator {
         if (PlaylistParser.isInternalPlaylist(File(e.path).uri.pathSegments.last)) continue;
         try {
           final names = PlaylistParser.parseTrackNames(e.path);
-          allPlaylistSongs.addAll(names);
+          for (final n in names) {
+            allPlaylistSongs.add(n.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase());
+          }
         } catch (_) {}
       }
     }
@@ -388,12 +390,8 @@ class PipelineOrchestrator {
         if (e is File) {
           final low = e.path.toLowerCase();
           if (!(low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac'))) continue;
-          final stem = e.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-          final matched = allPlaylistSongs.any((s) {
-            final sStem = s.replaceAll(RegExp(r'\.\w+$'), '');
-            return sStem.toLowerCase() == stem.toLowerCase();
-          });
-          if (!matched) unsortedFiles.add(e.path);
+          final stem = e.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
+          if (!allPlaylistSongs.contains(stem)) unsortedFiles.add(e.path);
         }
       }
     }
