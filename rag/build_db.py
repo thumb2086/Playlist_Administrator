@@ -1,0 +1,213 @@
+"""把 podcast 逐字稿 (.txt) 建立成 ChromaDB 向量資料庫
+用法: python rag/build_db.py [--data DIR] [--db DIR] [--model MODEL] [--reset] [--workers N]
+"""
+import argparse
+import os
+import re
+import sys
+import hashlib
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import chromadb
+import requests
+
+from _resolve import podcast_downloads_dir, chroma_db_dir
+
+OLLAMA_URL = "http://localhost:11434"
+
+
+def embed_one_batch(model: str, texts: list[str]) -> tuple[list[str], list[list[float]]]:
+    """單批 embedding；400 時逐個重試，回傳 (成功文字, 對應向量)"""
+    resp = requests.post(
+        f"{OLLAMA_URL}/api/embed",
+        json={"model": model, "input": texts},
+        timeout=600,
+    )
+    if resp.status_code == 400:
+        kept: list[str] = []
+        vectors: list[list[float]] = []
+        for t in texts:
+            r2 = requests.post(
+                f"{OLLAMA_URL}/api/embed",
+                json={"model": model, "input": [t]},
+                timeout=600,
+            )
+            if r2.status_code == 400:
+                print(f"!! 跳過問題 chunk (len={len(t)}): {t[:100]!r}")
+                continue
+            r2.raise_for_status()
+            kept.append(t)
+            vectors.append(r2.json()["embeddings"][0])
+        return kept, vectors
+    resp.raise_for_status()
+    return texts, resp.json()["embeddings"]
+
+
+def embed_texts(model: str, texts: list[str], batch: int = 32, workers: int = 6) -> tuple[list[str], list[list[float]]]:
+    """併發呼叫 Ollama /api/embed；回傳 (成功文字, 對應向量)"""
+    batches = [texts[i:i + batch] for i in range(0, len(texts), batch)]
+    if len(batches) <= 1:
+        if not batches:
+            return [], []
+        return embed_one_batch(model, batches[0])
+
+    kept_all: list[str] = []
+    vectors: list[list[float]] = []
+    results: list[tuple[list[str], list[list[float]]]] = [None] * len(batches)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        fut = {ex.submit(embed_one_batch, model, b): i for i, b in enumerate(batches)}
+        for f in as_completed(fut):
+            results[fut[f]] = f.result()
+    for k, v in results:
+        if k is None:
+            continue
+        kept_all.extend(k)
+        vectors.extend(v)
+    return kept_all, vectors
+
+
+def read_text_file(path: Path) -> str:
+    """讀檔，自動嘗試 UTF-8 / Big5 / GBK"""
+    raw = path.read_bytes()
+    for enc in ("utf-8-sig", "utf-8", "big5", "gb18030"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def split_sentences(text: str) -> list[str]:
+    """依中文句號斷句，過濾空白行"""
+    text = re.sub(r"\s+", "", text)
+    parts = re.split(r"(?<=[。！？!?；;])", text)
+    return [p for p in parts if len(p) >= 4]
+
+
+def make_chunks(sentences: list[str], max_len: int = 600, overlap: int = 60) -> list[str]:
+    """句子接成 chunk，每塊約 max_len 字元，前後重疊 overlap；超長句強制硬切"""
+    chunks: list[str] = []
+    cur = ""
+    for s in sentences:
+        while len(s) > max_len:
+            if cur:
+                chunks.append(cur)
+                cur = cur[-overlap:] if len(cur) > overlap else cur
+            chunks.append(s[:max_len])
+            s = s[max_len:]
+        if len(cur) + len(s) > max_len and cur:
+            chunks.append(cur)
+            tail = cur[-overlap:] if len(cur) > overlap else cur
+            cur = tail + s
+        else:
+            cur += s
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def detect_meta(path: Path) -> dict:
+    """從檔名/路徑猜節目與日期"""
+    parts = path.parts
+    show = parts[-2] if len(parts) >= 2 else "unknown"
+    name = path.stem
+    m = re.search(r"(20\d{2})[_\-_](\d{1,2})[_\-_](\d{1,2})", name)
+    date = f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}" if m else ""
+    return {"show": show, "file": name, "date": date}
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", default=str(podcast_downloads_dir()))
+    ap.add_argument("--db", default=str(chroma_db_dir()))
+    ap.add_argument("--model", default="bge-m3")
+    ap.add_argument("--reset", action="store_true", help="重建資料庫")
+    ap.add_argument("--limit", type=int, default=0, help="只索引前 N 篇 (測試用)")
+    ap.add_argument("--workers", type=int, default=6, help="併發 embedding 數")
+    args = ap.parse_args()
+
+    client = chromadb.PersistentClient(path=args.db)
+    if args.reset:
+        try:
+            client.delete_collection("podcasts")
+        except Exception:
+            pass
+    col = client.get_or_create_collection(
+        "podcasts",
+        metadata={"hnsw:space": "cosine"},
+    )
+
+    # 已索引的檔名 (resume 用) - 分段讀取避免 SQL 變數超限
+    done_files = set()
+    offset = 0
+    while True:
+        batch = col.get(limit=5000, offset=offset, include=["metadatas"])["metadatas"]
+        if not batch:
+            break
+        for m in batch:
+            if m:
+                done_files.add(m.get("file", ""))
+        offset += 5000
+        if offset > 1000000:
+            break
+
+    files = [f for f in sorted(Path(args.data).rglob("*.txt")) if f.stem not in done_files]
+    if args.limit:
+        files = files[: args.limit]
+    print(f"待索引 {len(files)} 篇 (已跳過 {len(done_files)} 篇)")
+
+    total_chunks = 0
+    t_start = time.time()
+    for i, f in enumerate(files, 1):
+        text = read_text_file(f)
+        chunks = make_chunks(split_sentences(text))
+        # token 保險: 單 chunk 超過 2800 字元就再切
+        final_chunks: list[str] = []
+        for ch in chunks:
+            final_chunks.extend(
+                [ch[i:i + 2800] for i in range(0, len(ch), 2800)] if len(ch) > 2800 else [ch]
+            )
+        chunks = final_chunks
+        if not chunks:
+            continue
+        meta = detect_meta(f)
+        try:
+            kept_chunks, vectors = embed_texts(args.model, chunks, workers=args.workers)
+        except requests.exceptions.HTTPError as e:
+            print(f"!! HTTP 錯誤 檔案={meta['file']} 前300字={chunks[0][:300] if chunks else ''}")
+            raise
+        except requests.exceptions.ConnectionError:
+            print("無法連線 Ollama，請先啟動 (ollama serve) 並 pull bge-m3")
+            sys.exit(1)
+        if not kept_chunks:
+            continue
+        ids = [
+            hashlib.md5(f"{meta['file']}|{j}".encode()).hexdigest()
+            for j in range(len(kept_chunks))
+        ]
+        metadatas = [
+            {**meta, "chunk": j, "chars": len(c), "path": str(f)}
+            for j, c in enumerate(kept_chunks)
+        ]
+        col.add(ids=ids, documents=kept_chunks, metadatas=metadatas, embeddings=vectors)
+        total_chunks += len(kept_chunks)
+        if i % 5 == 0 or i == len(files):
+            elapsed = time.time() - t_start
+            speed = i / elapsed
+            eta = (len(files) - i) / speed if speed > 0 else 0
+            print(
+                f"[{i}/{len(files)}] {i/len(files)*100:.1f}% | "
+                f"{speed:.2f}篇/秒 | 剩餘ETA {eta/60:.1f}分 | "
+                f"chunks累計 {total_chunks} | {meta['show'][:10]}/{meta['file'][:25]}",
+                flush=True,
+            )
+
+    print(f"完成! 共 {len(files)} 篇, {total_chunks} 個 chunk")
+
+
+if __name__ == "__main__":
+    main()

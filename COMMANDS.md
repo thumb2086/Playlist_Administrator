@@ -1,30 +1,35 @@
 
 # Playlist Administrator 指令說明書
 
-## Node.js CLI（npm）
+## CLI（與 GUI 共用同一引擎）
 
-Node CLI 以 Node.js 完整實作（`cli/` 目錄），與 Dart CLI 相同指令介面：
-
-```bash
-npm run pipeline                   # 完整流程（轉檔 → 爬取 → 清理 → 分類 → metadata → LUFS）
-npm run pipeline -- --step 3       # 從第 3 步開始
-npm run podcast                    # Podcast Pipeline（RSS → YouTube 字幕 → Groq 逐字稿）
-npm run status                     # 顯示狀態
-npm run spotube-download -- <name> # 下載單一歌單
-npm run spotube-download-all       # 下載所有歌單
-npm run spotube-move               # 搬移 M4A
-npm run spotube-cleanup            # 清除孤兒 MP3
-```
-
-也可全域安裝使用 `playlist-admin` 指令：
+`playlist-admin`（npm 包）**只是啟動器** — 真正的 pipeline / podcast / spotube
+邏輯全部在 Flutter app 內（`lib/cli_main.dart`），跟 GUI 共用同一份實作。
+先 build 一次：
 
 ```bash
-npm install -g .
-playlist-admin status
+flutter build windows --release
 ```
 
-不需要任何 npm 依賴；需要系統有 `ffmpeg` / `ffprobe` / `yt-dlp`（與 Python/Dart 版相同）。  
-Spotube 自動化透過 PowerShell P/Invoke（user32.dll）實作，不需要額外套件。
+之後：
+
+```bash
+playlist-admin pipeline                   # 完整流程（轉檔 → 爬取 → 清理 → 分類 → metadata → LUFS）
+playlist-admin pipeline --step N          # 從第 N 步開始
+playlist-admin podcast                    # Podcast Pipeline（RSS → YT 字幕 → Groq 逐字稿）
+playlist-admin status                     # 顯示狀態
+playlist-admin spotube-download <name>    # 下載單一歌單
+playlist-admin spotube-download-all       # 下載所有歌單
+playlist-admin spotube-move               # 搬移 M4A
+playlist-admin spotube-cleanup            # 清除孤兒 MP3
+playlist-admin rag build [--reset]        # 建立 podcast RAG 向量庫（Ollama + ChromaDB）
+playlist-admin rag query "問題" [--topk N] # 查 podcast 逐字稿語意
+```
+
+- 直接執行 exe 也可以：`playlist_administrator.exe pipeline`（同一份引擎）。
+- RAG 細節見 `rag/README.md`。
+
+---
 
 ## CLI 指令（Dart）
 

@@ -1,7 +1,7 @@
 {
   "name": "playlist-admin",
-  "version": "2.6.81",
-  "description": "Playlist Administrator CLI - music library pipeline, podcast pipeline and Spotube automation (Node.js)",
+  "version": "2.6.82",
+  "description": "Playlist Administrator CLI - thin launcher for the Flutter app engine (pipeline, podcast, spotube) + podcast RAG query",
   "type": "module",
   "bin": {
     "playlist-admin": "./cli/index.js"
@@ -16,10 +16,8 @@
     "spotube-cleanup": "node cli/index.js spotube-cleanup"
   },
   "files": [
-    "cli/",
-    "assets/zhcdict.json",
-    "README.md",
-    "COMMANDS.md"
+    "cli/index.js",
+    "rag/"
   ],
   "keywords": [
     "playlist",

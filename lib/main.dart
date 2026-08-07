@@ -1,9 +1,11 @@
+﻿import 'dart:convert';
 import 'dart:ffi';
-import 'dart:io';
+import 'dart:io' as io; // dk: Platform 與 Flutter 的 Platform 衝突，用別名
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:win32/win32.dart';
 import 'app.dart';
+import 'cli_main.dart' show runCli;
 import 'services/config_service.dart';
 import 'services/groq_service.dart';
 import 'services/i18n.dart';
@@ -33,20 +35,47 @@ void _bringToFront() {
   }
 }
 
-RandomAccessFile? _lockFile;
+io.RandomAccessFile? _lockFile;
 
 void _ensureSingleInstance() {
-  final lockPath = '${Directory.systemTemp.path}\\PlaylistAdmin.lock';
+  final lockPath = '${io.Directory.systemTemp.path}\\PlaylistAdmin.lock';
   try {
-    _lockFile = File(lockPath).openSync(mode: FileMode.write);
+    _lockFile = io.File(lockPath).openSync(mode: io.FileMode.write);
     _lockFile!.lockSync();
   } catch (_) {
     _bringToFront();
-    exit(0);
+    io.exit(0);
+  }
+}
+
+/// CLI args are delivered via the PA_CLI_ARGS environment variable
+/// (JSON array): Flutter's Dart `Platform.executableArguments` is empty in
+/// release on this SDK, so the `playlist-admin` npm wrapper passes args
+/// through env instead. Kept in the app so GUI and CLI share one binary.
+List<String> _cliArgs() {
+  final raw = io.Platform.environment['PA_CLI_ARGS'];
+  if (raw == null || raw.trim().isEmpty) return const [];
+  try {
+    final list = (jsonDecode(raw) as List<dynamic>).cast<String>();
+    return list;
+  } catch (_) {
+    return raw.split(' ').where((s) => s.isNotEmpty).toList();
   }
 }
 
 void main() async {
+  // Single binary, two surfaces: pass CLI args to use the headless engine
+  // (playlist_administrator.exe pipeline / status / podcast ...), which is
+  // what the `playlist-admin` npm package spawns.
+  final args = _cliArgs();
+  if (args.isNotEmpty) {
+    await runCli(args);
+    // The runner keeps a window message loop alive even without runApp —
+    // force-exit so the CLI returns to the caller.
+    io.exit(0);
+    return;
+  }
+
   WidgetsFlutterBinding.ensureInitialized();
   _ensureSingleInstance();
   await ConfigService.instance.load();

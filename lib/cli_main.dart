@@ -5,7 +5,10 @@ import 'pipeline/pipeline_orchestrator.dart';
 import 'pipeline/podcast_pipeline.dart';
 import 'models/pipeline_step.dart';
 
-void main(List<String> args) async {
+// Shared CLI engine — used by the Flutter app binary itself (main.dart
+// dispatches CLI args here) and by `playlist-admin` (npm wrapper spawning
+// the built exe). One engine, two surfaces.
+Future<void> runCli(List<String> args) async {
   await ConfigService.instance.load();
   final cfg = ConfigService.instance.config;
 
@@ -98,6 +101,10 @@ Playlists: ${cfg.urlNames.length}
 Downloaded: ${cfg.lastUpdated.length}''');
       break;
   }
+}
+
+void main(List<String> args) async {
+  await runCli(args);
 }
 
 Future<void> _cleanupMp3(String libPath) async {
