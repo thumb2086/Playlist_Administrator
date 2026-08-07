@@ -15,7 +15,11 @@ export class LufsService {
   _load(fmt) {
     const data = readJson(this._cacheFile(fmt), {});
     const out = {};
-    for (const [k, v] of Object.entries(data)) out[k] = typeof v === 'number' ? v : parseFloat(v);
+    for (const [k, v] of Object.entries(data)) {
+      // GUI (Python/Dart) writes unnormalized keys like "...\Playlists\..\mp3\x.mp3".
+      // Normalize so lookups (already normalized) hit the existing cache.
+      out[path.normalize(k)] = typeof v === 'number' ? v : parseFloat(v);
+    }
     return out;
   }
 

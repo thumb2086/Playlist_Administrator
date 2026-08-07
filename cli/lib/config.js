@@ -37,34 +37,34 @@ export function loadConfig() {
   cfg.base_path = cfg.base_path || basePath;
 
   const config = {
-    basePath: cfg.base_path || '',
+    basePath: cfg.base_path || cfg.basePath || '',
     language: cfg.language || 'zh-TW',
-    audioFormat: cfg.audio_format || 'mp3',
-    maxThreads: cfg.max_threads || 4,
+    audioFormat: cfg.audio_format || cfg.audioFormat || 'mp3',
+    maxThreads: cfg.max_threads || cfg.maxThreads || 4,
     debugMode: !!cfg.debug_mode,
-    enableMetadataEnrichment: !!cfg.enable_metadata_enrichment,
-    spotubeExactMatch: cfg.spotube_exact_match !== false,
-    spotubeConvertMatchedOnly: !!cfg.spotube_convert_matched_only,
-    ffmpegPath: cfg.ffmpeg_path || 'bin/ffmpeg.exe',
-    spotubeExePath: cfg.spotube_exe_path || '',
-    spotubeDownloadPath: cfg.spotube_download_path || '',
-    spotubeFolderName: cfg.spotube_folder_name || 'spotube',
-    lyricsFolderName: cfg.lyrics_folder_name || 'Lyrics',
-    autoUpdateCheck: cfg.auto_update_check !== false,
-    autoDownloadUpdate: !!cfg.auto_download_update,
-    enableRetroactiveLyrics: !!cfg.enable_retroactive_lyrics,
+    enableMetadataEnrichment: !!(cfg.enable_metadata_enrichment ?? cfg.enableMetadataEnrichment),
+    spotubeExactMatch: cfg.spotube_exact_match !== false && cfg.spotubeExactMatch !== false,
+    spotubeConvertMatchedOnly: !!(cfg.spotube_convert_matched_only ?? cfg.spotubeConvertMatchedOnly),
+    ffmpegPath: cfg.ffmpeg_path || cfg.ffmpegPath || 'bin/ffmpeg.exe',
+    spotubeExePath: cfg.spotube_exe_path || cfg.spotubeExePath || '',
+    spotubeDownloadPath: cfg.spotube_download_path || cfg.spotubeDownloadPath || '',
+    spotubeFolderName: cfg.spotube_folder_name || cfg.spotubeFolderName || 'spotube',
+    lyricsFolderName: cfg.lyrics_folder_name || cfg.lyricsFolderName || 'Lyrics',
+    autoUpdateCheck: cfg.auto_update_check !== false && cfg.autoUpdateCheck !== false,
+    autoDownloadUpdate: !!(cfg.auto_download_update ?? cfg.autoDownloadUpdate),
+    enableRetroactiveLyrics: !!(cfg.enable_retroactive_lyrics ?? cfg.enableRetroactiveLyrics),
     theme: cfg.theme || 'dark',
-    skippedVersion: cfg.skipped_version || '',
-    setupCompleted: !!cfg.setup_completed,
-    groqApiKey: cfg.groq_api_key || '',
-    groqConcurrency: cfg.groq_concurrency || 3,
-    podcastSubscriptions: cfg.podcast_subscriptions || {},
-    podcastHistory: cfg.podcast_history || {},
-    urlNames: cfg.url_names || {},
-    searchNames: cfg.search_names || {},
-    spotubeCoords: cfg.spotube_coords || {},
-    lastUpdated: cfg.last_updated || {},
-    lyricsOffsets: cfg.lyrics_offsets || {},
+    skippedVersion: cfg.skipped_version || cfg.skippedVersion || '',
+    setupCompleted: !!(cfg.setup_completed ?? cfg.setupCompleted),
+    groqApiKey: cfg.groq_api_key || cfg.groqApiKey || '',
+    groqConcurrency: cfg.groq_concurrency || cfg.groqConcurrency || 3,
+    podcastSubscriptions: cfg.podcast_subscriptions || cfg.podcastSubscriptions || {},
+    podcastHistory: cfg.podcast_history || cfg.podcastHistory || {},
+    urlNames: cfg.url_names || cfg.urlNames || {},
+    searchNames: cfg.search_names || cfg.searchNames || {},
+    spotubeCoords: cfg.spotube_coords || cfg.spotubeCoords || {},
+    lastUpdated: cfg.last_updated || cfg.lastUpdated || {},
+    lyricsOffsets: cfg.lyrics_offsets || cfg.lyricsOffsets || {},
   };
 
   if (config.basePath) derivePaths(config);
@@ -84,11 +84,39 @@ export function saveConfig(config) {
   }
   try {
     fs.writeFileSync(lock, '');
-    const json = {};
-    for (const [k, v] of Object.entries(config)) {
-      json[k] = v;
-    }
-    json.spotify_urls = Object.keys(config.urlNames);
+    // Write in the Python/Dart-compatible snake_case schema. Writing JS
+    // camelCase here would break the GUI/Flutter app (and this reader).
+    const json = {
+      base_path: config.basePath,
+      language: config.language,
+      audio_format: config.audioFormat,
+      max_threads: config.maxThreads,
+      debug_mode: config.debugMode,
+      enable_metadata_enrichment: config.enableMetadataEnrichment,
+      spotube_exact_match: config.spotubeExactMatch,
+      spotube_convert_matched_only: config.spotubeConvertMatchedOnly,
+      ffmpeg_path: config.ffmpegPath,
+      spotube_exe_path: config.spotubeExePath,
+      spotube_download_path: config.spotubeDownloadPath,
+      spotube_folder_name: config.spotubeFolderName,
+      lyrics_folder_name: config.lyricsFolderName,
+      auto_update_check: config.autoUpdateCheck,
+      auto_download_update: config.autoDownloadUpdate,
+      enable_retroactive_lyrics: config.enableRetroactiveLyrics,
+      theme: config.theme,
+      skipped_version: config.skippedVersion,
+      setup_completed: config.setupCompleted,
+      groq_api_key: config.groqApiKey,
+      groq_concurrency: config.groqConcurrency,
+      podcast_subscriptions: config.podcastSubscriptions,
+      podcast_history: config.podcastHistory,
+      url_names: config.urlNames,
+      search_names: config.searchNames,
+      spotube_coords: config.spotubeCoords,
+      last_updated: config.lastUpdated,
+      lyrics_offsets: config.lyricsOffsets,
+      spotify_urls: Object.keys(config.urlNames),
+    };
     fs.writeFileSync(path_, JSON.stringify(json, null, 2), 'utf-8');
   } finally {
     try { fs.unlinkSync(lock); } catch {}

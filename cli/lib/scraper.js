@@ -119,6 +119,7 @@ export class SpotifyScraper {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.5',
       },
+      signal: AbortSignal.timeout(60000),
     });
     if (resp.status !== 200) {
       this.log(`  HTTP ${resp.status}`);

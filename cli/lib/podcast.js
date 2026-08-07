@@ -206,7 +206,10 @@ export class PodcastService {
 
   async searchPodcasts(query) {
     const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=podcast&limit=20`;
-    const resp = await fetch(url, { headers: { 'User-Agent': 'PlaylistAdministrator/2.0' } });
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': 'PlaylistAdministrator/2.0' },
+      signal: AbortSignal.timeout(30000),
+    });
     if (resp.status !== 200) throw new Error(`搜尋失敗 (${resp.status})`);
     const data = await resp.json();
     return (data.results || [])
