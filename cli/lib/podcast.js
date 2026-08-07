@@ -16,14 +16,22 @@ function parseRss(xml) {
     const block = m[1];
     const title = (block.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || '';
     const pubDate = (block.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || [])[1] || '';
-    const enclosure = block.match(/<enclosure[^>]*url="([^"]*)"[^>]*type="([^"]*)"[^>]*\/?>/);
+    const enclosure = block.match(/<enclosure[^>]*\/?>/);
+    let audioUrl = '';
+    let audioType = '';
+    if (enclosure) {
+      const u = enclosure[0].match(/url="\s*([^"]+)"/);
+      const t = enclosure[0].match(/type="([^"]+)"/);
+      if (u) audioUrl = decodeXml(u[1]);
+      if (t) audioType = t[1];
+    }
     const duration = (block.match(/<itunes:duration>([\s\S]*?)<\/itunes:duration>/) || [])[1] || '';
     const description = (block.match(/<description>([\s\S]*?)<\/description>/) || [])[1] || '';
     items.push({
       title: decodeXml(title),
       pub_date: decodeXml(pubDate),
-      audio_url: enclosure ? decodeXml(enclosure[1]) : '',
-      audio_type: enclosure ? enclosure[2] : '',
+      audio_url: audioUrl,
+      audio_type: audioType,
       duration: decodeXml(duration),
       description: decodeXml(description),
     });
@@ -94,6 +102,7 @@ export class PodcastService {
     if (!resp.ok) throw new Error(`Download HTTP ${resp.status}`);
     const total = parseInt(resp.headers.get('content-length') || '0', 10);
     let downloaded = 0;
+    let lastPct = -1;
     const ws = fs.createWriteStream(outputPath + '.part');
     const reader = resp.body.getReader();
     while (true) {
@@ -102,11 +111,16 @@ export class PodcastService {
       ws.write(value);
       downloaded += value.length;
       if (total > 0) {
-        process.stdout.write(`\r  ⬇️ ${(downloaded / total * 100).toFixed(1)}%`);
+        const pct = Math.trunc(downloaded / total * 100);
+        if (pct !== lastPct) {
+          lastPct = pct;
+          process.stdout.write(`\r  ⬇️ ${pct}%`);
+        }
       }
     }
     ws.end();
-    if (total > 0) process.stdout.write('\n');
+    if (total > 0 && lastPct !== 100) process.stdout.write('\r  ⬇️ 100%');
+    process.stdout.write('\n');
     await new Promise((r) => ws.on('finish', r));
     fs.renameSync(outputPath + '.part', outputPath);
     return true;

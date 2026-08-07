@@ -252,8 +252,9 @@ def parse_playlist(file_path):
                 
                 if j < len(lines):
                     file_path_line = lines[j]
-                    # Get filename without extension
-                    song_name = os.path.splitext(os.path.basename(file_path_line))[0]
+                    from urllib.parse import unquote
+                    # Get filename without extension (decode URI-encoded paths)
+                    song_name = os.path.splitext(os.path.basename(unquote(file_path_line)))[0]
                     songs.append(song_name)
                     i = j + 1
                 else:
@@ -1934,13 +1935,14 @@ def move_unsorted_songs(config, log_func):
     if os.path.exists(single_tracks_dir):
         st_files = [f for f in os.listdir(single_tracks_dir) if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
         if st_files:
-            with open(single_tracks_pl, 'w', encoding='utf-8-sig', newline='') as f:
-                f.write("#EXTM3U\r\n")
+            from urllib.parse import quote as _uri_quote
+            with open(single_tracks_pl, 'w', encoding='utf-8', newline='\n') as f:
+                f.write("#EXTM3U\n")
                 for base in sorted(st_files):
                     name_no_ext = os.path.splitext(base)[0]
                     rel_path = f"../Music/Single Tracks/{base}"
-                    f.write(f"#EXTINF:-1,{name_no_ext}\r\n")
-                    f.write(f"{rel_path}\r\n")
+                    f.write(f"#EXTINF:-1,{name_no_ext}\n")
+                    f.write(f"{_uri_quote(rel_path.replace(os.sep, '/'), safe='/:@%')}\n")
     
     # Cleanup old legacy name if it exists
     old_m3u_path = os.path.join(playlists_path, "_Unsorted_Songs.m3u8")
@@ -1950,10 +1952,11 @@ def move_unsorted_songs(config, log_func):
     
     # Create playlist for unsorted songs (keep files in original location)
     if orphans:
+        from urllib.parse import quote as _uri_quote
         try:
             os.makedirs(playlists_path, exist_ok=True)
-            with open(m3u_path, 'w', encoding='utf-8-sig', newline='') as f:
-                f.write("#EXTM3U\r\n")
+            with open(m3u_path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write("#EXTM3U\n")
                 for file_path in sorted(orphans):
                     # Get relative path from playlists folder to the audio file
                     abs_file_path = os.path.normpath(os.path.abspath(file_path))
@@ -1973,10 +1976,13 @@ def move_unsorted_songs(config, log_func):
                             rel_path = rel_path.split(':', 1)[1].lstrip('/\\')
                         # Fallback to absolute path if relative path fails
                         rel_path = abs_file_path
+
+                    # Echo Nightly compatible: URI-encode the path
+                    m3u_entry_path = _uri_quote(rel_path.replace('\\', '/'), safe='/:@%')
                     
                     name_no_ext = os.path.splitext(os.path.basename(file_path))[0]
-                    f.write(f"#EXTINF:-1,{name_no_ext}\r\n")
-                    f.write(f"{rel_path}\r\n")
+                    f.write(f"#EXTINF:-1,{name_no_ext}\n")
+                    f.write(f"{m3u_entry_path}\n")
             
             log_func(f" -> 已為 {len(orphans)} 首未分類歌曲創建播放清單")
         except Exception as e:

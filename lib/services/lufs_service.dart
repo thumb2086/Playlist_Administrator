@@ -52,6 +52,10 @@ class LufsService {
 
   /// Resolve a playlist entry path to an absolute file path.
   String? _resolvePlaylistPath(String entry, String playlistsPath, String basePath, String libraryPath) {
+    String decodePath(String s) {
+      try { return Uri.decodeComponent(s); } catch (_) { return s; }
+    }
+    entry = decodePath(entry);
     if (entry.isEmpty) return null;
     if (!entry.contains('.') && !entry.contains('\\') && !entry.contains('/')) return null;
 

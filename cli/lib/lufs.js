@@ -24,6 +24,8 @@ export class LufsService {
   }
 
   _resolvePlaylistPath(entry, playlistsPath, basePath, libraryPath) {
+    let decodePath = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+    entry = decodePath(entry);
     if (!entry) return null;
     if (!entry.includes('.') && !entry.includes('\\') && !entry.includes('/')) return null;
     const resolved = path.join(playlistsPath, entry);

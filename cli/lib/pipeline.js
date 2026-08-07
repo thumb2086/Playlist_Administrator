@@ -269,6 +269,8 @@ export class PipelineOrchestrator {
   }
 
   _trackFileExists(entry) {
+    let decodePath = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+    entry = decodePath(entry);
     if (!entry.includes('.') && !entry.includes('\\')) return true;
     const relToPl = path.join(this.config.playlistsPath, entry);
     if (fs.existsSync(relToPl)) return true;
@@ -334,7 +336,8 @@ export class PipelineOrchestrator {
     for (const filePath of newUnsorted) {
       const absFilePath = path.resolve(filePath);
       sb += `#EXTINF:-1,${stemOf(filePath)}\n`;
-      sb += `${relativePath(absFilePath, absPlPath)}\n`;
+      // Echo Nightly compatible: URI-encode the relative path
+      sb += `${encodeURIComponent(relativePath(absFilePath, absPlPath)).replace(/%2F/g, '/')}\n`;
     }
 
     fs.writeFileSync(unsortedPath, sb, { flag: existingStems.size === 0 ? 'w' : 'a', encoding: 'utf-8' });

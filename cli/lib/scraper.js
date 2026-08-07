@@ -220,7 +220,9 @@ export class SpotifyScraper {
         sb += `#EXTINF:-1,${localName}\n`;
         const absPath = path.resolve(matched);
         const absPl = path.resolve(path.dirname(m3uPath));
-        sb += `${relativePath(absPath, absPl)}\n`;
+        // Echo Nightly compatible: URI-encode the path (keep slashes)
+        const rel = encodeURIComponent(relativePath(absPath, absPl)).replace(/%2F/g, '/');
+        sb += `${rel}\n`;
         resolved++;
       }
     }

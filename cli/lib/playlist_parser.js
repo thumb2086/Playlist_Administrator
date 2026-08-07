@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import { stemOf } from './util.js';
 
 // Port of lib/services/playlist_parser.dart
+function decodePath(s) {
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
 export class PlaylistParser {
   static isInternalPlaylist(name) {
     const n = name.toLowerCase();
@@ -31,7 +35,7 @@ export class PlaylistParser {
           const name = pathLine.includes('\\') || pathLine.includes('/')
             ? pathLine.replace(/[\\/]/g, '\\').split('\\').pop()
             : pathLine;
-          songs.push(name.replace(/\.[^.]+$/, ''));
+          songs.push(decodePath(name).replace(/\.[^.]+$/, ''));
           i = j + 1;
         } else {
           i++;
@@ -64,7 +68,7 @@ export class PlaylistParser {
         let j = i + 1;
         while (j < lines.length && (lines[j].startsWith('#') || lines[j].length === 0)) j++;
         if (j < lines.length) {
-          entries.push(lines[j]);
+          entries.push(decodePath(lines[j]));
           i = j + 1;
         } else {
           i++;

@@ -132,8 +132,13 @@ class _PlayerPageState extends State<PlayerPage> {
     final songs = <String>[];
     final lib = ConfigService.instance.config.libraryPath;
     for (final line in lines) {
-      final trimmed = line.trim();
-      if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+      final raw = line.trim();
+      if (raw.isEmpty || raw.startsWith('#')) continue;
+      // Echo Nightly playlists store URI-encoded paths — try both forms.
+      String decodePath(String s) {
+        try { return Uri.decodeComponent(s); } catch (_) { return s; }
+      }
+      final trimmed = decodePath(raw);
       if (File(trimmed).existsSync()) { songs.add(trimmed); continue; }
       final fname = File(trimmed).uri.pathSegments.last;
       String resolved = '$lib\\$fname';

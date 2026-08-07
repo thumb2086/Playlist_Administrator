@@ -350,6 +350,10 @@ class PipelineOrchestrator {
   int totalRemoved = 0;
 
   bool _trackFileExists(String entry) {
+    String decodePath(String s) {
+      try { return Uri.decodeComponent(s); } catch (_) { return s; }
+    }
+    entry = decodePath(entry);
     if (!entry.contains('.') && !entry.contains('\\')) return true;
     // Resolve relative to playlists dir first
     final relToPl = '${config.playlistsPath}\\$entry';
@@ -428,9 +432,11 @@ class PipelineOrchestrator {
       } catch (_) {
         relPath = absFilePath;
       }
+      // Echo Nightly compatible: URI-encode the relative path
+      final encPath = Uri.encodeComponent(relPath).replaceAll('%2F', '/');
       final nameNoExt = File(filePath).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
       sb.writeln('#EXTINF:-1,$nameNoExt');
-      sb.writeln(relPath);
+      sb.writeln(encPath);
     }
 
     await File(unsortedPath).writeAsString(sb.toString(),

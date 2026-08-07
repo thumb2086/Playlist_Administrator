@@ -47,7 +47,7 @@ class PlaylistParser {
             final name = pathLine.contains('\\') || pathLine.contains('/')
                 ? pathLine.split(RegExp(r'[\\/]')).last
                 : pathLine;
-            songs.add(name.replaceAll(RegExp(r'\.\w+$'), ''));
+            songs.add(_decode(name).replaceAll(RegExp(r'\.\w+$'), ''));
             i = j + 1;
           } else {
             i++;
@@ -63,6 +63,16 @@ class PlaylistParser {
       }
     }
     return songs;
+  }
+
+  static String _decode(String s) {
+    // Decode URI-encoded paths (e.g. %E5%A4%A2%E6%83%B3 -> 夢想).
+    // Raw paths (incl. literal %) must pass through untouched.
+    try {
+      return Uri.decodeComponent(s);
+    } catch (_) {
+      return s;
+    }
   }
 
   static List<String> parseTrackEntries(String filePath) {
@@ -97,9 +107,9 @@ class PlaylistParser {
           while (j < lines.length && (lines[j].startsWith('#') || lines[j].isEmpty)) {
             j++;
           }
-          if (j < lines.length) {
-            entries.add(lines[j]);
-            i = j + 1;
+if (j < lines.length) {
+          entries.add(_decode(lines[j]));
+          i = j + 1;
           } else {
             i++;
           }
