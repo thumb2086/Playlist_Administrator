@@ -22,6 +22,9 @@ SolidCompression=yes
 UninstallDisplayIcon={app}\{#MyAppExeName}
 PrivilegesRequired=admin
 
+[Tasks]
+Name: "npmcli"; Description: "Install npm CLI package (playlist-admin)"; GroupDescription: "Additional tools:"; Flags: checkedonce
+
 [Files]
 Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -30,4 +33,8 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
 [Run]
+Filename: "{cmd}"; Parameters: "/c npm install -g playlist-admin@{#MyAppVersion}"; StatusMsg: "Installing playlist-admin CLI (npm)..."; Tasks: npmcli; Flags: runhidden nowait
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+Filename: "{cmd}"; Parameters: "/c npm uninstall -g playlist-admin"; Flags: runhidden
