@@ -1,7 +1,32 @@
 
 # Playlist Administrator 指令說明書
 
-## CLI 指令
+## Node.js CLI（npm）
+
+Node CLI 以 Node.js 完整實作（`cli/` 目錄），與 Dart CLI 相同指令介面：
+
+```bash
+npm run pipeline                   # 完整流程（轉檔 → 爬取 → 清理 → 分類 → metadata → LUFS）
+npm run pipeline -- --step 3       # 從第 3 步開始
+npm run podcast                    # Podcast Pipeline（RSS → YouTube 字幕 → Groq 逐字稿）
+npm run status                     # 顯示狀態
+npm run spotube-download -- <name> # 下載單一歌單
+npm run spotube-download-all       # 下載所有歌單
+npm run spotube-move               # 搬移 M4A
+npm run spotube-cleanup            # 清除孤兒 MP3
+```
+
+也可全域安裝使用 `playlist-admin` 指令：
+
+```bash
+npm install -g .
+playlist-admin status
+```
+
+不需要任何 npm 依賴；需要系統有 `ffmpeg` / `ffprobe` / `yt-dlp`（與 Python/Dart 版相同）。  
+Spotube 自動化透過 PowerShell P/Invoke（user32.dll）實作，不需要額外套件。
+
+## CLI 指令（Dart）
 
 ### 完整流程
 

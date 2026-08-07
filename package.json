@@ -1,0 +1,38 @@
+{
+  "name": "playlist-admin",
+  "version": "2.6.76",
+  "description": "Playlist Administrator CLI - music library pipeline, podcast pipeline and Spotube automation (Node.js)",
+  "type": "module",
+  "bin": {
+    "playlist-admin": "./cli/index.js"
+  },
+  "scripts": {
+    "pipeline": "node cli/index.js pipeline",
+    "podcast": "node cli/index.js podcast",
+    "status": "node cli/index.js status",
+    "spotube-download": "node cli/index.js spotube-download",
+    "spotube-download-all": "node cli/index.js spotube-download-all",
+    "spotube-move": "node cli/index.js spotube-move",
+    "spotube-cleanup": "node cli/index.js spotube-cleanup"
+  },
+  "files": [
+    "cli/",
+    "assets/zhcdict.json",
+    "README.md",
+    "COMMANDS.md"
+  ],
+  "keywords": [
+    "playlist",
+    "spotify",
+    "podcast",
+    "m3u8",
+    "music",
+    "ffmpeg",
+    "spotube"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "private": false
+}
