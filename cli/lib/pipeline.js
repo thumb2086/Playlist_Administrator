@@ -106,7 +106,8 @@ export class PipelineOrchestrator {
 
       const mp3Name = `${stemOf(m4a)}.mp3`;
       const dest = path.join(config.mp3Path, mp3Name);
-      if (fs.existsSync(dest) && fs.statSync(dest).mtimeMs >= fs.statSync(m4a).mtimeMs) {
+      if (fs.existsSync(dest) && fs.statSync(dest).size > 0 &&
+          fs.statSync(dest).mtimeMs >= fs.statSync(m4a).mtimeMs) {
         skipped++;
         scanned++;
         this._scanLog(scanned, totalM4a, tasks, skipped);

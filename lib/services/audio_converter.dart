@@ -69,7 +69,11 @@ class AudioConverter {
           onTimeout: () => -1,
         );
         if (exited != -1) {
-          if (exited != 0) return (false, null);
+          if (exited != 0) {
+            // Remove the partial/empty output so it is not treated as done.
+            try { if (await File(outputPath).exists()) await File(outputPath).delete(); } catch (_) {}
+            return (false, null);
+          }
           final stderr = String.fromCharCodes(stderrBuf);
           final m = RegExp(r'Input Integrated:\s+([-\d.]+)').firstMatch(stderr);
           final lufs = m != null ? double.tryParse(m.group(1)!) : null;

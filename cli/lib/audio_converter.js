@@ -32,11 +32,16 @@ export async function convert({ inputPath, outputPath, format = 'mp3', ffmpegPat
 
   try {
     const result = await run(ffmpeg, args, { timeout: 600000 });
-    if (result.code !== 0) return { ok: false, lufs: null };
+    if (result.code !== 0) {
+      // Remove the partial/empty output so the file isn't treated as done.
+      try { fs.unlinkSync(outputPath); } catch {}
+      return { ok: false, lufs: null };
+    }
     const m = result.stderr.match(/Input Integrated:\s+([-\d.]+)/);
     const lufs = m ? parseFloat(m[1]) : null;
     return { ok: true, lufs };
   } catch {
+    try { fs.unlinkSync(outputPath); } catch {}
     return { ok: false, lufs: null };
   }
 }

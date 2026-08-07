@@ -156,8 +156,10 @@ class PipelineOrchestrator {
 
       // 4. Direct disk check: the in-memory index may be stale (built before
       // this run converted files), so trust the filesystem over the index.
+      // Zero-byte files are failed leftovers — never skip those.
       final destFile = File(dest);
       if (await destFile.exists() &&
+          (await destFile.length()) > 0 &&
           destFile.lastModifiedSync().compareTo(File(m4a).lastModifiedSync()) >= 0) {
         skipped++;
         scanned++;
