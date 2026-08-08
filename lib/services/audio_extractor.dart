@@ -138,6 +138,25 @@ class AudioExtractorStore {
 }
 
 class AudioExtractorEngine {
+  // deepFilter 每個 process 會載入一個 Python + 神經網路模型，記憶體成本極高。
+  // 一律最多 1 個同時在跑（ffmpeg 抽出/編碼階段照樣平行）。
+  static int _dfRunning = 0;
+  static final List<Completer<void>> _dfWaiters = [];
+
+  static Future<void> _acquireDfSlot() async {
+    while (_dfRunning >= 1) {
+      final c = Completer<void>();
+      _dfWaiters.add(c);
+      await c.future;
+    }
+    _dfRunning++;
+  }
+
+  static void _releaseDfSlot() {
+    _dfRunning--;
+    if (_dfWaiters.isNotEmpty) _dfWaiters.removeAt(0).complete();
+  }
+
   static String? _ffmpegCache, _ffprobeCache;
   static String ffmpegExe() => _ffmpegCache ??= _findExe('ffmpeg');
   static String ffprobeExe() => _ffprobeCache ??= _findExe('ffprobe');
@@ -183,9 +202,9 @@ class AudioExtractorEngine {
     required bool Function() canceled,
   }) async {
     if (jobs.isEmpty) return;
-    // 記憶體保險：deepFilter 每個 process 都要載入模型。一律硬上限 4 個，
-    // 避免同時開太多 deepFilter 把 RAM 吃光（先前 12 並發直接當機）。
-    final workers = math.max(1, math.min(4, math.min(cfg.workers, jobs.length)));
+    // ffmpeg 抽出/編碼可平行，但 worker 太多仍會堆高記憶體；deepFilter 階段
+    // 另有訊號燈保證同時只跑 1 個（模型載入是主要 RAM 殺手）。
+    final workers = math.max(1, math.min(2, math.min(cfg.workers, jobs.length)));
     final q = List.of(jobs);
     final active = <Process>[];
     await Future.wait(List.generate(workers, (_) async {
@@ -257,7 +276,13 @@ class AudioExtractorEngine {
     try {
       var err = await _run([ffmpegExe(), '-y', '-i', job.src, '-map', '0:${job.trackId}', '-vn', '-ar', '48000', '-c:a', 'pcm_s16le', wav], active);
       if (err != null) return 'extract: $err';
-      err = await _run([cfg.deepFilterPath, wav, '--output-dir', tmpDir.path, '--no-suffix', '--log-level', 'none'], active);
+      // deepFilter 是最吃記憶體的階段 — 序列化執行避免 RAM 爆掉。
+      await _acquireDfSlot();
+      try {
+        err = await _run([cfg.deepFilterPath, wav, '--output-dir', tmpDir.path, '--no-suffix', '--log-level', 'none'], active);
+      } finally {
+        _releaseDfSlot();
+      }
       if (err != null) return 'deepfilter: $err';
       final args = [ffmpegExe(), '-y', '-i', wav, '-vn'];
       if (cfg.format == 'aac') {

@@ -70,14 +70,14 @@ jobs:
         if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v4
         with:
-          name: PlaylistAdministrator-Setup
-          path: installer\PlaylistAdministrator-Setup-*.exe
+          name: playlist-admin-Setup
+          path: installer\playlist-admin-Setup-*.exe
 
       - name: Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           name: "Playlist Administrator ${{ github.ref_name }}"
-          files: installer\PlaylistAdministrator-Setup-*.exe
+          files: installer\playlist-admin-Setup-*.exe
         env:
           GITHUB_TOKEN: ${{ github.token }}

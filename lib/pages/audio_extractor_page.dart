@@ -193,13 +193,13 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
                   decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 12),
-                Text('並行任務（deepFilter 吃記憶體，上限 4）', style: Theme.of(ctx).textTheme.labelMedium),
+                Text('並行 ffmpeg（deepFilter 自動序列化，記憶體安全）', style: Theme.of(ctx).textTheme.labelMedium),
                 Slider(
-                  value: workers.toDouble(), min: 1, max: 4, divisions: 3,
+                  value: workers.toDouble(), min: 1, max: 2, divisions: 1,
                   label: '$workers',
                   onChanged: (v) => setDlg(() => workers = v.round()),
                 ),
-                Text('$workers 個同時抽取（4 個以上會把記憶體吃光）', style: Theme.of(ctx).textTheme.bodySmall),
+                Text('$workers 個 ffmpeg 同時跑；降噪一次只跑 1 個', style: Theme.of(ctx).textTheme.bodySmall),
                 const SizedBox(height: 12),
                 Text('DeepFilterNet 降噪（deepFilter.exe 路徑）', style: Theme.of(ctx).textTheme.labelMedium),
                 TextField(
