@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'config_service.dart';
 import 'playlist_parser.dart';
+import 'app_data_dir.dart';
 
 class Snapshot {
   final DateTime time;
@@ -40,10 +41,7 @@ class Snapshot {
 }
 
 class HistoryRecorder {
-  static String get _path {
-    final base = Platform.environment['LOCALAPPDATA'] ?? '';
-    return '$base\\Playlist Administrator\\data\\history.json';
-  }
+  static String get _path => '${AppDataDir.dir}\\history.json';
 
   static List<Snapshot> load() {
     try {

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'metadata_reader.dart';
+import 'app_data_dir.dart';
 import 'chinese_converter.dart';
 
 class LibraryIndex {

@@ -3,6 +3,7 @@ import 'dart:ffi';
 import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
+import 'services/app_data_dir.dart';
 
 int? _foundHwnd;
 
@@ -90,8 +91,7 @@ void main() {
   // Auto-save to config
   try {
     // Write directly to config.json
-    final localAppData = Platform.environment['LOCALAPPDATA'] ?? '';
-    final pointerFile = File('$localAppData\\Playlist Administrator\\data\\config.json');
+    final pointerFile = File('${AppDataDir.dir}\\config.json');
     if (pointerFile.existsSync()) {
       final data = jsonDecode(pointerFile.readAsStringSync()) as Map<String, dynamic>;
       data['spotube_coords'] = results.map((k, v) => MapEntry(k, v));

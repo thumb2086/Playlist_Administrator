@@ -11,7 +11,9 @@ def find_base() -> Path:
     local = os.environ.get("LOCALAPPDATA")
     pointer = None
     if local:
-        pointer = Path(local) / "Playlist Administrator" / "data" / "config.json"
+        pointer = Path(local) / "playlist-admin" / "data" / "config.json"
+        if not pointer.exists():
+            pointer = Path(local) / "Playlist Administrator" / "data" / "config.json"
     try:
         if pointer and pointer.exists():
             data = json.loads(pointer.read_text(encoding="utf-8"))

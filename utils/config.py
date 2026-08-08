@@ -24,6 +24,20 @@ def get_app_dir():
 def get_app_data_dir():
     base = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
     if base:
+        new_dir = os.path.join(base, 'playlist-admin', 'data')
+        legacy_dir = os.path.join(base, 'Playlist Administrator', 'data')
+        # 遷移：把舊資料目錄整個複製到新目錄（只搬一次）
+        if not os.path.exists(new_dir) and os.path.exists(legacy_dir):
+            try:
+                import shutil
+                shutil.copytree(legacy_dir, new_dir, dirs_exist_ok=True)
+            except Exception:
+                pass
+        return new_dir
+    # Fallback: use app directory (may be read-only in Program Files)
+    return os.path.join(get_app_dir(), 'data')
+    base = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
+    if base:
         return os.path.join(base, 'Playlist Administrator', 'data')
     # Fallback: use app directory (may be read-only in Program Files)
     return os.path.join(get_app_dir(), 'data')

@@ -1,5 +1,5 @@
-import 'package:flutter_test/flutter_test.dart';
-import 'package:playlist_administrator/app.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:playlist_admin/app.dart';
 
 void main() {
   testWidgets('App should build', (WidgetTester tester) async {

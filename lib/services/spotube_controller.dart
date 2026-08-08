@@ -1,9 +1,10 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io' hide sleep;
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
 import 'config_service.dart';
+import 'app_data_dir.dart';
 
 int _enumFindSpotube(int hwnd, int param) {
   final len = GetWindowTextLength(hwnd) + 1;
@@ -32,14 +33,14 @@ class SpotubeController {
   static const _stateFile = 'spotube_download_state.json';
   static Map<String, String> _loadState() {
     try {
-      final f = File('${Platform.environment['LOCALAPPDATA'] ?? ''}\\Playlist Administrator\\data\\$_stateFile');
+      final f = File('${AppDataDir.dir}\\$_stateFile');
       if (f.existsSync()) return Map<String, String>.from(jsonDecode(f.readAsStringSync()) as Map);
     } catch (_) {}
     return {};
   }
   static void _saveState(Map<String, String> state) {
     try {
-      final f = File('${Platform.environment['LOCALAPPDATA'] ?? ''}\\Playlist Administrator\\data\\$_stateFile');
+      final f = File('${AppDataDir.dir}\\$_stateFile');
       f.parent.createSync(recursive: true);
       f.writeAsStringSync(jsonEncode(state), flush: true);
     } catch (_) {}

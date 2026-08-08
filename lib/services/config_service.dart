@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../models/config_model.dart';
+import 'app_data_dir.dart';
 
 class ConfigService extends ChangeNotifier {
   ConfigService._();
@@ -10,13 +11,10 @@ class ConfigService extends ChangeNotifier {
   late AppConfig config;
   String? _configPath;
 
-  String get _appDataDir {
-    final localAppData = Platform.environment['LOCALAPPDATA'] ?? 
-        '${Platform.environment['USERPROFILE'] ?? 'C:\\Users\\Default'}\\AppData\\Local';
-    return '$localAppData\\Playlist Administrator\\data';
-  }
+  String get _appDataDir => AppDataDir.dir;
 
   Future<void> load() async {
+    await AppDataDir.ensureMigrated();
     final localDir = Directory(_appDataDir);
     final localFile = File('${localDir.path}\\config.json');
 

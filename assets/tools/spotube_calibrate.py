@@ -161,7 +161,7 @@ def main():
     # --- auto-save to config.json ---
     appdata_dir = os.path.join(
         os.environ.get("LOCALAPPDATA", os.path.expandvars(r"%USERPROFILE%\AppData\Local")),
-        "Playlist Administrator", "data",
+        "playlist-admin", "data",
     )
     appdata_cfg = os.path.join(appdata_dir, "config.json")
 
