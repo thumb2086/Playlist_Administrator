@@ -104,8 +104,11 @@ class LibraryPageState extends State<LibraryPage> {
             for (final line in lines) {
               if (!line.startsWith('#') && line.trim().isNotEmpty) {
                 total++;
-                final sep = line.contains('\\') || line.contains('/');
-                final name = sep ? line.split(RegExp(r'[\\/]')).last : line;
+                // 歌單路徑是 URI-encoded（Echo 相容），先解碼再比對
+                var raw = line;
+                try { raw = Uri.decodeComponent(raw); } catch (_) {}
+                final sep = raw.contains('\\') || raw.contains('/');
+                final name = sep ? raw.split(RegExp(r'[\\/]')).last : raw;
                 final stem = name.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
                 if (libStems.contains(stem)) { matched++; continue; }
                 if (stem.contains(' - ')) {
