@@ -285,6 +285,16 @@ class AudioExtractorEngine {
     return 'cuda';
   }
 
+  /// PyTorch CUDA OOM / 碎片化錯誤偵測
+  static bool _isGpuOom(String err) {
+    final e = err.toLowerCase();
+    return e.contains('out of memory') ||
+        e.contains('cuda out') ||
+        e.contains('reserved by pytorch') ||
+        e.contains('cudnn_status') ||
+        e.contains('cublas');
+  }
+
   /// 一次呼叫 deepFilter 處理多個 wav（模型只載入一次）。
   static Future<String?> _batchDeep(List<String> wavs, AudioExtractorConfig cfg,
       List<Process> active, void Function(String) onLog,
@@ -389,19 +399,24 @@ onLog('deeplog> device=${device == 'cpu' ? 'cpu' : 'cuda'} (forceCpu=$forceCpu)'
           final part = segs.skip(s).take(chunk).toList();
           var e2 = await _batchDeep(part, cfg, active, onLog,
               forceCpu: device == 'cpu', cancelCheck: canceled);
+          if (e2 != null && device != 'cpu' && _isGpuOom(e2)) {
+            // GPU 記憶體不足（例如遊戲正佔著顯卡）→ 整批改 CPU 重試
+            onLog('🔄 GPU 記憶體不足，此批改 CPU 重試');
+            e2 = await _batchDeep(part, cfg, active, onLog, forceCpu: true, cancelCheck: canceled);
+          }
           if (e2 != null) {
             onLog('deepFilter 批次失敗: $e2');
             // 逐檔重試（GPU→CPU 兜底）
             for (final w in part) {
               if (canceled()) break;
-              final env = device == 'cpu' ? {'CUDA_VISIBLE_DEVICES': '999999'} : <String, String>{};
+              final env = {'PYTHONWARNINGS': 'ignore', if (device == 'cpu') 'CUDA_VISIBLE_DEVICES': '999999'};
               var e3 = await _run([cfg.deepFilterPath, w,
                     '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
                   active, env: env, onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
               if (e3 != null && device != 'cpu') {
                 e3 = await _run([cfg.deepFilterPath, w,
                       '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
-                    active, env: {'CUDA_VISIBLE_DEVICES': '999999'},
+                    active, env: {'PYTHONWARNINGS': 'ignore', 'CUDA_VISIBLE_DEVICES': '999999'},
                     onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
               }
               if (e3 != null) {
