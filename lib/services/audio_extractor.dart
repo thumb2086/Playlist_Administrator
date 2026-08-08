@@ -294,9 +294,10 @@ class AudioExtractorEngine {
     try {
       final code = await proc.exitCode.timeout(const Duration(hours: 1));
       if (code == 0) return null;
-      var e = sb.toString().trim();
-      if (e.length > 200) e = e.substring(0, 200);
-      return e.isEmpty ? 'exit $code' : e.replaceAll('\n', ' ');
+      // 失敗時顯示 stderr「尾部」— 真正的錯誤訊息在最後，開頭常常只是 warning
+      var e = sb.toString().trim().replaceAll('\n', ' | ');
+      if (e.length > 300) e = e.substring(e.length - 300);
+      return e.isEmpty ? 'exit $code' : '(exit $code) $e';
     } on TimeoutException {
       try { proc.kill(); } catch (_) {}
       return 'timeout (killed)';
@@ -333,9 +334,14 @@ class AudioExtractorEngine {
       var err = await _run([ffmpegExe(), '-y', '-i', job.src, '-map', '0:${job.trackId}', '-vn', '-ar', '48000', '-c:a', 'pcm_s16le', wav], active);
       if (err != null) return 'extract: $err';
       // deepFilter 是最吃記憶體的階段 — 序列化執行避免 RAM 爆掉。
+      // 偶發失敗（GPU/IO 暫時性問題）先重試一次。
       await _acquireDfSlot();
       try {
         err = await _run([cfg.deepFilterPath, wav, '--output-dir', tmpDir.path, '--no-suffix', '--log-level', 'none'], active);
+        if (err != null) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+          err = await _run([cfg.deepFilterPath, wav, '--output-dir', tmpDir.path, '--no-suffix', '--log-level', 'none'], active);
+        }
       } finally {
         _releaseDfSlot();
       }
