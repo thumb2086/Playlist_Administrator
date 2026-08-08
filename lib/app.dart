@@ -8,6 +8,7 @@ import 'pages/settings_page.dart';
 import 'pages/player_page.dart';
 import 'pages/download_page.dart';
 import 'pages/rag_page.dart';
+import 'pages/audio_extractor_page.dart';
 import 'services/i18n.dart';
 import 'services/config_service.dart';
 import 'services/update_service.dart';
@@ -71,6 +72,7 @@ class _MainShellState extends State<MainShell> {
     StatsPage(),
     DownloadPage(),
     RagPage(),
+    AudioExtractorPage(),
     SettingsPage(),
   ];
 
@@ -129,6 +131,7 @@ class _MainShellState extends State<MainShell> {
         _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, t('app.sidebar.stats')),
         _NavItemData(Icons.cloud_download_outlined, Icons.cloud_download, t('app.sidebar.download')),
         _NavItemData(Icons.manage_search_rounded, Icons.manage_search, 'Podcast RAG'),
+        _NavItemData(Icons.audio_file_outlined, Icons.audio_file, '音軌抽取'),
         _NavItemData(Icons.settings_outlined, Icons.settings, t('app.sidebar.settings')),
       ];
     });

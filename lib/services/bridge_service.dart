@@ -137,13 +137,24 @@ class BridgeService {
     final targetDir = '$tmpDir\\playlist_admin_tools';
     final bridgeScript = '$targetDir\\flutter_download_bridge.py';
 
-    await Directory(targetDir).create(recursive: true);
-    await for (final f in Directory(sourceDir).list()) {
-      if (f is File) {
-        // Always overwrite, see _extractFromAssets.
-        await f.copy('$targetDir\\${f.uri.pathSegments.last}');
+    final rootLen = sourceDir.length;
+    Future<void> copyTree(Directory src) async {
+      await for (final f in src.list()) {
+        final rel = f.path.substring(rootLen).replaceAll('/', '\\').replaceAll('\\\\', '\\');
+        final dest = File('$targetDir$rel');
+        if (f is File) {
+          // Always overwrite, see _extractFromAssets.
+          await dest.parent.create(recursive: true);
+          await f.copy(dest.path);
+        } else if (f is Directory) {
+          await Directory('$targetDir$rel').create(recursive: true);
+          await copyTree(f);
+        }
       }
     }
+
+    await Directory(targetDir).create(recursive: true);
+    await copyTree(Directory(sourceDir));
     return _extractedPath = bridgeScript;
   }
 }
