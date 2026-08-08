@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+﻿import 'package:flutter/foundation.dart';
 import '../version.dart';
 
 class I18N extends ChangeNotifier {
@@ -28,16 +28,16 @@ class I18N extends ChangeNotifier {
 
   static final Map<String, String> _zh = {
     // App
-    'app.title': '播放清單管理',
+    'app.title': 'playlist-admin',
     'app.sidebar.library': '歌單庫',
     'app.sidebar.player': '播放器',
     'app.sidebar.pipeline': 'Pipeline',
     'app.sidebar.stats': '統計',
+    'app.sidebar.playlist': 'playlist',
+    'app.sidebar.admin': 'admin',
     'app.sidebar.spotube': 'Spotube',
     'app.sidebar.download': '下載',
     'app.sidebar.settings': '設定',
-    'app.sidebar.playlist': 'Playlist',
-    'app.sidebar.admin': 'Administrator',
     'app.version': 'v$appVersion',
     'app.header.badge': 'PLAYLIST ADMIN',
 
@@ -198,8 +198,8 @@ class I18N extends ChangeNotifier {
     'app.sidebar.spotube': 'Spotube',
     'app.sidebar.download': 'Download',
     'app.sidebar.settings': 'Settings',
-    'app.sidebar.playlist': 'Playlist',
-    'app.sidebar.admin': 'Administrator',
+    'app.sidebar.playlist': 'playlist',
+    'app.sidebar.admin': 'admin',
     'app.version': 'v$appVersion',
     'app.header.badge': 'PLAYLIST ADMIN',
 

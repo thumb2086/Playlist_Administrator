@@ -14,10 +14,7 @@ class LibraryIndex {
   int _podcastOtherCount = 0;
   bool _built = false;
 
-  static String _cacheDir() {
-    final base = Platform.environment['LOCALAPPDATA'] ?? '';
-    return '$base\\Playlist Administrator\\data';
-  }
+  static String _cacheDir() => AppDataDir.dir;
   static String _fingerprintFile(String libraryPath) =>
       '${_cacheDir()}\\index_fingerprint.json';
 
