@@ -171,6 +171,7 @@ class PodcastService {
       environment: env,
     );
 
+    var failed = false;
     proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
       (line) {
         if (line.trim().isEmpty) return;
@@ -180,14 +181,17 @@ class PodcastService {
             final pct = (json['percent'] as num?)?.toDouble() ?? 0;
             onProgress(pct / 100);
           } else if (json['type'] == 'error') {
-            throw Exception(json['message'] as String? ?? 'Download failed');
+            failed = true;
+            onProgress(1.0);
           }
-        } catch (e) {
-          if (e is Exception) rethrow;
-        }
+        } catch (_) {}
       },
     );
-    await proc.exitCode;
+    final code = await proc.exitCode;
+    // bridge 回 error 或非零退出 → 視為失敗，讓 pipeline 重試而不是浪費 YT/Groq
+    if (failed || code != 0) {
+      throw Exception('下載失敗（bridge exit $code）');
+    }
     onProgress(1.0);
     return true;
   }

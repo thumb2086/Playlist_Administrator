@@ -104,7 +104,13 @@ Downloaded: ${cfg.lastUpdated.length}''');
 }
 
 void main(List<String> args) async {
-  await runCli(args);
+  try {
+    await runCli(args);
+    exit(0);
+  } catch (e) {
+    print('CLI fail: $e');
+    exit(1);
+  }
 }
 
 Future<void> _cleanupMp3(String libPath) async {

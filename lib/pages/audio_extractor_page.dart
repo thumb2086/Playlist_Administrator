@@ -59,13 +59,18 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
       for (int i = 0; i < _files.length; i++) {
         if (_files[i].tracks.any((t) => t.bitRate <= 0 || t.bitRate >= thr)) _sel.add(i);
       }
-      setState(() {});
+    } else {
+      // 換目錄無快取：清空舊清單，避免 _start 抽到舊資料夾的檔案
+      _files = [];
+      _sel.clear();
     }
+    if (mounted) setState(() {});
   }
 
   Future<void> _pickSource() async {
     final d = await FilePicker.getDirectoryPath();
     if (d == null) return;
+    if (!mounted) return;
     _cfg.sourceDir = d;
     _cfg.outputDir = p.join(d, 'extracted_audio');
     AudioExtractorStore.saveConfig(_cfg, _profile);
@@ -73,31 +78,40 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
   }
 
   Future<void> _scan() async {
+    if (_scanning) return;
+    final targetDir = _cfg.sourceDir;
     setState(() {
       _scanning = true;
       _files = [];
       _sel.clear();
     });
-    const exts = {'.mp4', '.mov', '.mkv', '.avi', '.m4v', '.ts', '.webm'};
-    final paths = (await Directory(_cfg.sourceDir).list()
-        .where((e) => e is File && exts.contains(p.extension(e.path).toLowerCase()))
-        .map((e) => e.path).toList())
-      ..sort();
-    final files = <VideoFile>[];
-    for (int i = 0; i < paths.length; i++) {
-      final f = await AudioExtractorEngine.probe(paths[i]);
-      if (f != null) files.add(f);
-    }
-    AudioExtractorStore.saveCache(_cfg.sourceDir, files);
-    if (!mounted) return;
-    setState(() {
-      _files = files;
-      _scanning = false;
-      final thr = _cfg.silenceThreshold;
-      for (int i = 0; i < files.length; i++) {
-        if (files[i].tracks.any((t) => t.bitRate <= 0 || t.bitRate >= thr)) _sel.add(i);
+    try {
+      const exts = {'.mp4', '.mov', '.mkv', '.avi', '.m4v', '.ts', '.webm'};
+      final paths = (await Directory(targetDir).list()
+          .where((e) => e is File && exts.contains(p.extension(e.path).toLowerCase()))
+          .map((e) => e.path).toList())
+        ..sort();
+      final files = <VideoFile>[];
+      for (int i = 0; i < paths.length; i++) {
+        final f = await AudioExtractorEngine.probe(paths[i]);
+        if (f != null) files.add(f);
       }
-    });
+      AudioExtractorStore.saveCache(targetDir, files);
+      if (!mounted) return;
+      // 掃描期間可能切換設定檔/目錄：只採用「仍是當前目錄」的結果
+      if (targetDir != _cfg.sourceDir) return;
+      setState(() {
+        _files = files;
+        final thr = _cfg.silenceThreshold;
+        for (int i = 0; i < files.length; i++) {
+          if (files[i].tracks.any((t) => t.bitRate <= 0 || t.bitRate >= thr)) _sel.add(i);
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() {});
+    } finally {
+      if (mounted) setState(() => _scanning = false);
+    }
   }
 
   void _selAll() => setState(() => _sel.addAll(List.generate(_files.length, (i) => i)));
@@ -173,7 +187,7 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
     );
     if (!mounted) return;
     setState(() => _running = false);
-    _snack('完成 $_done tracks');
+    _snack(_cancel ? '已取消（完成 $_done tracks）' : '完成 $_done tracks');
   }
 
   void _snack(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
@@ -425,7 +439,7 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
             SizedBox(
               width: 110,
               child: DropdownButtonFormField<String>(
-                initialValue: _profile,
+                initialValue: _profile, key: ValueKey('pl_$_profile'),
                 isDense: true,
                 decoration: const InputDecoration(
                   labelText: '設定檔',
@@ -446,7 +460,7 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
             SizedBox(
               width: 110,
               child: DropdownButtonFormField<String>(
-                initialValue: _cfg.format,
+                initialValue: _cfg.format, key: ValueKey('fmt_${_cfg.format}'),
                 isDense: true,
                 decoration: const InputDecoration(
                   labelText: '格式', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -472,7 +486,7 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
               SizedBox(
                 width: 90,
                 child: DropdownButtonFormField<String>(
-                  initialValue: _cfg.bitrate,
+                  initialValue: _cfg.bitrate, key: ValueKey('br_${_cfg.bitrate}'),
                   isDense: true,
                   decoration: const InputDecoration(
                     labelText: 'Bitrate', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),

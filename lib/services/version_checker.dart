@@ -110,19 +110,31 @@ class VersionChecker {
       if (response.statusCode != 200) return null;
 
       final total = response.contentLength ?? -1;
+      if (total > 200 * 1024 * 1024) return null; // 200MB 上限防呆
       final completer = Completer<String?>();
-      final chunks = <int>[];
+      final tmp = '${Directory.systemTemp.path}\\PlaylistAdmin_Setup_${DateTime.now().microsecondsSinceEpoch}.exe';
+      final sink = File(tmp).openWrite();
+      int written = 0;
       response.stream.listen(
         (chunk) {
-          chunks.addAll(chunk);
-          if (total > 0) onProgress?.call(chunks.length / total);
+          sink.add(chunk);
+          written += chunk.length;
+          if (total > 0) onProgress?.call(written / total);
         },
         onDone: () {
-          final tmp = '${Directory.systemTemp.path}\\PlaylistAdmin_Setup.exe';
-          File(tmp).writeAsBytesSync(chunks);
-          completer.complete(tmp);
+          sink.flush().then((_) => sink.close()).then((_) {
+            if (written > 0 && (total < 0 || written >= total)) {
+              completer.complete(tmp);
+            } else {
+              try { File(tmp).deleteSync(); } catch (_) {}
+              completer.complete(null);
+            }
+          });
         },
-        onError: (e) => completer.complete(null),
+        onError: (e) {
+          try { sink.close(); File(tmp).deleteSync(); } catch (_) {}
+          completer.complete(null);
+        },
         cancelOnError: false,
       );
       return await completer.future;

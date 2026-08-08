@@ -38,6 +38,9 @@ class PipelineOrchestrator {
 
     final end = toStep ?? steps.length;
     int doneWeight = 0;
+    for (int i = 0; i < fromStep && i < steps.length; i++) {
+      doneWeight += steps[i].$2.toInt();
+    }
 
     for (int i = fromStep; i < end; i++) {
       if (state.isCancelled) break;
@@ -453,6 +456,10 @@ class PipelineOrchestrator {
   String _relativePath(String absPath, String relativeTo) {
     final absParts = absPath.replaceAll('\\', '/').split('/');
     final relParts = relativeTo.replaceAll('\\', '/').split('/');
+    if (absParts.first.toLowerCase() != relParts.first.toLowerCase()) {
+      // 跨磁碟：回傳絕對路徑，避免產生 ../../D:/ 這種無效相對路徑
+      return absPath.replaceAll('\\', '/');
+    }
     int common = 0;
     while (common < absParts.length && common < relParts.length &&
         absParts[common].toLowerCase() == relParts[common].toLowerCase()) {

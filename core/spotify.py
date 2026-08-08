@@ -672,7 +672,7 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                             # Echo Nightly compatible: URI-encode the path so the player
                             # can resolve Chinese / spaces / special chars (等於註解要的
                             # "URI encoded paths"，之前一直沒做)
-                            m3u_entry_path = urllib.parse.quote(m3u_entry_path, safe='/:@%')
+                            m3u_entry_path = _uri_quote(m3u_entry_path, safe='/:@%')
 
                             # Write EXTINF and the relative path with LF (Echo Nightly compatible)
                             f.write(f"#EXTINF:-1,{clean_track}\n")
