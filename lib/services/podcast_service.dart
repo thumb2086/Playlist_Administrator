@@ -268,7 +268,7 @@ class PodcastService {
     final url = Uri.parse(
         'https://itunes.apple.com/search?term=${Uri.encodeQueryComponent(query)}&media=podcast&limit=20');
     final resp = await http.get(url, headers: {
-      'User-Agent': 'PlaylistAdministrator/2.0',
+      'User-Agent': 'playlist-admin/2.0',
     });
     if (resp.statusCode != 200) {
       throw Exception('\u641c\u5c0b\u5931\u6557 (${resp.statusCode})');

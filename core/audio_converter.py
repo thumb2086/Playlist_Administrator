@@ -71,7 +71,7 @@ def _migrate_m4a_metadata_to_mp3(m4a_path, mp3_path, log_func=None):
                     log_func(f"    🖼️ Migrated album cover")
         
         # Add comment to indicate source
-        mp3.tags['COMM'] = COMM(encoding=3, lang='eng', desc='Source', text='Converted from M4A by Playlist Administrator')
+        mp3.tags['COMM'] = COMM(encoding=3, lang='eng', desc='Source', text='Converted from M4A by playlist-admin')
         
         mp3.save()
         

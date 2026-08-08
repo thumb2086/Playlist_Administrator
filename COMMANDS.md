@@ -1,5 +1,5 @@
 ﻿
-# Playlist Administrator 指令說明書
+# playlist-admin 指令說明書
 
 ## CLI（與 GUI 共用同一引擎）
 

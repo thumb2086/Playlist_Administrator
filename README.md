@@ -1,4 +1,4 @@
-# Playlist Administrator
+# playlist-admin
 
 A Flutter desktop app for music library management and Spotube playlist automation.
 

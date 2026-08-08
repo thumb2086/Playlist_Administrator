@@ -478,7 +478,7 @@ class PlaylistApp:
 
         # Title with accent color
         tk.Label(main_frame, text="🎵", font=get_font(48), fg=COLORS['accent'], bg=COLORS['bg']).pack(pady=(10, 0))
-        tk.Label(main_frame, text="Playlist Administrator", font=get_font(22, bold=True), fg=COLORS['text'], bg=COLORS['bg']).pack(pady=(5, 5))
+        tk.Label(main_frame, text="playlist-admin", font=get_font(22, bold=True), fg=COLORS['text'], bg=COLORS['bg']).pack(pady=(5, 5))
         tk.Label(main_frame, text="播放清單管理工具", font=get_font(14), fg=COLORS['text_secondary'], bg=COLORS['bg']).pack(pady=(0, 20))
 
         # Language selection prompt

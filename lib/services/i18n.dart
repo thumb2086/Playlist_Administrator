@@ -190,7 +190,7 @@ class I18N extends ChangeNotifier {
   };
 
   static final Map<String, String> _en = {
-    'app.title': 'Playlist Administrator',
+    'app.title': 'playlist-admin',
     'app.sidebar.library': 'Library',
     'app.sidebar.player': 'Player',
     'app.sidebar.pipeline': 'Pipeline',

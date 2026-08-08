@@ -3,7 +3,7 @@
 #ifndef MyAppVersion
   #define MyAppVersion "2.0.2-beta.8"
 #endif
-#define MyAppPublisher "Playlist Administrator"
+#define MyAppPublisher "playlist-admin"
 #define MyAppURL "https://github.com/thumb2086/playlist-admin"
 #define MyAppExeName "playlist-admin.exe"
 

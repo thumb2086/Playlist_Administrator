@@ -60,7 +60,7 @@ def check_for_updates(silent=False, timeout=5):
         
         headers = {
             'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': f'PlaylistAdministrator/{current_version}'
+            'User-Agent': f'playlist-admin/{current_version}'
         }
         
         response = requests.get(url, headers=headers, timeout=timeout)

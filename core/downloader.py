@@ -278,7 +278,7 @@ def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enri
             
             # Add source information
             audio['SOURCE'] = 'YouTube'
-            audio['COMMENT'] = f'Downloaded via Playlist Administrator'
+            audio['COMMENT'] = f'Downloaded via playlist-admin'
             
             # Add artwork
             if thumbnail_url:
@@ -412,7 +412,7 @@ def download_lyrics(song_name, output_path, log_func, failed_cache=None):
         # Direct API function
         def fetch_lrc(query, timeout=10):
             url = f"https://lrclib.net/api/search?q={urllib.parse.quote(query)}"
-            req = urllib.request.Request(url, headers={'User-Agent': 'PlaylistAdministrator/2.0'})
+            req = urllib.request.Request(url, headers={'User-Agent': 'playlist-admin/2.0'})
             
             # Create a custom context to ignore SSL verification if needed (though API usually fine)
             ctx = ssl.create_default_context()

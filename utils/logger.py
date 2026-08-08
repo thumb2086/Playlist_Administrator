@@ -41,7 +41,7 @@ class LogFileManager:
         self.enabled = True
         
         # Write header
-        self._write_raw(f"=== Playlist Administrator Log ===\n")
+        self._write_raw(f"=== playlist-admin Log ===\n")
         self._write_raw(f"Session started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         self._write_raw(f"=" * 50 + "\n\n")
         

@@ -13,7 +13,7 @@ Future<void> runCli(List<String> args) async {
   final cfg = ConfigService.instance.config;
 
   if (args.isEmpty) {
-    print('''Playlist Administrator CLI
+    print('''playlist-admin CLI
 Usage:
   dart cli_main.dart pipeline                   Run full pipeline
   dart cli_main.dart pipeline --step N          Run single step

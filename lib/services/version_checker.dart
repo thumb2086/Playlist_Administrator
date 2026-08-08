@@ -68,7 +68,7 @@ class VersionChecker {
     try {
       final resp = await http.get(
         Uri.parse(_apiUrl),
-        headers: {'User-Agent': 'PlaylistAdministrator/2.0'},
+        headers: {'User-Agent': 'playlist-admin/2.0'},
       );
       if (resp.statusCode != 200) {
         return VersionInfo(latestVersion: currentVersion, htmlUrl: '', hasUpdate: false);

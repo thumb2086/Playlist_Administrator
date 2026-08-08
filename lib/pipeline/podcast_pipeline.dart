@@ -50,7 +50,7 @@ class PodcastPipeline {
 
     final _stamp = DateTime.now().toString().substring(0, 19);
     final _ver = appVersion.startsWith('v') ? appVersion : 'v$appVersion';
-    onLog('$_stamp  Playlist Administrator $_ver');
+    onLog('$_stamp  playlist-admin $_ver');
 
     await GroqService.instance.loadFromEnv();
     // Also load from config if env didn't provide

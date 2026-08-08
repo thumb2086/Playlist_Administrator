@@ -1,5 +1,5 @@
 name: playlist_administrator
-description: Playlist Administrator - Music library management & Spotube automation
+description: playlist-admin - Music library management & Spotube automation
 publish_to: 'none'
 version: 2.6.4
 

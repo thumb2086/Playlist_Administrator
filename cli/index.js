@@ -7,7 +7,7 @@ import path from 'node:path';
 // (lib/cli_main.dart), so GUI and CLI share one implementation.
 // This script just locates the built exe / rag scripts and forwards args.
 
-const HELP = `Playlist Administrator CLI
+const HELP = `playlist-admin CLI
 
   Runs the same engine as the GUI app (shared Dart code). Requires a built
   release: flutter build windows --release
