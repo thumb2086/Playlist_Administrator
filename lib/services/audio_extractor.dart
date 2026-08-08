@@ -390,6 +390,9 @@ class AudioExtractorEngine {
     }
     if (proc == null) return 'launch failed';
     active.add(proc);
+    // 非常重要：deepFilter 的進度行(Enhanced/%) 走 stdout，要排空否則 pipe
+    // 塞滿後 process 卡死（CPU 0 但無限等待）。
+    proc.stdout.drain<void>();
     proc.stderr.transform(const Utf8Decoder(allowMalformed: true)).listen((chunk) {
       sb.write(chunk);
       if (onLine != null) {
