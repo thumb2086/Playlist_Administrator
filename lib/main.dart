@@ -18,7 +18,7 @@ int _enumFindFlutter(int h, int _) {
   GetWindowText(h, buf.cast<Utf16>(), len);
   final title = buf.cast<Utf16>().toDartString();
   calloc.free(buf);
-  if (title.contains('Playlist') || title.contains('播放清單')) {
+  if (title.toLowerCase().contains('playlist') || title.contains('播放清單')) {
     _foundHwnd = h;
     return FALSE;
   }
@@ -65,7 +65,7 @@ List<String> _cliArgs() {
 
 void main() async {
   // Single binary, two surfaces: pass CLI args to use the headless engine
-  // (playlist_administrator.exe pipeline / status / podcast ...), which is
+  // (playlist-admin pipeline / status / podcast ...), which is
   // what the `playlist-admin` npm package spawns.
   final args = _cliArgs();
   if (args.isNotEmpty) {

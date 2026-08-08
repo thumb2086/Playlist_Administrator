@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/config_service.dart';
@@ -55,6 +56,7 @@ class _PipelinePageState extends State<PipelinePage> {
         t('pipeline.step_unsorted'),
         t('pipeline.step_metadata'),
         t('pipeline.step_lufs'),
+        t('pipeline.step_rag'),
         t('pipeline.step_srt'),
       ];
     });
@@ -103,6 +105,15 @@ class _PipelinePageState extends State<PipelinePage> {
       _musicLog('  ❌ Pipeline 執行錯誤: $e');
     } finally {
       if (mounted) setState(() { _musicRunning = false; _musicProgress = 0; });
+    }
+  }
+
+  /// 用 opencode 問 podcast 內容（RAG skill 已安裝）。
+  void _openOpencode() {
+    try {
+      Process.run('cmd', ['/c', 'start', 'opencode'], runInShell: false).ignore();
+    } catch (e) {
+      _musicLog('⚠️ 無法啟動 opencode: $e');
     }
   }
 
@@ -195,8 +206,10 @@ class _PipelinePageState extends State<PipelinePage> {
             _PButton(t('pipeline.run_all'), Icons.play_arrow_rounded, () => _run(), _musicRunning, isPrimary: true),
             _PButton(t('pipeline.run_convert'), Icons.transform, () => _run(fromStep: 0, toStep: 1), _musicRunning),
             _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1, toStep: 2), _musicRunning),
-            _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2, toStep: 3), _musicRunning),
-            _PButton(t('pipeline.run_podcast'), Icons.podcasts, _runPodcast, _podcastRunning, color: const Color(0xFFCE93D8)),
+_PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2, toStep: 3), _musicRunning),
+        _PButton(t('pipeline.run_podcast'), Icons.podcasts, _runPodcast, _podcastRunning, color: const Color(0xFFCE93D8)),
+        _PButton(t('pipeline.run_rag'), Icons.auto_awesome, () => _run(fromStep: 6, toStep: 7), _musicRunning, color: const Color(0xFF4DB6AC)),
+        _PButton(t('pipeline.run_opencode'), Icons.forum_outlined, _openOpencode, false, color: const Color(0xFF9575CD)),
             if (_musicRunning) ...[
               _PButton(t('pipeline.pause'), Icons.pause_rounded, () {
                 _musicState.pause();

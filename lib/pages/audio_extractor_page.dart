@@ -135,7 +135,10 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
       cfg: _cfg,
       onLog: (l) {
         if (!mounted) return;
-        setState(() => _logs.add(l));
+        setState(() {
+          _logs.add(l);
+          if (_logs.length > 1000) _logs.removeRange(0, _logs.length - 1000);
+        });
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_logCtrl.hasClients) _logCtrl.jumpTo(_logCtrl.position.maxScrollExtent);
         });
@@ -190,13 +193,13 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
                   decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 12),
-                Text('並行 ffmpeg 任務', style: Theme.of(ctx).textTheme.labelMedium),
+                Text('並行任務（deepFilter 吃記憶體，上限 4）', style: Theme.of(ctx).textTheme.labelMedium),
                 Slider(
-                  value: workers.toDouble(), min: 1, max: 32, divisions: 31,
+                  value: workers.toDouble(), min: 1, max: 4, divisions: 3,
                   label: '$workers',
                   onChanged: (v) => setDlg(() => workers = v.round()),
                 ),
-                Text('$workers 個同時抽取', style: Theme.of(ctx).textTheme.bodySmall),
+                Text('$workers 個同時抽取（4 個以上會把記憶體吃光）', style: Theme.of(ctx).textTheme.bodySmall),
                 const SizedBox(height: 12),
                 Text('DeepFilterNet 降噪（deepFilter.exe 路徑）', style: Theme.of(ctx).textTheme.labelMedium),
                 TextField(

@@ -70,7 +70,7 @@ class AudioExtractorConfig {
   Map<int, String> trackNames;
   AudioExtractorConfig({
     this.sourceDir = '', this.outputDir = '', this.format = 'aac', this.bitrate = '384k',
-    this.lufsTarget = -14, this.silenceThreshold = 10000, this.workers = 12,
+    this.lufsTarget = -14, this.silenceThreshold = 10000, this.workers = 2,
     this.deepFilterPath = 'deepFilter', Map<int, String>? trackNames,
   }) : trackNames = trackNames ?? {1: 'Mix', 2: 'Game', 3: 'Mic', 5: 'DC'};
   Map<String, dynamic> toJson() => {
@@ -86,7 +86,7 @@ class AudioExtractorConfig {
     bitrate: j['bitrate'] as String? ?? '384k',
     lufsTarget: j['lufsTarget'] as int? ?? -14,
     silenceThreshold: j['silenceThreshold'] as int? ?? 10000,
-    workers: (j['workers'] as num?)?.toInt() ?? 12,
+    workers: (j['workers'] as num?)?.toInt() ?? 2,
     deepFilterPath: j['deepFilterPath'] as String? ?? 'deepFilter',
     trackNames: (j['trackNames'] as Map<String, dynamic>? ?? {}).map((k, v) => MapEntry(int.parse(k), v as String)),
   );
@@ -183,7 +183,9 @@ class AudioExtractorEngine {
     required bool Function() canceled,
   }) async {
     if (jobs.isEmpty) return;
-    final workers = math.max(1, math.min(cfg.workers, jobs.length));
+    // 記憶體保險：deepFilter 每個 process 都要載入模型。一律硬上限 4 個，
+    // 避免同時開太多 deepFilter 把 RAM 吃光（先前 12 並發直接當機）。
+    final workers = math.max(1, math.min(4, math.min(cfg.workers, jobs.length)));
     final q = List.of(jobs);
     final active = <Process>[];
     await Future.wait(List.generate(workers, (_) async {

@@ -16,4 +16,4 @@ $releaseDir = "$PSScriptRoot\build\windows\x64\runner\Release"
 Write-Host "Copying tools to $releaseDir..."
 Copy-Item -Path "$PSScriptRoot\tools" -Destination "$releaseDir\tools" -Recurse -Force
 
-Write-Host "Done: $releaseDir\playlist_administrator.exe"
+Write-Host "Done: $releaseDir\playlist-admin.exe"

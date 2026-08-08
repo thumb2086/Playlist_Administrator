@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 #include "resource.h"
@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "playlist_administrator" "\0"
+            VALUE "FileDescription", "playlist-admin" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "playlist_administrator" "\0"
+            VALUE "InternalName", "playlist-admin" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "playlist_administrator.exe" "\0"
-            VALUE "ProductName", "playlist_administrator" "\0"
+            VALUE "OriginalFilename", "playlist-admin.exe" "\0"
+            VALUE "ProductName", "playlist-admin" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

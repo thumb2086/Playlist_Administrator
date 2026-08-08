@@ -41,8 +41,9 @@ function projectRoot() {
 
 function exePath(root) {
   const candidates = [
+    path.join(root, 'build', 'windows', 'x64', 'runner', 'Release', 'playlist-admin.exe'),
+    path.join(root, 'build', 'windows', 'x64', 'runner', 'Debug', 'playlist-admin.exe'),
     path.join(root, 'build', 'windows', 'x64', 'runner', 'Release', 'playlist_administrator.exe'),
-    path.join(root, 'build', 'windows', 'x64', 'runner', 'Debug', 'playlist_administrator.exe'),
   ];
   return candidates.find((c) => fs.existsSync(c)) || null;
 }

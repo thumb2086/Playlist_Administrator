@@ -23,7 +23,7 @@ class VersionInfo {
 
 class VersionChecker {
   static const _owner = 'thumb2086';
-  static const _repo = 'Playlist_Administrator';
+  static const _repo = 'playlist-admin';
   static const _apiUrl = 'https://api.github.com/repos/$_owner/$_repo/releases/latest';
 
   static String get currentVersion => appVersion.startsWith('v') ? appVersion : 'v$appVersion';

@@ -10,7 +10,7 @@ __version__ = "2.6.4"
 
 # GitHub repository info for update checking
 GITHUB_OWNER = "thumb2086"
-GITHUB_REPO = "Playlist_Administrator"
+GITHUB_REPO = "playlist-admin"
 
 # Default check interval in days
 CHECK_INTERVAL_DAYS = 1

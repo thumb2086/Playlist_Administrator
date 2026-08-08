@@ -1,4 +1,4 @@
-
+﻿
 # Playlist Administrator 指令說明書
 
 ## CLI（與 GUI 共用同一引擎）
@@ -26,7 +26,7 @@ playlist-admin rag build [--reset]        # 建立 podcast RAG 向量庫（Ollam
 playlist-admin rag query "問題" [--topk N] # 查 podcast 逐字稿語意
 ```
 
-- 直接執行 exe 也可以：`playlist_administrator.exe pipeline`（同一份引擎）。
+- 直接執行 exe 也可以：`playlist-admin.exe pipeline`（同一份引擎）。
 - RAG 細節見 `rag/README.md`。
 
 ---
@@ -239,7 +239,7 @@ flutter analyze
 flutter build windows --release
 ```
 
-輸出：`build/windows/x64/runner/Release/playlist_administrator.exe`
+輸出：`build/windows/x64/runner/Release/playlist-admin.exe`
 
 ### 編譯 Windows Debug
 
@@ -247,7 +247,7 @@ flutter build windows --release
 flutter build windows --debug
 ```
 
-輸出：`build/windows/x64/runner/Debug/playlist_administrator.exe`
+輸出：`build/windows/x64/runner/Debug/playlist-admin.exe`
 
 ### 版本標籤
 

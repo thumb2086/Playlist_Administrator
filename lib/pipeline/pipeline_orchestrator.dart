@@ -10,6 +10,7 @@ import '../services/snapshot_manager.dart';
 import '../services/file_renamer.dart';
 import '../services/playlist_parser.dart';
 import '../services/lufs_service.dart';
+import '../services/rag_service.dart';
 
 class PipelineOrchestrator {
   final AppConfig config;
@@ -26,12 +27,13 @@ class PipelineOrchestrator {
 
   Future<void> run({int fromStep = 0, int? toStep}) async {
     final steps = [
-      ('Convert M4A → MP3', 30.0),
-      ('Scrape Spotify playlists', 25.0),
+      ('Convert M4A → MP3', 25.0),
+      ('Scrape Spotify playlists', 20.0),
       ('Prune missing tracks', 15.0),
       ('Organize unsorted songs', 10.0),
       ('Enrich metadata', 10.0),
       ('Measure LUFS', 10.0),
+      ('Podcast RAG index', 10.0),
     ];
 
     final end = toStep ?? steps.length;
@@ -74,6 +76,7 @@ class PipelineOrchestrator {
       case 3: await _stepUnsorted(progress); break;
       case 4: await _stepMetadata(progress); break;
       case 5: await _stepMeasureLufs(progress); break;
+      case 6: await _stepRag(progress); break;
     }
   }
 
@@ -504,6 +507,22 @@ class PipelineOrchestrator {
       );
     } catch (e) {
       onLog('LUFS 異常: $e');
+    }
+    progress(100);
+  }
+
+  /// Update the podcast RAG vector index (incremental, non-fatal).
+  Future<void> _stepRag(void Function(double) progress) async {
+    if (state.isCancelled) return;
+    onLog('檢查 Podcast 逐字稿並更新 RAG 向量庫…');
+    try {
+      await RagService.instance.build((line) {
+        if (state.isCancelled) return;
+        onLog('  $line');
+      });
+      onLog('✅ RAG 索引已更新');
+    } catch (e) {
+      onLog('  ⚠️ RAG 索引更新失敗（需要 Ollama + chromadb）: $e');
     }
     progress(100);
   }
