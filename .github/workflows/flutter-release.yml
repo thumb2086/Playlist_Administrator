@@ -77,7 +77,7 @@ jobs:
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          name: "Playlist Administrator ${{ github.ref_name }}"
+          name: "playlist-admin ${{ github.ref_name }}"
           files: installer\playlist-admin-Setup-*.exe
         env:
           GITHUB_TOKEN: ${{ github.token }}
