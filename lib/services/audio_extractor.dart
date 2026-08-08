@@ -336,7 +336,20 @@ onLog('deeplog> device=${device == 'cpu' ? 'cpu' : 'cuda'} (forceCpu=$forceCpu)'
     if (jobs.isEmpty) return;
     final active = <Process>[];
     const pool = 4;
-    final ext = switch (cfg.format) { 'wav' => '.wav', 'flac' => '.flac', _ => '.m4a' };
+    // 格式防呆：m4a 等同 aac；未知格式一律 aac
+    final fmt = switch (cfg.format) { 'm4a' => 'aac', 'wav' => 'wav', 'flac' => 'flac', _ => 'aac' };
+    final ext = switch (fmt) { 'wav' => '.wav', 'flac' => '.flac', _ => '.m4a' };
+
+    // 開跑前清掉陳腐的暫存 wav（>1 小時，可能來自先前被殺掉的執行）
+    try {
+      final now = DateTime.now();
+      for (final f in Directory.systemTemp.listSync().whereType<File>()) {
+        if (f.path.contains('df_') && f.path.endsWith('.wav') &&
+            now.difference(f.lastModifiedSync()).inMinutes > 60) {
+          try { f.deleteSync(); } catch (_) {}
+        }
+      }
+    } catch (_) {}
 
     void killAll() {
       for (final pr in active) {
@@ -517,12 +530,13 @@ onLog('deeplog> device=${device == 'cpu' ? 'cpu' : 'cuda'} (forceCpu=$forceCpu)'
   static Future<String?> _extractPlain(
       ({String src, int trackId, int sampleRate, String trackName, bool denoise}) job,
       String out, AudioExtractorConfig cfg, List<Process> active) async {
+    final fmt = cfg.format == 'm4a' ? 'aac' : cfg.format;
     final args = [ffmpegExe(), '-y', '-i', job.src, '-map', '0:${job.trackId}', '-vn'];
-    if (cfg.format == 'aac') {
+    if (fmt == 'aac') {
       args.addAll(['-c:a', 'aac', '-b:a', cfg.bitrate]);
       if (job.sampleRate > 0) args.addAll(['-ar', '${job.sampleRate}']);
       args.addAll(['-af', 'loudnorm=I=${cfg.lufsTarget}:LRA=1:TP=-1']);
-    } else if (cfg.format == 'flac') {
+    } else if (fmt == 'flac') {
       args.addAll(['-c:a', 'flac']);
     } else {
       args.addAll(['-c:a', 'pcm_s16le']);
@@ -534,11 +548,12 @@ onLog('deeplog> device=${device == 'cpu' ? 'cpu' : 'cuda'} (forceCpu=$forceCpu)'
   /// deepFilter 後的 wav → 目標格式（AAC + loudnorm / FLAC / WAV）。
   static Future<String?> _encodeWav(String wav, String out, AudioExtractorConfig cfg,
       List<Process> active) async {
+    final fmt = cfg.format == 'm4a' ? 'aac' : cfg.format;
     final args = [ffmpegExe(), '-y', '-i', wav, '-vn'];
-    if (cfg.format == 'aac') {
+    if (fmt == 'aac') {
       args.addAll(['-c:a', 'aac', '-b:a', cfg.bitrate, '-ar', '48000']);
       args.addAll(['-af', 'loudnorm=I=${cfg.lufsTarget}:LRA=1:TP=-1']);
-    } else if (cfg.format == 'flac') {
+    } else if (fmt == 'flac') {
       args.addAll(['-c:a', 'flac']);
     } else {
       args.addAll(['-c:a', 'pcm_s16le']);
