@@ -81,8 +81,11 @@ class VersionChecker {
       final assets = data['assets'] as List<dynamic>?;
       if (assets != null) {
         for (final asset in assets) {
-          final name = asset['name'] as String? ?? '';
-          if (name.startsWith('PlaylistAdministrator-Setup') && name.endsWith('.exe')) {
+          final name = (asset['name'] as String? ?? '').toLowerCase();
+          final ok =
+              (name.startsWith('playlist-admin-setup') || name.startsWith('playlistadministrator-setup')) &&
+              name.endsWith('.exe');
+          if (ok) {
             downloadUrl = asset['browser_download_url'] as String?;
             break;
           }

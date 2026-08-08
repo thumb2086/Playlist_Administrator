@@ -1,6 +1,6 @@
 {
   "name": "playlist-admin",
-  "version": "2.6.87",
+  "version": "2.6.88",
   "description": "Playlist Administrator CLI - thin launcher for the Flutter app engine (pipeline, podcast, spotube) + podcast RAG query",
   "type": "module",
   "bin": {
