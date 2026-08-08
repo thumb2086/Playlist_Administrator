@@ -257,8 +257,8 @@ class AudioExtractorEngine {
         e.contains('cublas');
   }
 
-  /// 超過 30 分鐘的 wav 切成 10 分鐘段。段名含來源 hash，防同名/跨檔碰撞；
-  /// 依 duration 直接推導段檔名（不做 temp 全掃描）。
+/// 超過 15 分鐘的 wav 切成 10 分鐘段。長檔直送會讓 DeepFilterNet 的特徵
+  /// buffer 爆 VRAM（單一分配可達 8GB）— 切段後每批峰值小很多。
   static Future<List<String>> _maybeSplit(String wav, List<Process> active,
       bool Function()? cancelCheck) async {
     try {
@@ -267,7 +267,7 @@ class AudioExtractorEngine {
         '-of', 'default=noprint_wrappers=1:nokey=1', wav,
       ]).timeout(const Duration(seconds: 20));
       final dur = double.tryParse((r.stdout as String).trim()) ?? 0;
-      if (dur <= 1800) return [wav];
+      if (dur <= 900) return [wav];
       final base = p.basenameWithoutExtension(wav);
       final segCount = (dur / 600).ceil();
       final pat = p.join(Directory.systemTemp.path, '${base}_seg_%03d.wav');
