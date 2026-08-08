@@ -250,6 +250,20 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                Text('降噪裝置', style: Theme.of(ctx).textTheme.labelMedium),
+                DropdownButtonFormField<String>(
+                  initialValue: _cfg.deepFilterDevice,
+                  items: const [
+                    DropdownMenuItem(value: 'auto', child: Text('自動（GPU 忙就 CPU）')),
+                    DropdownMenuItem(value: 'cuda', child: Text('只用 GPU')),
+                    DropdownMenuItem(value: 'cpu', child: Text('只用 CPU（不打遊戲最穩）')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setDlg(() => _cfg.deepFilterDevice = v);
+                  },
+                  decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 12),
                 Text('音軌名稱（輸出檔名）｜勾選 = 降噪（通常只有 Mic 需要）', style: Theme.of(ctx).textTheme.labelMedium),
                 for (int t = 1; t <= 6; t++)
                   Padding(

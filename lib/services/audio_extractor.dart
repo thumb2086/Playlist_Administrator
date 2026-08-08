@@ -67,11 +67,13 @@ class AudioExtractorConfig {
   int lufsTarget, silenceThreshold, workers;
   Map<int, String> trackNames;
   Set<int> denoiseTracks;
+  // deepFilter 裝置: auto(自動偵測，GPU 忙就 CPU) | cuda | cpu
+  String deepFilterDevice;
   AudioExtractorConfig({
     this.sourceDir = '', this.outputDir = '', this.format = 'aac', this.bitrate = '384k',
     this.lufsTarget = -14, this.silenceThreshold = 10000, this.workers = 2,
     this.deepFilterPath = 'deepFilter', Map<int, String>? trackNames,
-    Set<int>? denoiseTracks,
+    Set<int>? denoiseTracks, this.deepFilterDevice = 'auto',
   })  : trackNames = trackNames ?? {1: 'Mix', 2: 'Game', 3: 'Mic', 5: 'DC'},
         denoiseTracks = denoiseTracks ?? {3};
   Map<String, dynamic> toJson() => {
@@ -80,6 +82,7 @@ class AudioExtractorConfig {
     'deepFilterPath': deepFilterPath,
     'trackNames': trackNames.map((k, v) => MapEntry('$k', v)),
     'denoiseTracks': denoiseTracks.toList(),
+    'deepFilterDevice': deepFilterDevice,
   };
   factory AudioExtractorConfig.fromJson(Map<String, dynamic> j) => AudioExtractorConfig(
     sourceDir: j['sourceDir'] as String? ?? '',
@@ -92,6 +95,7 @@ class AudioExtractorConfig {
     deepFilterPath: j['deepFilterPath'] as String? ?? 'deepFilter',
     trackNames: (j['trackNames'] as Map<String, dynamic>? ?? {}).map((k, v) => MapEntry(int.parse(k), v as String)),
     denoiseTracks: ((j['denoiseTracks'] as List<dynamic>?) ?? [3]).map((e) => (e as num).toInt()).toSet(),
+    deepFilterDevice: j['deepFilterDevice'] as String? ?? 'auto',
   );
 }
 
@@ -212,6 +216,52 @@ class AudioExtractorEngine {
     'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True',
   };
 
+  /// 決定 deepFilter 的 device。auto：遊戲/其他程式佔用 VRAM > 50% 就改用 CPU。
+  static Future<String> _resolveDevice(AudioExtractorConfig cfg) async {
+    if (cfg.deepFilterDevice == 'cuda') return 'cuda';
+    if (cfg.deepFilterDevice == 'cpu') return 'cpu';
+    // auto: 查 nvidia-smi
+    try {
+      final r = await Process.run('nvidia-smi',
+          ['--query-gpu=memory.used,memory.total', '--format=csv,noheader,nounits'])
+          .timeout(const Duration(seconds: 10));
+      if (r.exitCode == 0) {
+        final line = (r.stdout as String).trim();
+        final parts = line.split(',');
+        if (parts.length >= 2) {
+          final used = double.tryParse(parts[0].trim());
+          final total = double.tryParse(parts[1].trim());
+          if (used != null && total != null && total > 0) {
+            final pct = used / total;
+            if (pct > 0.5) return 'cpu'; // 遊戲/其他程式佔著顯卡 → 不要搶
+          }
+        }
+      }
+    } catch (_) {}
+    return 'cuda';
+  }
+
+  /// 一次呼叫 deepFilter 處理多個 wav（模型只載入一次）。
+  static Future<String?> _batchDeep(List<String> wavs, AudioExtractorConfig cfg,
+      List<Process> active, void Function(String) onLog,
+      {List<String>? extraArgs}) async {
+    final device = await _resolveDevice(cfg);
+    if (device == 'cpu') onLog('deeplog> device=cpu（GPU 忙碌自動切換）');
+    return _run([
+      cfg.deepFilterPath, ...wavs,
+      '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info',
+      if (device == 'cpu') '--device', 'cpu',
+      if (extraArgs != null) ...extraArgs,
+    ], active, env: _dfEnv, onLine: (s) {
+      final t = s.trim();
+      if (t.contains('Device') || t.contains('device') || t.contains('Error') || t.contains('error') ||
+          t.contains('OOM') || t.contains('CUDA') || t.contains('enhanced') || t.contains('Infer') ||
+          t.contains('Loading model')) {
+        onLog('deeplog> $t');
+      }
+    });
+  }
+
   /// 三階段流水線: 抽出(並行4) → 批次 deepFilter(一次) → 編碼(並行4)。
   static Future<void> runParallel({
     required List<({String src, int trackId, int sampleRate, String trackName, bool denoise})> jobs,
@@ -270,24 +320,35 @@ class AudioExtractorEngine {
     // Phase 2: 批次 DeepFilter — 一次呼叫處理全部 wav，模型只載入一次。
     if (deno.isNotEmpty && !canceled()) {
       final wavs = deno.map((e) => e.wav).toList();
-      var err = await _run([cfg.deepFilterPath, ...wavs,
-            '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'none'],
-          active, env: _dfEnv);
+      // 先整批 GPU
+      var err = await _batchDeep(wavs, cfg, active, onLog);
       if (err != null) {
-        // GPU 批次失敗 → 重試一次，仍失敗就退回 CPU
-        onLog('deepFilter 批次失敗: $err');
-        err = await _run([cfg.deepFilterPath, ...wavs,
-              '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'none'],
-            active, env: _dfEnv);
-      }
-      if (err != null) {
-        for (final w in wavs) {
-          final per = await _run([cfg.deepFilterPath, w,
-                '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'none', '--device', 'cpu'],
-              active, env: _dfEnv);
-          if (per != null) {
-            onLog('FAIL ${p.basename(w)}: deepfilter(cpu): $per');
-            deno.removeWhere((e) => e.wav == w);
+        onLog('deepFilter 整批失敗: $err');
+        // GPU 分批重試（每次 8 條，避免一次吃爆 VRAM；順風就不會落到 CPU）
+        const chunk = 8;
+        final failed = <String>[];
+        for (int i = 0; i < wavs.length; i += chunk) {
+          final part = wavs.skip(i).take(chunk).toList();
+          var e2 = await _batchDeep(part, cfg, active, onLog, extraArgs: const ['--device', 'cuda']);
+          if (e2 != null) {
+            onLog('deepFilter 分批(GPU)失敗: $e2');
+            failed.addAll(part);
+          }
+        }
+        // 分批 GPU 仍失敗 → 逐檔 GPU → 最後才 CPU
+        if (failed.isNotEmpty) {
+          for (final w in failed) {
+            var e3 = await _run([cfg.deepFilterPath, w,
+                  '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
+                active, env: _dfEnv, onLine: (s) => onLog('$s'));
+            if (e3 == null) continue;
+            e3 = await _run([cfg.deepFilterPath, w,
+                  '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info', '--device', 'cpu'],
+                active, env: _dfEnv, onLine: (s) => onLog('$s'));
+            if (e3 != null) {
+              onLog('FAIL ${p.basename(w)}: deepfilter: $e3');
+              deno.removeWhere((e) => e.wav == w);
+            }
           }
         }
       }
@@ -308,18 +369,9 @@ class AudioExtractorEngine {
     }
   }
 
-  /// 批量 deepFilter 呼叫（GPU => CPU fallback 由呼叫方接手）。
-  static Future<String?> _batchDeep(List<String> wavs, AudioExtractorConfig cfg,
-      List<Process> active, {List<String>? extraArgs}) async {
-    return _run([
-      cfg.deepFilterPath, ...wavs,
-      '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'none',
-      if (extraArgs != null) ...extraArgs,
-    ], active, env: _dfEnv);
-  }
-
+  /// 批次 deepFilter 呼叫（可指定 device / log level；log 行即時轉送給 UI）。
   static Future<String?> _run(List<String> args, List<Process> active,
-      {String? workDir, Map<String, String>? env}) async {
+      {String? workDir, Map<String, String>? env, void Function(String line)? onLine}) async {
     final fullEnv = env != null ? {...Platform.environment, ...env} : null;
     Process? proc;
     final sb = StringBuffer();
@@ -335,7 +387,15 @@ class AudioExtractorEngine {
     }
     if (proc == null) return 'launch failed';
     active.add(proc);
-    proc.stderr.transform(const Utf8Decoder(allowMalformed: true)).listen(sb.write);
+    proc.stderr.transform(const Utf8Decoder(allowMalformed: true)).listen((chunk) {
+      sb.write(chunk);
+      if (onLine != null) {
+        final lines = chunk.split('\n');
+        for (final l in lines) {
+          if (l.trim().isNotEmpty) onLine(l.trim());
+        }
+      }
+    });
     try {
       final code = await proc.exitCode.timeout(const Duration(hours: 1));
       if (code == 0) return null;
