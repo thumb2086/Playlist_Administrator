@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -247,8 +247,8 @@ class AudioExtractorEngine {
     final device = forceCpu ? 'cpu' : await _resolveDevice(cfg);
     Map<String, String> env;
     if (device == 'cpu') {
-      // expandable_segments 只對 CUDA 有用，CPU 時別帶以免 warning 噪音
-      env = {'CUDA_VISIBLE_DEVICES': ''};
+      // 空字串會被系統丟掉 → 用不存在的 GPU 編號讓 torch 完全看不到顯卡
+      env = {'CUDA_VISIBLE_DEVICES': '999999'};
     } else {
       env = {..._dfEnv};
     }
@@ -344,7 +344,7 @@ class AudioExtractorEngine {
             for (final w in failed) {
               final e3 = await _run([cfg.deepFilterPath, w,
                     '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
-                  active, env: {..._dfEnv, 'CUDA_VISIBLE_DEVICES': ''}, onLine: (s) => onLog('deeplog> $s'));
+                  active, env: {..._dfEnv, 'CUDA_VISIBLE_DEVICES': '999999'}, onLine: (s) => onLog('deeplog> $s'));
               if (e3 != null) {
                 onLog('FAIL ${p.basename(w)}: deepfilter(cpu): $e3');
                 deno.removeWhere((e) => e.wav == w);
