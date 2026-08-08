@@ -73,7 +73,7 @@ class AudioExtractorConfig {
     this.sourceDir = '', this.outputDir = '', this.format = 'aac', this.bitrate = '384k',
     this.lufsTarget = -14, this.silenceThreshold = 10000, this.workers = 2,
     this.deepFilterPath = 'deepFilter', Map<int, String>? trackNames,
-    Set<int>? denoiseTracks, this.deepFilterDevice = 'auto',
+    Set<int>? denoiseTracks, this.deepFilterDevice = 'cuda',
   })  : trackNames = trackNames ?? {1: 'Mix', 2: 'Game', 3: 'Mic', 5: 'DC'},
         denoiseTracks = denoiseTracks ?? {3};
   Map<String, dynamic> toJson() => {
@@ -95,7 +95,7 @@ class AudioExtractorConfig {
     deepFilterPath: j['deepFilterPath'] as String? ?? 'deepFilter',
     trackNames: (j['trackNames'] as Map<String, dynamic>? ?? {}).map((k, v) => MapEntry(int.parse(k), v as String)),
     denoiseTracks: ((j['denoiseTracks'] as List<dynamic>?) ?? [3]).map((e) => (e as num).toInt()).toSet(),
-    deepFilterDevice: j['deepFilterDevice'] as String? ?? 'auto',
+    deepFilterDevice: j['deepFilterDevice'] as String? ?? 'cuda',
   );
 }
 
@@ -243,7 +243,7 @@ class AudioExtractorEngine {
   /// 一次呼叫 deepFilter 處理多個 wav（模型只載入一次）。
   static Future<String?> _batchDeep(List<String> wavs, AudioExtractorConfig cfg,
       List<Process> active, void Function(String) onLog,
-      {bool forceCpu = false}) async {
+      {bool forceCpu = false, bool Function()? cancelCheck}) async {
     final device = forceCpu ? 'cpu' : await _resolveDevice(cfg);
     Map<String, String> env;
     if (device == 'cpu') {
@@ -256,7 +256,7 @@ class AudioExtractorEngine {
     return _run([
       cfg.deepFilterPath, ...wavs,
       '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info',
-    ], active, env: env, onLine: (s) {
+    ], active, env: env, cancelCheck: cancelCheck, onLine: (s) {
       final t = s.trim();
       if (t.contains('Error') || t.contains('error') || t.contains('OOM') || t.contains('CUDA') ||
           t.contains('enhanced') || t.contains('Running on device') || t.contains('Loading model')) {
@@ -316,40 +316,42 @@ class AudioExtractorEngine {
         } else if (!job.denoise) {
           onLog('OK  ${p.basename(out)}');
         }
-        onProgress();
+        // 進度：非降噪軌在此計一次；降噪軌在 Phase 2 完成時計一次（避免重複灌滿）
+        if (!job.denoise) onProgress();
       }
     }));
 
     // Phase 2: 批次 DeepFilter — 一次呼叫處理全部 wav，模型只載入一次。
     if (deno.isNotEmpty && !canceled()) {
-      final wavs = deno.map((e) => e.wav).toList();
+      final wavs0 = deno.map((e) => e.wav).toList();
       final device = await _resolveDevice(cfg);
-      var err = await _batchDeep(wavs, cfg, active, onLog, forceCpu: device == 'cpu');
-      if (err != null) {
-        onLog('deepFilter 整批失敗: $err');
-        if (device == 'cuda') {
-          // GPU 分批重試（每次 8 條，避免一次吃爆 VRAM）
-          const chunk = 8;
-          final failed = <String>[];
-          for (int i = 0; i < wavs.length; i += chunk) {
-            final part = wavs.skip(i).take(chunk).toList();
-            final e2 = await _batchDeep(part, cfg, active, onLog);
-            if (e2 != null) {
-              onLog('deepFilter 分批(GPU)失敗: $e2');
-              failed.addAll(part);
+      const chunk = 8;
+      for (int i = 0; i < wavs0.length; i += chunk) {
+        if (canceled()) break;
+        final part = wavs0.skip(i).take(chunk).toList();
+        onLog('🎤 Mic deepFilter ${i + 1}~${i + part.length}/${wavs0.length}（${device == 'cpu' ? 'CPU' : 'GPU'}）');
+        var e2 = await _batchDeep(part, cfg, active, onLog,
+            forceCpu: device == 'cpu', cancelCheck: canceled);
+        if (e2 != null) {
+          onLog('deepFilter 批次失敗: $e2');
+          // 逐檔重試（同 device）；仍失敗就移除該檔
+          for (final w in part) {
+            if (canceled()) break;
+            final env = device == 'cpu' ? {'CUDA_VISIBLE_DEVICES': '999999'} : _dfEnv;
+            final e3 = await _run([cfg.deepFilterPath, w,
+                  '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
+                active, env: env, onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
+            if (e3 != null) {
+              onLog('FAIL ${p.basename(w)}: deepfilter: $e3');
+              deno.removeWhere((e) => e.wav == w);
             }
+            onProgress();
           }
-          // 分批 GPU 仍失敗 → 逐檔 CPU
-          if (failed.isNotEmpty) {
-            for (final w in failed) {
-              final e3 = await _run([cfg.deepFilterPath, w,
-                    '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
-                  active, env: {..._dfEnv, 'CUDA_VISIBLE_DEVICES': '999999'}, onLine: (s) => onLog('deeplog> $s'));
-              if (e3 != null) {
-                onLog('FAIL ${p.basename(w)}: deepfilter(cpu): $e3');
-                deno.removeWhere((e) => e.wav == w);
-              }
-            }
+        } else {
+          // 整批成功：每條計一次進度
+          for (int k = 0; k < part.length; k++) {
+            if (canceled()) break;
+            onProgress();
           }
         }
       }
@@ -364,7 +366,6 @@ class AudioExtractorEngine {
           final err = await _encodeWav(t.wav, t.out, cfg, active);
           try { File(t.wav).deleteSync(); } catch (_) {}
           onLog(err == null ? 'OK  ${p.basename(t.out)}' : 'FAIL ${p.basename(t.out)}: $err');
-          onProgress();
         }
       }));
     }
@@ -372,7 +373,8 @@ class AudioExtractorEngine {
 
   /// 批次 deepFilter 呼叫（可指定 device / log level；log 行即時轉送給 UI）。
   static Future<String?> _run(List<String> args, List<Process> active,
-      {String? workDir, Map<String, String>? env, void Function(String line)? onLine}) async {
+      {String? workDir, Map<String, String>? env, void Function(String line)? onLine,
+      bool Function()? cancelCheck}) async {
     final fullEnv = env != null ? {...Platform.environment, ...env} : null;
     Process? proc;
     final sb = StringBuffer();
@@ -398,7 +400,19 @@ class AudioExtractorEngine {
       }
     });
     try {
-      final code = await proc.exitCode.timeout(const Duration(hours: 1));
+      // 取消時即時殺掉子程序（先前 cancel 只能等階段結束才生效）
+      int code = -1;
+      for (int waitMs = 0; ; waitMs += 250) {
+        if (cancelCheck != null && cancelCheck()) {
+          try { proc.kill(); } catch (_) {}
+          try { active.remove(proc); } catch (_) {}
+          return 'cancelled';
+        }
+        if (waitMs >= 60000) break; // 檢查頻率下限：至少每 1 分鐘看一眼
+        code = await proc.exitCode.timeout(const Duration(milliseconds: 250), onTimeout: () => -1);
+        if (code != -1) break;
+      }
+      code = await proc.exitCode.timeout(const Duration(hours: 1));
       if (code == 0) return null;
       // 錯誤訊息的真正內容在 stderr 尾部
       var e = sb.toString().trim().replaceAll('\n', ' | ');
