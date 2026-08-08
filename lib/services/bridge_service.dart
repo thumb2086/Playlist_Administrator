@@ -53,8 +53,8 @@ class BridgeService {
           try {
             final ragDst = Directory('$tmpDir\\playlist_admin_tools\\rag');
             await ragDst.create(recursive: true);
-            final ragSrc = Directory('${d.path}\\rag');
             final rags = <File>[];
+            final ragSrc = Directory('${d.path}\\rag');
             if (await ragSrc.exists()) {
               await for (final f in ragSrc.list()) {
                 if (f is File && f.path.toLowerCase().endsWith('.py')) {
@@ -76,6 +76,21 @@ class BridgeService {
               if (!dest.existsSync() ||
                   f.lastModifiedSync().isAfter(dest.lastModifiedSync())) {
                 await f.copy(dest.path);
+              }
+            }
+            // deepFilter daemon 也要跟隨 bridge（音軌抽取需要它）
+            for (final cand in [
+              '${d.path}\\tools\\deepfilter_daemon.py',
+              '${d.path}\\assets\\tools\\deepfilter_daemon.py',
+            ]) {
+              final src = File(cand);
+              if (src.existsSync()) {
+                final dest = File('$tmpDir\\playlist_admin_tools\\deepfilter_daemon.py');
+                if (!dest.existsSync() ||
+                    src.lastModifiedSync().isAfter(dest.lastModifiedSync())) {
+                  await src.copy(dest.path);
+                }
+                break;
               }
             }
           } catch (_) {}
