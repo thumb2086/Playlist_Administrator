@@ -214,6 +214,53 @@ class AudioExtractorEngine {
 
   
 
+  /// 超過 30 分鐘的 wav 切成 10 分鐘段（deep 記憶體固定、避免 cuDNN 長輸入雷）。
+  /// 回傳要被 deep 處理的檔案清單。
+  static Future<List<String>> _maybeSplit(String wav, List<Process> active) async {
+    try {
+      final r = await Process.run(ffprobeExe(), [
+        '-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', wav,
+      ]).timeout(const Duration(seconds: 20));
+      final dur = double.tryParse((r.stdout as String).trim()) ?? 0;
+      if (dur <= 1800) return [wav];
+      final base = p.basenameWithoutExtension(wav);
+      final pat = p.join(Directory.systemTemp.path, '${base}_seg_%03d.wav');
+      final e = await _run([
+        ffmpegExe(), '-y', '-i', wav, '-f', 'segment', '-segment_time', '600',
+        '-c', 'copy', pat,
+      ], active);
+      if (e != null) return [wav];
+      return Directory(Directory.systemTemp.path)
+          .listSync()
+          .whereType<File>()
+          .map((f) => f.path)
+          .where((f) => f.contains('${base}_seg_') && f.endsWith('.wav'))
+          .toList()
+        ..sort();
+    } catch (_) {
+      return [wav];
+    }
+  }
+
+  /// 把 deep 處理後的段拼回原 wav（ffmpeg concat，自動清段檔）。
+  static Future<String?> _concatSegs(List<String> segs, String destWav,
+      List<Process> active) async {
+    try {
+      final listPath = p.join(Directory.systemTemp.path, 'concat_${DateTime.now().microsecondsSinceEpoch}.txt');
+      File(listPath).writeAsStringSync(segs.map((s) => "file '${s.replaceAll("'", r"'\''")}'").join('\n'));
+      final e = await _run([ffmpegExe(), '-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', destWav], active);
+      File(listPath).deleteSync();
+      if (e != null) return e;
+      for (final s in segs) {
+        try { File(s).deleteSync(); } catch (_) {}
+      }
+      return null;
+    } catch (e) {
+      return 'concat: $e';
+    }
+  }
+
   /// 決定 deepFilter 的 device。auto：遊戲/其他程式佔用 VRAM > 50% 就改用 CPU。
   /// 注意：deepFilter CLI 沒有 --device 參數，強制 CPU 要用 CUDA_VISIBLE_DEVICES=''。
   static Future<String> _resolveDevice(AudioExtractorConfig cfg) async {
@@ -328,44 +375,54 @@ onLog('deeplog> device=${device == 'cpu' ? 'cpu' : 'cuda'} (forceCpu=$forceCpu)'
     if (deno.isNotEmpty && !canceled()) {
       final wavs0 = deno.map((e) => e.wav).toList();
       final device = await _resolveDevice(cfg);
-      // 批大小 4：deepFilterNet 會把整批 wav 載入 RAM（1.5h 錄影≈2GB 浮點），
-      // 8 條一批峰值可到 ~11GB；4 條約 5~6GB 比較安全。
       const chunk = 4;
-      for (int i = 0; i < wavs0.length; i += chunk) {
+      int done = 0;
+      for (final origWav in wavs0) {
         if (canceled()) break;
-        final part = wavs0.skip(i).take(chunk).toList();
-        onLog('🎤 Mic deepFilter ${i + 1}~${i + part.length}/${wavs0.length}（${device == 'cpu' ? 'CPU' : 'GPU'}）');
-        var e2 = await _batchDeep(part, cfg, active, onLog,
-            forceCpu: device == 'cpu', cancelCheck: canceled);
-        if (e2 != null) {
-          onLog('deepFilter 批次失敗: $e2');
-// 逐檔重試（同 device）；仍失敗就移除該檔
-      for (final w in part) {
-            if (canceled()) break;
-            final env = device == 'cpu' ? {'CUDA_VISIBLE_DEVICES': '999999'} : <String, String>{};
-            var e3 = await _run([cfg.deepFilterPath, w,
-                  '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
-                active, env: env, onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
-            if (e3 != null && device != 'cpu') {
-              // 某些 wav 長度會讓 cuDNN/GRU 拒跑（CUDNN_STATUS_NOT_SUPPORTED）→ CPU 再試一次
-              e3 = await _run([cfg.deepFilterPath, w,
+        done++;
+        // 長檔（>30 分）切成 10 分鐘段，記憶體固定、避開 cuDNN 長輸入雷
+        final segs = await _maybeSplit(origWav, active);
+        final segLabel = segs.length > 1 ? '（${segs.length} 段）' : '';
+        onLog('🎤 Mic deepFilter $done/${wavs0.length}$segLabel（${device == 'cpu' ? 'CPU' : 'GPU'}）');
+        var allOk = !canceled();
+        for (int s = 0; s < segs.length && !canceled(); s += chunk) {
+          final part = segs.skip(s).take(chunk).toList();
+          var e2 = await _batchDeep(part, cfg, active, onLog,
+              forceCpu: device == 'cpu', cancelCheck: canceled);
+          if (e2 != null) {
+            onLog('deepFilter 批次失敗: $e2');
+            // 逐檔重試（GPU→CPU 兜底）
+            for (final w in part) {
+              if (canceled()) break;
+              final env = device == 'cpu' ? {'CUDA_VISIBLE_DEVICES': '999999'} : <String, String>{};
+              var e3 = await _run([cfg.deepFilterPath, w,
                     '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
-                  active, env: {'CUDA_VISIBLE_DEVICES': '999999'},
-                  onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
+                  active, env: env, onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
+              if (e3 != null && device != 'cpu') {
+                e3 = await _run([cfg.deepFilterPath, w,
+                      '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
+                    active, env: {'CUDA_VISIBLE_DEVICES': '999999'},
+                    onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
+              }
+              if (e3 != null) {
+                onLog('  ⚠️ 段處理失敗（跳過此檔）: $e3');
+                allOk = false;
+              }
             }
-            if (e3 != null) {
-              onLog('FAIL ${p.basename(w)}: deepfilter: $e3');
-              deno.removeWhere((e) => e.wav == w);
-            }
-            onProgress();
-          }
-        } else {
-          // 整批成功：每條計一次進度
-          for (int k = 0; k < part.length; k++) {
-            if (canceled()) break;
-            onProgress();
           }
         }
+        if (allOk && segs.length > 1) {
+          // 把降噪後的段拼回原 wav
+          final ce = await _concatSegs(segs, origWav, active);
+          if (ce != null) {
+            onLog('  ⚠️ 拼接失敗: $ce');
+            allOk = false;
+          }
+        }
+        if (!allOk) {
+          deno.removeWhere((e) => e.wav == origWav);
+        }
+        onProgress();
       }
     }
 
