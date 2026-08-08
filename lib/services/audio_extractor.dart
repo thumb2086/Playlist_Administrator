@@ -212,9 +212,7 @@ class AudioExtractorEngine {
     }
   }
 
-  static const _dfEnv = {
-    'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True',
-  };
+  
 
   /// 決定 deepFilter 的 device。auto：遊戲/其他程式佔用 VRAM > 50% 就改用 CPU。
   /// 注意：deepFilter CLI 沒有 --device 參數，強制 CPU 要用 CUDA_VISIBLE_DEVICES=''。
@@ -250,7 +248,7 @@ class AudioExtractorEngine {
       // 空字串會被系統丟掉 → 用不存在的 GPU 編號讓 torch 完全看不到顯卡
       env = {'CUDA_VISIBLE_DEVICES': '999999'};
     } else {
-      env = {..._dfEnv};
+      env = <String, String>{};
     }
     onLog('deeplog> device=${device == 'cpu' ? 'cpu' : 'cuda'} (forceCpu=$forceCpu)');
     return _run([
@@ -325,7 +323,9 @@ class AudioExtractorEngine {
     if (deno.isNotEmpty && !canceled()) {
       final wavs0 = deno.map((e) => e.wav).toList();
       final device = await _resolveDevice(cfg);
-      const chunk = 8;
+      // 批大小 4：deepFilterNet 會把整批 wav 載入 RAM（1.5h 錄影≈2GB 浮點），
+      // 8 條一批峰值可到 ~11GB；4 條約 5~6GB 比較安全。
+      const chunk = 4;
       for (int i = 0; i < wavs0.length; i += chunk) {
         if (canceled()) break;
         final part = wavs0.skip(i).take(chunk).toList();
@@ -337,7 +337,7 @@ class AudioExtractorEngine {
           // 逐檔重試（同 device）；仍失敗就移除該檔
           for (final w in part) {
             if (canceled()) break;
-            final env = device == 'cpu' ? {'CUDA_VISIBLE_DEVICES': '999999'} : _dfEnv;
+            final env = device == 'cpu' ? {'CUDA_VISIBLE_DEVICES': '999999'} : <String, String>{};
             final e3 = await _run([cfg.deepFilterPath, w,
                   '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
                 active, env: env, onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
