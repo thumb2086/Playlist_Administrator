@@ -4,7 +4,9 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:path/path.dart' as p;
 
-// Port of 大拇哥實驗室 AudioExtractor — DeepFilterNet 降噪 only (RNNoise/afftdn removed).
+// Port of 大拇哥實驗室 AudioExtractor — DeepFilterNet 降噪 only。
+// 三階段流水線: ffmpeg 抽出(平行) → 批次 deepFilter(一次載入模型) → ffmpeg 編碼(平行)。
+// 用於切出音軌時記憶體/GPU 最佳化：deepFilter 只跑勾選的軌、只載入一次模型。
 
 class AudioTrack {
   final int index;
@@ -58,25 +60,20 @@ class VideoFile {
     tracks: (j['tracks'] as List).map((t) => AudioTrack.fromJson(t as Map<String, dynamic>)).toList(),
     mtime: DateTime.tryParse(j['mtime'] as String? ?? '') ?? DateTime(2000),
   );
-  int durationSeconds() {
-    final t = duration.toInt();
-    return t < 0 ? 0 : t;
-  }
 }
 
 class AudioExtractorConfig {
   String sourceDir, outputDir, format, bitrate, deepFilterPath;
   int lufsTarget, silenceThreshold, workers;
   Map<int, String> trackNames;
-  // 只有勾選的軌（預設 Mic=3）才會跑 DeepFilterNet；其他軌純 ffmpeg 抽出。
   Set<int> denoiseTracks;
   AudioExtractorConfig({
     this.sourceDir = '', this.outputDir = '', this.format = 'aac', this.bitrate = '384k',
     this.lufsTarget = -14, this.silenceThreshold = 10000, this.workers = 2,
     this.deepFilterPath = 'deepFilter', Map<int, String>? trackNames,
     Set<int>? denoiseTracks,
-  }) : trackNames = trackNames ?? {1: 'Mix', 2: 'Game', 3: 'Mic', 5: 'DC'},
-       denoiseTracks = denoiseTracks ?? {3};
+  })  : trackNames = trackNames ?? {1: 'Mix', 2: 'Game', 3: 'Mic', 5: 'DC'},
+        denoiseTracks = denoiseTracks ?? {3};
   Map<String, dynamic> toJson() => {
     'sourceDir': sourceDir, 'outputDir': outputDir, 'format': format, 'bitrate': bitrate,
     'lufsTarget': lufsTarget, 'silenceThreshold': silenceThreshold, 'workers': workers,
@@ -174,25 +171,6 @@ class AudioExtractorStore {
 }
 
 class AudioExtractorEngine {
-  // deepFilter 每個 process 會載入一個 Python + 神經網路模型，記憶體成本極高。
-  // 一律最多 1 個同時在跑（ffmpeg 抽出/編碼階段照樣平行）。
-  static int _dfRunning = 0;
-  static final List<Completer<void>> _dfWaiters = [];
-
-  static Future<void> _acquireDfSlot() async {
-    while (_dfRunning >= 1) {
-      final c = Completer<void>();
-      _dfWaiters.add(c);
-      await c.future;
-    }
-    _dfRunning++;
-  }
-
-  static void _releaseDfSlot() {
-    _dfRunning--;
-    if (_dfWaiters.isNotEmpty) _dfWaiters.removeAt(0).complete();
-  }
-
   static String? _ffmpegCache, _ffprobeCache;
   static String ffmpegExe() => _ffmpegCache ??= _findExe('ffmpeg');
   static String ffprobeExe() => _ffprobeCache ??= _findExe('ffprobe');
@@ -230,6 +208,11 @@ class AudioExtractorEngine {
     }
   }
 
+  static const _dfEnv = {
+    'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True',
+  };
+
+  /// 三階段流水線: 抽出(並行4) → 批次 deepFilter(一次) → 編碼(並行4)。
   static Future<void> runParallel({
     required List<({String src, int trackId, int sampleRate, String trackName, bool denoise})> jobs,
     required AudioExtractorConfig cfg,
@@ -238,50 +221,112 @@ class AudioExtractorEngine {
     required bool Function() canceled,
   }) async {
     if (jobs.isEmpty) return;
-    // ffmpeg 抽出/編碼可平行，但 worker 太多仍會堆高記憶體；deepFilter 階段
-    // 另有訊號燈保證同時只跑 1 個（模型載入是主要 RAM 殺手）。
-    final workers = math.max(1, math.min(2, math.min(cfg.workers, jobs.length)));
-    final q = List.of(jobs);
     final active = <Process>[];
-    await Future.wait(List.generate(workers, (_) async {
-      while (q.isNotEmpty) {
-        if (canceled()) {
-          for (final p in active) {
-            try { p.kill(); } catch (_) {}
-          }
-          return;
-        }
-        final job = q.removeAt(0);
-        final d = Directory(cfg.outputDir);
-        if (!await d.exists()) await d.create(recursive: true);
-        final ext = switch (cfg.format) { 'wav' => '.wav', 'flac' => '.flac', _ => '.m4a' };
+    const pool = 4;
+    final ext = switch (cfg.format) { 'wav' => '.wav', 'flac' => '.flac', _ => '.m4a' };
+
+    void killAll() {
+      for (final pr in active) {
+        try { pr.kill(); } catch (_) {}
+      }
+    }
+
+    // Phase 1: 抽出。一般軌直接輸出；Mic(降噪)軌先抽成暫存 wav。
+    final q1 = List.of(jobs);
+    final deno = <({String wav, String out})>[];
+    await Future.wait(List.generate(pool, (_) async {
+      while (q1.isNotEmpty) {
+        if (canceled()) { killAll(); return; }
+        final job = q1.removeAt(0);
         final stem = p.basenameWithoutExtension(job.src);
         final name = job.trackName.isNotEmpty ? '${stem}_${job.trackName}' : '${stem}_track${job.trackId}';
         final out = p.join(cfg.outputDir, '$name$ext');
-        if (await File(out).exists()) {
+        if (File(out).existsSync()) {
           onLog('SKIP ${p.basename(out)} (exists)');
           onProgress();
           continue;
         }
-        try {
-          final err = job.denoise
-              ? await _extractDf(job, out, cfg, active)
-              : await _extractPlain(job, out, cfg, active);
-          onLog(err == null ? 'OK  ${p.basename(out)}' : 'FAIL ${p.basename(out)}: $err');
-        } catch (e) {
-          onLog('FAIL ${p.basename(out)}: $e');
+        String? err;
+        if (job.denoise) {
+          final wav = p.join(Directory.systemTemp.path,
+              'df_${p.basenameWithoutExtension(job.src)}_t${job.trackId}_${job.src.hashCode.abs().toRadixString(16)}.wav');
+          err = await _run(
+            [ffmpegExe(), '-y', '-i', job.src, '-map', '0:${job.trackId}', '-vn', '-ar', '48000', '-c:a', 'pcm_s16le', wav],
+            active,
+          );
+          if (err == null) deno.add((wav: wav, out: out));
+        } else {
+          err = await _extractPlain(job, out, cfg, active);
+        }
+        if (err != null) {
+          onLog('FAIL $name$ext: $err');
+        } else if (!job.denoise) {
+          onLog('OK  ${p.basename(out)}');
         }
         onProgress();
       }
     }));
+
+    // Phase 2: 批次 DeepFilter — 一次呼叫處理全部 wav，模型只載入一次。
+    if (deno.isNotEmpty && !canceled()) {
+      final wavs = deno.map((e) => e.wav).toList();
+      var err = await _run([cfg.deepFilterPath, ...wavs,
+            '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'none'],
+          active, env: _dfEnv);
+      if (err != null) {
+        // GPU 批次失敗 → 重試一次，仍失敗就退回 CPU
+        onLog('deepFilter 批次失敗: $err');
+        err = await _run([cfg.deepFilterPath, ...wavs,
+              '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'none'],
+            active, env: _dfEnv);
+      }
+      if (err != null) {
+        for (final w in wavs) {
+          final per = await _run([cfg.deepFilterPath, w,
+                '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'none', '--device', 'cpu'],
+              active, env: _dfEnv);
+          if (per != null) {
+            onLog('FAIL ${p.basename(w)}: deepfilter(cpu): $per');
+            deno.removeWhere((e) => e.wav == w);
+          }
+        }
+      }
+    }
+
+    // Phase 3: Deep wav → 目標格式（平行 ffmpeg），完成刪暫存。
+    if (deno.isNotEmpty && !canceled()) {
+      await Future.wait(List.generate(pool, (_) async {
+        while (deno.isNotEmpty) {
+          if (canceled()) { killAll(); return; }
+          final t = deno.removeAt(0);
+          final err = await _encodeWav(t.wav, t.out, cfg, active);
+          try { File(t.wav).deleteSync(); } catch (_) {}
+          onLog(err == null ? 'OK  ${p.basename(t.out)}' : 'FAIL ${p.basename(t.out)}: $err');
+          onProgress();
+        }
+      }));
+    }
   }
 
-  static Future<String?> _run(List<String> args, List<Process> active, {String? workDir}) async {
+  /// 批量 deepFilter 呼叫（GPU => CPU fallback 由呼叫方接手）。
+  static Future<String?> _batchDeep(List<String> wavs, AudioExtractorConfig cfg,
+      List<Process> active, {List<String>? extraArgs}) async {
+    return _run([
+      cfg.deepFilterPath, ...wavs,
+      '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'none',
+      if (extraArgs != null) ...extraArgs,
+    ], active, env: _dfEnv);
+  }
+
+  static Future<String?> _run(List<String> args, List<Process> active,
+      {String? workDir, Map<String, String>? env}) async {
+    final fullEnv = env != null ? {...Platform.environment, ...env} : null;
     Process? proc;
     final sb = StringBuffer();
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
-        proc = await Process.start(args[0], args.sublist(1), workingDirectory: workDir);
+        proc = await Process.start(args[0], args.sublist(1),
+            workingDirectory: workDir, environment: fullEnv);
         break;
       } catch (e) {
         if (attempt == 2) return 'launch failed: $e';
@@ -294,7 +339,7 @@ class AudioExtractorEngine {
     try {
       final code = await proc.exitCode.timeout(const Duration(hours: 1));
       if (code == 0) return null;
-      // 失敗時顯示 stderr「尾部」— 真正的錯誤訊息在最後，開頭常常只是 warning
+      // 錯誤訊息的真正內容在 stderr 尾部
       var e = sb.toString().trim().replaceAll('\n', ' | ');
       if (e.length > 300) e = e.substring(e.length - 300);
       return e.isEmpty ? 'exit $code' : '(exit $code) $e';
@@ -306,7 +351,7 @@ class AudioExtractorEngine {
     }
   }
 
-  /// 純 ffmpeg 抽出：直接轉目標格式 + loudnorm（非降噪軌用，記憶體低）。
+  /// 純 ffmpeg 抽出：直接轉目標格式 + loudnorm（非降噪軌，記憶體低）。
   static Future<String?> _extractPlain(
       ({String src, int trackId, int sampleRate, String trackName, bool denoise}) job,
       String out, AudioExtractorConfig cfg, List<Process> active) async {
@@ -324,43 +369,19 @@ class AudioExtractorEngine {
     return _run(args, active);
   }
 
-  /// ffmpeg 抽出 wav → DeepFilterNet 降噪 → ffmpeg 轉目標格式 + loudnorm。
-  static Future<String?> _extractDf(
-      ({String src, int trackId, int sampleRate, String trackName, bool denoise}) job,
-      String out, AudioExtractorConfig cfg, List<Process> active) async {
-    final tmpDir = Directory.systemTemp;
-    final wav = p.join(tmpDir.path, 'df_${p.basenameWithoutExtension(job.src)}_track${job.trackId}.wav');
-    try {
-      var err = await _run([ffmpegExe(), '-y', '-i', job.src, '-map', '0:${job.trackId}', '-vn', '-ar', '48000', '-c:a', 'pcm_s16le', wav], active);
-      if (err != null) return 'extract: $err';
-      // deepFilter 是最吃記憶體的階段 — 序列化執行避免 RAM 爆掉。
-      // 偶發失敗（GPU/IO 暫時性問題）先重試一次。
-      await _acquireDfSlot();
-      try {
-        err = await _run([cfg.deepFilterPath, wav, '--output-dir', tmpDir.path, '--no-suffix', '--log-level', 'none'], active);
-        if (err != null) {
-          await Future<void>.delayed(const Duration(seconds: 2));
-          err = await _run([cfg.deepFilterPath, wav, '--output-dir', tmpDir.path, '--no-suffix', '--log-level', 'none'], active);
-        }
-      } finally {
-        _releaseDfSlot();
-      }
-      if (err != null) return 'deepfilter: $err';
-      final args = [ffmpegExe(), '-y', '-i', wav, '-vn'];
-      if (cfg.format == 'aac') {
-        args.addAll(['-c:a', 'aac', '-b:a', cfg.bitrate, '-ar', '48000']);
-        args.addAll(['-af', 'loudnorm=I=${cfg.lufsTarget}:LRA=1:TP=-1']);
-      } else if (cfg.format == 'flac') {
-        args.addAll(['-c:a', 'flac']);
-      } else {
-        args.addAll(['-c:a', 'pcm_s16le']);
-      }
-      args.add(out);
-      err = await _run(args, active);
-      if (err != null) return 'encode: $err';
-      return null;
-    } finally {
-      try { File(wav).deleteSync(); } catch (_) {}
+  /// deepFilter 後的 wav → 目標格式（AAC + loudnorm / FLAC / WAV）。
+  static Future<String?> _encodeWav(String wav, String out, AudioExtractorConfig cfg,
+      List<Process> active) async {
+    final args = [ffmpegExe(), '-y', '-i', wav, '-vn'];
+    if (cfg.format == 'aac') {
+      args.addAll(['-c:a', 'aac', '-b:a', cfg.bitrate, '-ar', '48000']);
+      args.addAll(['-af', 'loudnorm=I=${cfg.lufsTarget}:LRA=1:TP=-1']);
+    } else if (cfg.format == 'flac') {
+      args.addAll(['-c:a', 'flac']);
+    } else {
+      args.addAll(['-c:a', 'pcm_s16le']);
     }
+    args.add(out);
+    return _run(args, active);
   }
 }
