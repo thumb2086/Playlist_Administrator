@@ -252,16 +252,19 @@ class AudioExtractorEngine {
     }
     // 壓掉 library 內部 warnings（torchaudio/git 偵測 等），log 才不會被淹沒
     env['PYTHONWARNINGS'] = 'ignore';
-    onLog('deeplog> device=${device == 'cpu' ? 'cpu' : 'cuda'} (forceCpu=$forceCpu)');
+onLog('deeplog> device=${device == 'cpu' ? 'cpu' : 'cuda'} (forceCpu=$forceCpu)');
     return _run([
       cfg.deepFilterPath, ...wavs,
       '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info',
     ], active, env: env, cancelCheck: cancelCheck, onLine: (s) {
       final t = s.trim();
-      final meaningful = t.contains('Running on device') || t.contains('Loading model') ||
-          t.contains('Enhanced noisy audio file') || t.contains('Out of memory') ||
-          t.contains('CUDA out') || t.contains('Traceback') || t.contains('Error:') || t.contains('error:');
-      if (meaningful) onLog('deeplog> $t');
+      // 只轉播階段/裝置/關鍵錯誤行；堆疊明細（File "..."/ 程式碼行）不進 log
+      if (t.contains('Running on device') || t.contains('Loading model') ||
+          t.contains('Enhanced noisy audio file') ||
+          t.contains('Traceback') || t.contains('RuntimeError') || t.contains('Error:') ||
+          t.contains('CUDA out') || t.contains('Out of memory')) {
+        onLog('deeplog> $t');
+      }
     });
   }
 
@@ -336,13 +339,20 @@ class AudioExtractorEngine {
             forceCpu: device == 'cpu', cancelCheck: canceled);
         if (e2 != null) {
           onLog('deepFilter 批次失敗: $e2');
-          // 逐檔重試（同 device）；仍失敗就移除該檔
-          for (final w in part) {
+// 逐檔重試（同 device）；仍失敗就移除該檔
+      for (final w in part) {
             if (canceled()) break;
             final env = device == 'cpu' ? {'CUDA_VISIBLE_DEVICES': '999999'} : <String, String>{};
-            final e3 = await _run([cfg.deepFilterPath, w,
+            var e3 = await _run([cfg.deepFilterPath, w,
                   '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
                 active, env: env, onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
+            if (e3 != null && device != 'cpu') {
+              // 某些 wav 長度會讓 cuDNN/GRU 拒跑（CUDNN_STATUS_NOT_SUPPORTED）→ CPU 再試一次
+              e3 = await _run([cfg.deepFilterPath, w,
+                    '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
+                  active, env: {'CUDA_VISIBLE_DEVICES': '999999'},
+                  onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
+            }
             if (e3 != null) {
               onLog('FAIL ${p.basename(w)}: deepfilter: $e3');
               deno.removeWhere((e) => e.wav == w);
