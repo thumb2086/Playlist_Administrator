@@ -250,16 +250,18 @@ class AudioExtractorEngine {
     } else {
       env = <String, String>{};
     }
+    // 壓掉 library 內部 warnings（torchaudio/git 偵測 等），log 才不會被淹沒
+    env['PYTHONWARNINGS'] = 'ignore';
     onLog('deeplog> device=${device == 'cpu' ? 'cpu' : 'cuda'} (forceCpu=$forceCpu)');
     return _run([
       cfg.deepFilterPath, ...wavs,
       '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info',
     ], active, env: env, cancelCheck: cancelCheck, onLine: (s) {
       final t = s.trim();
-      if (t.contains('Error') || t.contains('error') || t.contains('OOM') || t.contains('CUDA') ||
-          t.contains('enhanced') || t.contains('Running on device') || t.contains('Loading model')) {
-        onLog('deeplog> $t');
-      }
+      final meaningful = t.contains('Running on device') || t.contains('Loading model') ||
+          t.contains('Enhanced noisy audio file') || t.contains('Out of memory') ||
+          t.contains('CUDA out') || t.contains('Traceback') || t.contains('Error:') || t.contains('error:');
+      if (meaningful) onLog('deeplog> $t');
     });
   }
 
