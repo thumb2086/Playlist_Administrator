@@ -243,19 +243,23 @@ class AudioExtractorEngine {
   /// 一次呼叫 deepFilter 處理多個 wav（模型只載入一次）。
   static Future<String?> _batchDeep(List<String> wavs, AudioExtractorConfig cfg,
       List<Process> active, void Function(String) onLog,
-      {bool forceCpu = false, Map<String, String>? extraEnv}) async {
+      {bool forceCpu = false}) async {
     final device = forceCpu ? 'cpu' : await _resolveDevice(cfg);
-    final env = <String, String>{..._dfEnv, ...?extraEnv};
+    Map<String, String> env;
+    if (device == 'cpu') {
+      // expandable_segments 只對 CUDA 有用，CPU 時別帶以免 warning 噪音
+      env = {'CUDA_VISIBLE_DEVICES': ''};
+    } else {
+      env = {..._dfEnv};
+    }
     onLog('deeplog> device=${device == 'cpu' ? 'cpu' : 'cuda'} (forceCpu=$forceCpu)');
-    if (device == 'cpu') env['CUDA_VISIBLE_DEVICES'] = '';
     return _run([
       cfg.deepFilterPath, ...wavs,
       '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info',
     ], active, env: env, onLine: (s) {
       final t = s.trim();
-      if (t.contains('Device') || t.contains('device') || t.contains('Error') || t.contains('error') ||
-          t.contains('OOM') || t.contains('CUDA') || t.contains('enhanced') || t.contains('Infer') ||
-          t.contains('Loading model')) {
+      if (t.contains('Error') || t.contains('error') || t.contains('OOM') || t.contains('CUDA') ||
+          t.contains('enhanced') || t.contains('Running on device') || t.contains('Loading model')) {
         onLog('deeplog> $t');
       }
     });
