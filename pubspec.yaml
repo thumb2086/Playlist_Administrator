@@ -26,3 +26,4 @@ flutter:
   assets:
     - assets/zhcdict.json
     - assets/tools/
+    - assets/tools/rag/

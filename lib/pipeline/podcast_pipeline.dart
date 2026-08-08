@@ -6,6 +6,7 @@ import '../models/pipeline_step.dart';
 import '../services/config_service.dart';
 import '../services/podcast_service.dart';
 import '../services/groq_service.dart';
+import '../services/rag_service.dart';
 import '../version.dart';
 
 class PodcastPipeline {
@@ -84,6 +85,22 @@ class PodcastPipeline {
       onLog('Podcast Pipeline 已取消');
     } else {
       onLog('Podcast Pipeline 完成');
+    }
+
+    await _updateRagIndex();
+  }
+
+  /// Podcast 處理完後，把新逐字稿納入 RAG 向量庫（增量，失敗不影響主流程）。
+  Future<void> _updateRagIndex() async {
+    if (state.isCancelled) return;
+    onLog('\n🌐 更新 Podcast RAG 索引…');
+    try {
+      await RagService.instance.build((line) {
+        if (state.isCancelled) return;
+        onLog('  $line');
+      });
+    } catch (e) {
+      onLog('  ⏭️ RAG 索引更新失敗（可稍後在 Podcast RAG 頁面重建）: $e');
     }
   }
 

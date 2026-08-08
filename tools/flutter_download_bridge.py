@@ -5,6 +5,7 @@ import tempfile
 import traceback
 import re
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -854,6 +855,80 @@ def cmd_youtube_subs(args):
         emit_json({'type': 'error', 'message': f'下載字幕異常: {e}'})
 
 
+def _rag_script(name):
+    """Locate a rag script next to this bridge (assets/tools/rag in release,
+    repo rag/ in dev / CLI), or relative to cwd."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    cands = [
+        os.path.join(here, 'rag', name),                      # temp extracted / bundle copy
+        os.path.join(here, '..', 'rag', name),                # repo: tools/../rag
+        os.path.join(os.getcwd(), 'rag', name),               # CLI: cwd = repo root
+        os.path.join(os.getcwd(), '..', 'rag', name),
+        os.path.join(os.getcwd(), '..', '..', 'rag', name),
+        os.environ.get('PA_ROOT', '') and os.path.join(os.environ['PA_ROOT'], 'rag', name),
+    ]
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    return ''
+
+
+def cmd_rag_query(args):
+    """Query the podcast RAG: python rag/query.py "<q>" --answer --json --out <tmp>"""
+    script = _rag_script('query.py')
+    if not script:
+        emit_json({'type': 'error', 'message': '找不到 rag/query.py（release 需打包 assets/tools/rag）'})
+        return
+    question = args[0]
+    topk = args[1] if len(args) > 1 else '8'
+    show = args[2] if len(args) > 2 else ''
+    out_file = os.path.join(tempfile.gettempdir(), f'pa_rag_{int(time.time() * 1000)}.json')
+    cmd = [sys.executable, script, question, '--no-full', '--topk', str(topk), '--answer', '--json', '--out', out_file]
+    if show:
+        cmd += ['--show', show]
+    env = dict(os.environ)
+    env['BASE_PATH'] = env.get('BASE_PATH', '')
+    try:
+        r = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace',
+                           env=env, timeout=900, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if not os.path.exists(out_file):
+            emit_json({'type': 'error', 'message': (r.stderr or r.stdout or '無輸出').strip()[-500:]})
+            return
+        with open(out_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        os.unlink(out_file)
+    except Exception as e:
+        emit_json({'type': 'error', 'message': f'rag-query 執行失敗: {e}'})
+        return
+    emit_json({'type': 'rag_result', 'data': data})
+
+
+def cmd_rag_build(args):
+    """Incremental RAG build: python rag/build_db.py"""
+    script = _rag_script('build_db.py')
+    if not script:
+        emit_json({'type': 'error', 'message': '找不到 rag/build_db.py（release 需打包 assets/tools/rag）'})
+        return
+    cmd = [sys.executable, script]
+    if '--reset' in args:
+        cmd.append('--reset')
+    env = dict(os.environ)
+    env['BASE_PATH'] = env.get('BASE_PATH', '')
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                encoding='utf-8', errors='replace', env=env,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if line:
+                emit_json({'type': 'log', 'message': line})
+        proc.wait(timeout=3600)
+        emit_json({'type': 'complete', 'message': 'RAG 索引更新完成'})
+    except Exception as e:
+        emit_json({'type': 'error', 'message': f'rag-build 執行失敗: {e}'})
+
+
 def main():
     if len(sys.argv) < 2:
         emit_json({'type': 'error', 'message': 'No command specified'})
@@ -885,6 +960,10 @@ def main():
             cmd_normalize_mp3_lufs(args)
         elif command == 'youtube-subs':
             cmd_youtube_subs(args)
+        elif command == 'rag-query':
+            cmd_rag_query(args)
+        elif command == 'rag-build':
+            cmd_rag_build(args)
         else:
             emit_json({'type': 'error', 'message': f'Unknown command: {command}'})
             return 1

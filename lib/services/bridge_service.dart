@@ -46,9 +46,39 @@ class BridgeService {
           final cached = File('$tmpDir\\playlist_admin_tools\\flutter_download_bridge.py');
           if (!cached.existsSync() ||
               File(candidate).lastModifiedSync().isAfter(cached.lastModifiedSync())) {
-            await Directory(tmpDir).create(recursive: true);
             await File(candidate).copy(cached.path);
           }
+          // RAG scripts travel with the bridge — always keep them in sync
+          // (unconditional; timestamp shortcuts hurt parity here).
+          try {
+            final ragDst = Directory('$tmpDir\\playlist_admin_tools\\rag');
+            await ragDst.create(recursive: true);
+            final ragSrc = Directory('${d.path}\\rag');
+            final rags = <File>[];
+            if (await ragSrc.exists()) {
+              await for (final f in ragSrc.list()) {
+                if (f is File && f.path.toLowerCase().endsWith('.py')) {
+                  rags.add(f);
+                }
+              }
+            }
+            // also the asset copy may be newer/only source
+            final assetRag = Directory('${d.path}\\assets\\tools\\rag');
+            if (await assetRag.exists()) {
+              await for (final f in assetRag.list()) {
+                if (f is File && f.path.toLowerCase().endsWith('.py')) {
+                  rags.add(f);
+                }
+              }
+            }
+            for (final f in rags) {
+              final dest = File('${ragDst.path}\\${f.uri.pathSegments.last}');
+              if (!dest.existsSync() ||
+                  f.lastModifiedSync().isAfter(dest.lastModifiedSync())) {
+                await f.copy(dest.path);
+              }
+            }
+          } catch (_) {}
           return _extractedPath = cached.path;
         }
         final parent = d.parent;

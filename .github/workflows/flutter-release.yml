@@ -50,6 +50,8 @@ jobs:
         run: |
           Copy-Item -Path "tools\flutter_download_bridge.py" -Destination "assets\tools\flutter_download_bridge.py" -Force
           Copy-Item -Path "tools\download_podcast_srts.py" -Destination "assets\tools\download_podcast_srts.py" -Force
+          New-Item -ItemType Directory -Path "assets\tools\rag" -Force | Out-Null
+          Copy-Item -Path "rag\*.py" -Destination "assets\tools\rag\" -Force
 
       - name: Build Windows
         if: github.ref_type == 'tag'

@@ -54,10 +54,16 @@ function python() {
 function forward(exe, args) {
   // Deliver CLI args via PA_CLI_ARGS (JSON) — Flutter Dart exposes no
   // command-line args in release on this SDK (see lib/main.dart).
+  // PA_ROOT lets the Python bridge find rag/ scripts when invoked from the CLI.
+  const root = projectRoot();
   const child = spawn(exe, [], {
     stdio: 'inherit',
     windowsHide: false,
-    env: { ...process.env, PA_CLI_ARGS: JSON.stringify(args) },
+    env: {
+      ...process.env,
+      PA_CLI_ARGS: JSON.stringify(args),
+      ...(root ? { PA_ROOT: root } : {}),
+    },
   });
   child.on('exit', (code) => process.exit(code ?? 1));
   child.on('error', (e) => {
