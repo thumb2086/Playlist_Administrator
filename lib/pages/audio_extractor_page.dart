@@ -13,6 +13,7 @@ class AudioExtractorPage extends StatefulWidget {
 }
 
 class _AudioExtractorPageState extends State<AudioExtractorPage> {
+  String _profile = 'default';
   AudioExtractorConfig _cfg = AudioExtractorStore.loadConfig();
   List<VideoFile> _files = [];
   final Set<int> _sel = {};
@@ -24,6 +25,8 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
   @override
   void initState() {
     super.initState();
+    _profile = AudioExtractorStore.activeProfile();
+    _cfg = AudioExtractorStore.loadConfig(_profile);
     if (_cfg.sourceDir.isNotEmpty && Directory(_cfg.sourceDir).existsSync()) {
       _tryCache();
     }
@@ -33,6 +36,19 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
   void dispose() {
     _logCtrl.dispose();
     super.dispose();
+  }
+
+  void _switchProfile(String name) {
+    if (name == _profile) return;
+    AudioExtractorStore.setActiveProfile(name);
+    setState(() {
+      _profile = name;
+      _cfg = AudioExtractorStore.loadConfig(name);
+      _files = [];
+      _sel.clear();
+      _logs.clear();
+    });
+    if (_cfg.sourceDir.isNotEmpty && Directory(_cfg.sourceDir).existsSync()) _tryCache();
   }
 
   void _tryCache() {
@@ -52,7 +68,7 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
     if (d == null) return;
     _cfg.sourceDir = d;
     _cfg.outputDir = p.join(d, 'extracted_audio');
-    AudioExtractorStore.saveConfig(_cfg);
+    AudioExtractorStore.saveConfig(_cfg, _profile);
     _tryCache();
   }
 
@@ -99,7 +115,7 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
     final d = await FilePicker.getDirectoryPath();
     if (d != null) {
       _cfg.outputDir = d;
-      AudioExtractorStore.saveConfig(_cfg);
+      AudioExtractorStore.saveConfig(_cfg, _profile);
       setState(() {});
     }
   }
@@ -121,13 +137,19 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
       _running = true;
       _cancel = false;
     });
-    final jobs = <({String src, int trackId, int sampleRate, String trackName})>[];
+    final jobs = <({String src, int trackId, int sampleRate, String trackName, bool denoise})>[];
     for (final i in _sel) {
       final f = _files[i];
       final tks = f.tracks.where((t) => t.bitRate <= 0 || t.bitRate >= thr).toList();
       if (tks.isEmpty) continue;
       for (final t in tks) {
-        jobs.add((src: f.path, trackId: t.index, sampleRate: t.sampleRate, trackName: _cfg.trackNames[t.index] ?? ''));
+        jobs.add((
+          src: f.path,
+          trackId: t.index,
+          sampleRate: t.sampleRate,
+          trackName: _cfg.trackNames[t.index] ?? '',
+          denoise: _cfg.denoiseTracks.contains(t.index),
+        ));
       }
     }
     await AudioExtractorEngine.runParallel(
@@ -160,9 +182,14 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
     int lufs = _cfg.lufsTarget;
     int thr = _cfg.silenceThreshold;
     int workers = _cfg.workers;
+    final pnameCtrl = TextEditingController(text: _profile);
     final dfpCtrl = TextEditingController(text: _cfg.deepFilterPath);
     final nameCtrls = <int, TextEditingController>{};
-    for (int t = 1; t <= 6; t++) nameCtrls[t] = TextEditingController(text: _cfg.trackNames[t] ?? '');
+    final denoiseSel = <int, bool>{};
+    for (int t = 1; t <= 6; t++) {
+      nameCtrls[t] = TextEditingController(text: _cfg.trackNames[t] ?? '');
+      denoiseSel[t] = _cfg.denoiseTracks.contains(t);
+    }
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -172,6 +199,18 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
             width: 340,
             child: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('設定檔', style: Theme.of(ctx).textTheme.labelMedium),
+                TextField(
+                  controller: pnameCtrl,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                Text('改成新名稱存檔 = 另存為新設定檔',
+                    style: Theme.of(ctx).textTheme.labelSmall?.copyWith(color: AppColors.textMuted)),
+                const SizedBox(height: 12),
                 Text('LUFS 目標', style: Theme.of(ctx).textTheme.labelMedium),
                 Slider(
                   value: lufs.toDouble(), min: -30, max: 0, divisions: 30,
@@ -211,7 +250,7 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text('音軌名稱（輸出檔名）', style: Theme.of(ctx).textTheme.labelMedium),
+                Text('音軌名稱（輸出檔名）｜勾選 = 降噪（通常只有 Mic 需要）', style: Theme.of(ctx).textTheme.labelMedium),
                 for (int t = 1; t <= 6; t++)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
@@ -228,9 +267,15 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
                           ),
                         ),
                       ),
+                      const SizedBox(width: 4),
+                      Checkbox(
+                        value: denoiseSel[t],
+                        onChanged: (v) => setDlg(() => denoiseSel[t] = v ?? false),
+                        visualDensity: VisualDensity.compact,
+                      ),
                     ]),
                   ),
-                Text('留空 = 用 trackN；例如 3=Mic 輸出 xxx_Mic.m4a',
+                Text('只對勾選的軌跑 DeepFilterNet（記憶體/速度都會快很多）',
                     style: Theme.of(ctx).textTheme.labelSmall?.copyWith(color: AppColors.textMuted)),
               ]),
             ),
@@ -254,9 +299,19 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
                   for (int t = 1; t <= 6; t++)
                     if (nameCtrls[t]!.text.trim().isNotEmpty) t: nameCtrls[t]!.text.trim()
                 };
-                AudioExtractorStore.saveConfig(_cfg);
+                _cfg.denoiseTracks = {
+                  for (int t = 1; t <= 6; t++)
+                    if (denoiseSel[t] == true) t
+                };
+                final newName = pnameCtrl.text.trim();
+                AudioExtractorStore.saveConfig(_cfg, newName.isEmpty ? _profile : newName);
+                if (newName.isNotEmpty && newName != _profile) {
+                  _profile = newName;
+                  AudioExtractorStore.setActiveProfile(newName);
+                }
                 for (final c in nameCtrls.values) c.dispose();
                 dfpCtrl.dispose();
+                pnameCtrl.dispose();
                 setState(() {});
                 Navigator.pop(ctx);
               },
@@ -356,6 +411,27 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
             SizedBox(
               width: 110,
               child: DropdownButtonFormField<String>(
+                initialValue: _profile,
+                isDense: true,
+                decoration: const InputDecoration(
+                  labelText: '設定檔',
+                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  border: OutlineInputBorder(),
+                ),
+                items: AudioExtractorStore.listProfiles()
+                    .map((pn) => DropdownMenuItem(
+                        value: pn,
+                        child: Text(pn, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)))
+                    .toList(),
+                onChanged: _running ? null : (v) {
+                  if (v != null) _switchProfile(v);
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 110,
+              child: DropdownButtonFormField<String>(
                 initialValue: _cfg.format,
                 isDense: true,
                 decoration: const InputDecoration(
@@ -372,7 +448,7 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
                     : (v) {
                         _cfg.format = v!;
                         _cfg.bitrate = v == 'aac' ? '384k' : '-';
-                        AudioExtractorStore.saveConfig(_cfg);
+                        AudioExtractorStore.saveConfig(_cfg, _profile);
                         setState(() {});
                       },
               ),
@@ -395,7 +471,7 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
                       ? null
                       : (v) {
                           _cfg.bitrate = v!;
-                          AudioExtractorStore.saveConfig(_cfg);
+                          AudioExtractorStore.saveConfig(_cfg, _profile);
                           setState(() {});
                         },
                 ),

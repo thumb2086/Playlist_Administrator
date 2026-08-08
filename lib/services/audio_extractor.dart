@@ -68,16 +68,21 @@ class AudioExtractorConfig {
   String sourceDir, outputDir, format, bitrate, deepFilterPath;
   int lufsTarget, silenceThreshold, workers;
   Map<int, String> trackNames;
+  // 只有勾選的軌（預設 Mic=3）才會跑 DeepFilterNet；其他軌純 ffmpeg 抽出。
+  Set<int> denoiseTracks;
   AudioExtractorConfig({
     this.sourceDir = '', this.outputDir = '', this.format = 'aac', this.bitrate = '384k',
     this.lufsTarget = -14, this.silenceThreshold = 10000, this.workers = 2,
     this.deepFilterPath = 'deepFilter', Map<int, String>? trackNames,
-  }) : trackNames = trackNames ?? {1: 'Mix', 2: 'Game', 3: 'Mic', 5: 'DC'};
+    Set<int>? denoiseTracks,
+  }) : trackNames = trackNames ?? {1: 'Mix', 2: 'Game', 3: 'Mic', 5: 'DC'},
+       denoiseTracks = denoiseTracks ?? {3};
   Map<String, dynamic> toJson() => {
     'sourceDir': sourceDir, 'outputDir': outputDir, 'format': format, 'bitrate': bitrate,
     'lufsTarget': lufsTarget, 'silenceThreshold': silenceThreshold, 'workers': workers,
     'deepFilterPath': deepFilterPath,
     'trackNames': trackNames.map((k, v) => MapEntry('$k', v)),
+    'denoiseTracks': denoiseTracks.toList(),
   };
   factory AudioExtractorConfig.fromJson(Map<String, dynamic> j) => AudioExtractorConfig(
     sourceDir: j['sourceDir'] as String? ?? '',
@@ -89,25 +94,56 @@ class AudioExtractorConfig {
     workers: (j['workers'] as num?)?.toInt() ?? 2,
     deepFilterPath: j['deepFilterPath'] as String? ?? 'deepFilter',
     trackNames: (j['trackNames'] as Map<String, dynamic>? ?? {}).map((k, v) => MapEntry(int.parse(k), v as String)),
+    denoiseTracks: ((j['denoiseTracks'] as List<dynamic>?) ?? [3]).map((e) => (e as num).toInt()).toSet(),
   );
 }
 
 class AudioExtractorStore {
   static String get _dir => '${Platform.environment['LOCALAPPDATA'] ?? Platform.environment['TEMP'] ?? '.'}\\AudioExtractor';
   static String get configFile => '$_dir\\config.json';
+  static String get activeFile => '$_dir\\active.txt';
   static String cacheFile(String dir) => '$_dir\\cache_${_safe(dir)}.json';
   static String _safe(String s) => s.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
 
-  static AudioExtractorConfig loadConfig() {
+  static String profileFile(String name) =>
+      name.isEmpty || name == 'default' ? configFile : '$_dir\\config_${_safe(name)}.json';
+
+  static String activeProfile() {
     try {
-      return AudioExtractorConfig.fromJson(jsonDecode(File(configFile).readAsStringSync()) as Map<String, dynamic>);
+      final s = File(activeFile).readAsStringSync().trim();
+      if (s.isNotEmpty) return s;
+    } catch (_) {}
+    return 'default';
+  }
+  static void setActiveProfile(String name) {
+    Directory(_dir).createSync(recursive: true);
+    File(activeFile).writeAsStringSync(name);
+  }
+  static List<String> listProfiles() {
+    final d = Directory(_dir);
+    if (!d.existsSync()) return const ['default'];
+    final names = <String>[];
+    for (final f in d.listSync()) {
+      if (f is File && f.path.contains('config_') && f.path.endsWith('.json')) {
+        final base = f.path.split(Platform.pathSeparator).last;
+        names.add(base.substring('config_'.length, base.length - '.json'.length));
+      }
+    }
+    names.sort();
+    return ['default', ...names];
+  }
+
+  static AudioExtractorConfig loadConfig([String name = 'default']) {
+    try {
+      return AudioExtractorConfig.fromJson(
+          jsonDecode(File(profileFile(name)).readAsStringSync()) as Map<String, dynamic>);
     } catch (_) {
       return AudioExtractorConfig();
     }
   }
-  static void saveConfig(AudioExtractorConfig c) {
+  static void saveConfig(AudioExtractorConfig c, [String name = 'default']) {
     Directory(_dir).createSync(recursive: true);
-    File(configFile).writeAsStringSync(jsonEncode(c.toJson()));
+    File(profileFile(name)).writeAsStringSync(jsonEncode(c.toJson()));
   }
 
   static List<VideoFile>? loadCache(String dir) {
@@ -195,7 +231,7 @@ class AudioExtractorEngine {
   }
 
   static Future<void> runParallel({
-    required List<({String src, int trackId, int sampleRate, String trackName})> jobs,
+    required List<({String src, int trackId, int sampleRate, String trackName, bool denoise})> jobs,
     required AudioExtractorConfig cfg,
     required void Function(String) onLog,
     required void Function() onProgress,
@@ -228,7 +264,9 @@ class AudioExtractorEngine {
           continue;
         }
         try {
-          final err = await _extractDf(job, out, cfg, active);
+          final err = job.denoise
+              ? await _extractDf(job, out, cfg, active)
+              : await _extractPlain(job, out, cfg, active);
           onLog(err == null ? 'OK  ${p.basename(out)}' : 'FAIL ${p.basename(out)}: $err');
         } catch (e) {
           onLog('FAIL ${p.basename(out)}: $e');
@@ -267,9 +305,27 @@ class AudioExtractorEngine {
     }
   }
 
+  /// 純 ffmpeg 抽出：直接轉目標格式 + loudnorm（非降噪軌用，記憶體低）。
+  static Future<String?> _extractPlain(
+      ({String src, int trackId, int sampleRate, String trackName, bool denoise}) job,
+      String out, AudioExtractorConfig cfg, List<Process> active) async {
+    final args = [ffmpegExe(), '-y', '-i', job.src, '-map', '0:${job.trackId}', '-vn'];
+    if (cfg.format == 'aac') {
+      args.addAll(['-c:a', 'aac', '-b:a', cfg.bitrate]);
+      if (job.sampleRate > 0) args.addAll(['-ar', '${job.sampleRate}']);
+      args.addAll(['-af', 'loudnorm=I=${cfg.lufsTarget}:LRA=1:TP=-1']);
+    } else if (cfg.format == 'flac') {
+      args.addAll(['-c:a', 'flac']);
+    } else {
+      args.addAll(['-c:a', 'pcm_s16le']);
+    }
+    args.add(out);
+    return _run(args, active);
+  }
+
   /// ffmpeg 抽出 wav → DeepFilterNet 降噪 → ffmpeg 轉目標格式 + loudnorm。
   static Future<String?> _extractDf(
-      ({String src, int trackId, int sampleRate, String trackName}) job,
+      ({String src, int trackId, int sampleRate, String trackName, bool denoise}) job,
       String out, AudioExtractorConfig cfg, List<Process> active) async {
     final tmpDir = Directory.systemTemp;
     final wav = p.join(tmpDir.path, 'df_${p.basenameWithoutExtension(job.src)}_track${job.trackId}.wav');

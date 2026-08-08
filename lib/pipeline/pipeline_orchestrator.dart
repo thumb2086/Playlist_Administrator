@@ -519,6 +519,13 @@ class PipelineOrchestrator {
       await RagService.instance.build((line) {
         if (state.isCancelled) return;
         onLog('  $line');
+        // build_db.py 進度行格式: [12/219] 42.5% | ...
+        final m = RegExp(r'\[(\d+)/(\d+)\]\s+[\d.]+%').firstMatch(line);
+        if (m != null) {
+          final done = int.tryParse(m.group(1)!) ?? 0;
+          final total = int.tryParse(m.group(2)!) ?? 0;
+          if (total > 0) progress(done / total * 100);
+        }
       });
       onLog('✅ RAG 索引已更新');
     } catch (e) {
