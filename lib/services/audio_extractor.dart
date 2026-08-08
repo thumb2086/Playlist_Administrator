@@ -257,7 +257,25 @@ class AudioExtractorEngine {
         e.contains('cublas');
   }
 
-/// 超過 15 分鐘的 wav 切成 10 分鐘段。長檔直送會讓 DeepFilterNet 的特徵
+/// 定位 deepfilter_daemon.py：橋接暫存目錄（release）→ cwd/tools（dev）
+  static String? _daemonScript() {
+    final cands = <String>[
+      // BridgeService 解壓到 %TEMP%\playlist_admin_tools
+      p.join(Directory.systemTemp.path, 'playlist_admin_tools', 'deepfilter_daemon.py'),
+      // dev / CLI：專案內
+      p.join(Directory.current.path, 'tools', 'deepfilter_daemon.py'),
+      p.join(Directory.current.path, 'deepfilter_daemon.py'),
+      // 用戶指定專案根
+      if (Platform.environment['PA_ROOT'] != null)
+        p.join(Platform.environment['PA_ROOT']!, 'tools', 'deepfilter_daemon.py'),
+    ];
+    for (final c in cands) {
+      if (File(c).existsSync()) return c;
+    }
+    return null;
+  }
+
+  /// 超過 15 分鐘的 wav 切成 10 分鐘段。長檔直送會讓 DeepFilterNet 的特徵
   /// buffer 爆 VRAM（單一分配可達 8GB）— 切段後每批峰值小很多。
   static Future<List<String>> _maybeSplit(String wav, List<Process> active,
       bool Function()? cancelCheck) async {
@@ -418,6 +436,98 @@ class AudioExtractorEngine {
     if (deno.isNotEmpty && !canceled()) {
       final wavs0 = List.of(deno.map((e) => e.wav));
       var useCuda = await _resolveDevice(cfg) == 'cuda';
+      // 常駐 daemon：整個 run 只載入一次模型（根治 VRAM 逐批累積）
+      Process? daemon;
+      final pending = <int, Completer<Map<String, dynamic>>>{};
+      bool daemonAlive = false;
+      bool daemonCpu = !useCuda;
+      int nextId = 1;
+
+      Future<Map<String, dynamic>> daemonAsk(String wav) async {
+        final id = nextId++;
+        final c = Completer<Map<String, dynamic>>();
+        pending[id] = c;
+        final s = daemon?.stdin;
+        if (s == null || !daemonAlive) {
+          if (!c.isCompleted) c.complete({'id': id, 'ok': false, 'err': 'daemon dead'});
+        } else {
+          try {
+            s.writeln(jsonEncode({'cmd': 'enhance', 'id': id, 'path': wav}));
+            await s.flush();
+          } catch (_) { /* exit-handler 會完成本請求 */ }
+        }
+        return c.future.timeout(const Duration(minutes: 10),
+            onTimeout: () => {'id': id, 'ok': false, 'err': 'daemon timeout'});
+      }
+
+      Future<bool> ensureDaemon() async {
+        if (daemonAlive) return true;
+        // 清理殘留進程（ready 逾時/已死未報），避免雙啟動孤兒吃爆 VRAM
+        if (daemon != null) {
+          try { await _killTree(daemon!.pid); } catch (_) {}
+          daemon = null;
+        }
+        final script = _daemonScript();
+        if (script == null) {
+          onLog('  ⚠️ 找不到 deepfilter_daemon.py');
+          return false;
+        }
+        final env = <String, String>{
+          ...Platform.environment,
+          'PYTHONWARNINGS': 'ignore',
+          if (daemonCpu) 'CUDA_VISIBLE_DEVICES': '999999',
+        };
+        try {
+          daemon = await Process.start('python', [script], runInShell: false, environment: env);
+          final dPid = daemon!.pid;
+          Process.start('powershell', [
+            '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
+            '-Command', "(Get-Process -Id $dPid).PriorityClass='BelowNormal'",
+          ], runInShell: false).ignore();
+        } catch (e) {
+          onLog('  ⚠️ daemon 啟動失敗: $e');
+          return false;
+        }
+        pending.clear();
+        final ready = Completer<bool>();
+        daemon!.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+          final t = line.trim();
+          if (t.isEmpty) return;
+          try {
+            final j = jsonDecode(t) as Map<String, dynamic>;
+            if (j.containsKey('ready')) {
+              onLog('daemon> ready ${j['device']}');
+              if (!ready.isCompleted) ready.complete(true);
+            } else {
+              final id = (j['id'] as num?)?.toInt();
+              if (id != null && pending.containsKey(id)) {
+                pending.remove(id)!.complete(j);
+              }
+            }
+          } catch (_) {}
+        });
+        daemon!.stderr.drain<void>();
+        daemon!.exitCode.then((_) {
+          daemonAlive = false;
+          for (final c in pending.values) {
+            if (!c.isCompleted) c.complete({'id': -1, 'ok': false, 'err': 'daemon exited'});
+          }
+          pending.clear();
+        });
+        daemonAlive = true;
+        try {
+          await ready.future.timeout(const Duration(seconds: 40));
+          return true;
+        } catch (_) {
+          daemonAlive = false;
+          if (daemon != null) {
+            try { await _killTree(daemon!.pid); } catch (_) {}
+            daemon = null;
+          }
+          return false;
+        }
+      }
+
       int done = 0;
       for (final origWav in wavs0) {
         if (canceled()) break;
@@ -426,37 +536,35 @@ class AudioExtractorEngine {
         final segLabel = segs.length > 1 ? '（${segs.length} 段）' : '';
         onLog('🎤 Mic deepFilter $done/${wavs0.length}$segLabel（${useCuda ? 'GPU' : 'CPU'}）');
         var allOk = !canceled();
-        const chunk = 4;
-        for (int s = 0; s < segs.length && !canceled(); s += chunk) {
-          final part = segs.skip(s).take(chunk).toList();
-          var e2 = await _batchDeep(part, cfg, active, onLog,
-              forceCpu: !useCuda, cancelCheck: canceled);
-          if (e2 != null && useCuda && _isGpuOom(e2)) {
-            // GPU 記憶體不足 → 後續整批直接 CPU（避免每批都撞一次）
-            onLog('🔄 GPU 記憶體不足，後續批次改 CPU');
-            useCuda = false;
-            e2 = await _batchDeep(part, cfg, active, onLog, forceCpu: true, cancelCheck: canceled);
+        for (final w in segs) {
+          if (canceled()) break;
+          if (!await ensureDaemon()) {
+            allOk = false;
+            break;
           }
-          if (e2 != null) {
-            onLog('deepFilter 批次失敗: $e2');
-            for (final w in part) {
-              if (canceled()) break;
-final env = {'PYTHONWARNINGS': 'ignore', if (!useCuda) 'CUDA_VISIBLE_DEVICES': '999999'};
-              var e3 = await _run([cfg.deepFilterPath, w,
-                    '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
-                  active, env: env, onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
-              if (e3 != null && useCuda) {
-                e3 = await _run([cfg.deepFilterPath, w,
-                      '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
-                    active, env: {'PYTHONWARNINGS': 'ignore', 'CUDA_VISIBLE_DEVICES': '999999'},
-                    onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
-              }
-              if (e3 != null) {
-                onLog('  ⚠️ 段處理失敗（跳過此檔）: $e3');
-                allOk = false;
-              }
+          // 取消時 1 秒輪詢，避免卡在 10 分鐘 timeout
+          final f = daemonAsk(w).then<Map<String, dynamic>?>((v) => v);
+          Map<String, dynamic> r = const {};
+          bool got = false;
+          while (!canceled()) {
+            final x = await f.timeout(const Duration(seconds: 1), onTimeout: () => null);
+            if (x != null) { r = x; got = true; break; }
+          }
+          if (!got) break; // canceled：外層收尾會殺 daemon
+          if (r['ok'] == true) continue;
+          // daemon 異常死亡（GPU OOM 等）→ 改用 CPU 重啟再試一次
+          final died = !daemonAlive;
+          if (died && daemon != null) {
+            onLog('  🔄 daemon 異常（可能 GPU OOM），改 CPU 重啟');
+            daemonCpu = true;
+            useCuda = false;
+            if (await ensureDaemon()) {
+              final r2 = await daemonAsk(w);
+              if (r2['ok'] == true) continue;
             }
           }
+          onLog('  ⚠️ 降噪失敗（跳過此檔）: ${(r['err'] as String?) ?? 'unknown'}');
+          allOk = false;
         }
         if (allOk && segs.length > 1) {
           final ce = await _concatSegs(segs, origWav, active, canceled);
@@ -466,9 +574,18 @@ final env = {'PYTHONWARNINGS': 'ignore', if (!useCuda) 'CUDA_VISIBLE_DEVICES': '
           }
         }
         if (!allOk) {
+          try { File(origWav).deleteSync(); } catch (_) {}
           deno.removeWhere((e) => e.wav == origWav);
         }
         onProgress();
+      }
+      // 收尾：關閉 daemon
+      if (daemonAlive && daemon != null) {
+        try {
+          daemon?.stdin.writeln(jsonEncode({'cmd': 'quit'}));
+          await daemon!.exitCode.timeout(const Duration(seconds: 5), onTimeout: () => -1);
+        } catch (_) {}
+        try { await _killTree(daemon!.pid); } catch (_) {}
       }
     }
 
