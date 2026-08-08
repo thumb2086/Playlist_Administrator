@@ -356,7 +356,7 @@ class AudioExtractorEngine {
   }) async {
     if (jobs.isEmpty) return;
     final active = <Process>[];
-    const pool = 4;
+    const pool = 2;
     final fmt = switch (cfg.format) { 'm4a' => 'aac', 'wav' => 'wav', 'flac' => 'flac', _ => 'aac' };
     final ext = switch (fmt) { 'wav' => '.wav', 'flac' => '.flac', _ => '.m4a' };
 
@@ -417,33 +417,35 @@ class AudioExtractorEngine {
     // Phase 2: 批次 DeepFilter（長檔先切段，逐原檔處理）
     if (deno.isNotEmpty && !canceled()) {
       final wavs0 = List.of(deno.map((e) => e.wav));
-      final device = await _resolveDevice(cfg);
+      var useCuda = await _resolveDevice(cfg) == 'cuda';
       int done = 0;
       for (final origWav in wavs0) {
         if (canceled()) break;
         done++;
         final segs = await _maybeSplit(origWav, active, canceled);
         final segLabel = segs.length > 1 ? '（${segs.length} 段）' : '';
-        onLog('🎤 Mic deepFilter $done/${wavs0.length}$segLabel（${device == 'cpu' ? 'CPU' : 'GPU'}）');
+        onLog('🎤 Mic deepFilter $done/${wavs0.length}$segLabel（${useCuda ? 'GPU' : 'CPU'}）');
         var allOk = !canceled();
         const chunk = 4;
         for (int s = 0; s < segs.length && !canceled(); s += chunk) {
           final part = segs.skip(s).take(chunk).toList();
           var e2 = await _batchDeep(part, cfg, active, onLog,
-              forceCpu: device == 'cpu', cancelCheck: canceled);
-          if (e2 != null && device != 'cpu' && _isGpuOom(e2)) {
-            onLog('🔄 GPU 記憶體不足，此批改 CPU 重試');
+              forceCpu: !useCuda, cancelCheck: canceled);
+          if (e2 != null && useCuda && _isGpuOom(e2)) {
+            // GPU 記憶體不足 → 後續整批直接 CPU（避免每批都撞一次）
+            onLog('🔄 GPU 記憶體不足，後續批次改 CPU');
+            useCuda = false;
             e2 = await _batchDeep(part, cfg, active, onLog, forceCpu: true, cancelCheck: canceled);
           }
           if (e2 != null) {
             onLog('deepFilter 批次失敗: $e2');
             for (final w in part) {
               if (canceled()) break;
-              final env = {'PYTHONWARNINGS': 'ignore', if (device == 'cpu') 'CUDA_VISIBLE_DEVICES': '999999'};
+final env = {'PYTHONWARNINGS': 'ignore', if (!useCuda) 'CUDA_VISIBLE_DEVICES': '999999'};
               var e3 = await _run([cfg.deepFilterPath, w,
                     '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
                   active, env: env, onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
-              if (e3 != null && device != 'cpu') {
+              if (e3 != null && useCuda) {
                 e3 = await _run([cfg.deepFilterPath, w,
                       '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
                     active, env: {'PYTHONWARNINGS': 'ignore', 'CUDA_VISIBLE_DEVICES': '999999'},
@@ -522,6 +524,13 @@ class AudioExtractorEngine {
     }
     if (proc == null) return 'launch failed';
     active.add(proc);
+    // 子進程設為 BelowNormal：讓「播放影片/遊戲」等前景程式優先，避免卡頓
+    try {
+      Process.start('powershell', [
+        '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
+        '-Command', "(Get-Process -Id ${proc.pid}).PriorityClass='BelowNormal'"
+      ], runInShell: false).ignore();
+    } catch (_) {}
     // 排空 stdout（deepFilter 進度行走 stdout，不排會 pipe 塞滿死鎖）
     proc.stdout.drain<void>();
     proc.stderr.transform(const Utf8Decoder(allowMalformed: true)).listen((chunk) {
