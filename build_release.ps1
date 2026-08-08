@@ -7,6 +7,8 @@ Copy-Item -Path "$PSScriptRoot\tools\flutter_download_bridge.py" -Destination "$
 # RAG scripts accompany the bridge so GUI RAG works in release too.
 New-Item -ItemType Directory -Path "$PSScriptRoot\assets\tools\rag" -Force | Out-Null
 Copy-Item -Path "$PSScriptRoot\rag\*.py" -Destination "$PSScriptRoot\assets\tools\rag\" -Force
+# deepFilter daemon travels with the bridge (needed by audio extractor).
+Copy-Item -Path "$PSScriptRoot\tools\deepfilter_daemon.py" -Destination "$PSScriptRoot\assets\tools\deepfilter_daemon.py" -Force
 
 Write-Host "Building release..."
 flutter build windows --release

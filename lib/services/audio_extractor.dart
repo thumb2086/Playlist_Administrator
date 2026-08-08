@@ -539,8 +539,23 @@ class AudioExtractorEngine {
         for (final w in segs) {
           if (canceled()) break;
           if (!await ensureDaemon()) {
-            allOk = false;
-            break;
+            // 兜底：daemon 不可用（沒打包/啟動失敗）→ 改用單檔 CLI，一樣有 GPU/CPU 邏輯
+            final env = {'PYTHONWARNINGS': 'ignore', if (!useCuda) 'CUDA_VISIBLE_DEVICES': '999999'};
+            var e = await _run([cfg.deepFilterPath, w,
+                  '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
+                active, env: env, onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
+            if (e != null && useCuda) {
+              e = await _run([cfg.deepFilterPath, w,
+                    '--output-dir', Directory.systemTemp.path, '--no-suffix', '--log-level', 'info'],
+                  active, env: {'PYTHONWARNINGS': 'ignore', 'CUDA_VISIBLE_DEVICES': '999999'},
+                  onLine: (s) => onLog('deeplog> $s'), cancelCheck: canceled);
+            }
+            if (e != null) {
+              onLog('  ⚠️ 降噪失敗（跳過此檔）: $e');
+              allOk = false;
+              break;
+            }
+            continue;
           }
           // 取消時 1 秒輪詢，避免卡在 10 分鐘 timeout
           final f = daemonAsk(w).then<Map<String, dynamic>?>((v) => v);
