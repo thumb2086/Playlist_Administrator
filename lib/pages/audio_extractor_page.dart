@@ -278,6 +278,23 @@ class _AudioExtractorPageState extends State<AudioExtractorPage> {
                   decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 12),
+                Text('記憶體模式', style: Theme.of(ctx).textTheme.labelMedium),
+                DropdownButtonFormField<String>(
+                  initialValue: _cfg.memoryMode,
+                  items: const [
+                    DropdownMenuItem(value: 'auto', child: Text('自動（依可用 RAM：≥18G品質／≥9G均衡／其餘節能）')),
+                    DropdownMenuItem(value: 'quality', child: Text('品質（DF3 fp32，建議可用 RAM ≥18GB，~8GB 佔用）')),
+                    DropdownMenuItem(value: 'balanced', child: Text('均衡（DF3 fp16，建議 ≥9GB，~5GB 佔用）')),
+                    DropdownMenuItem(value: 'eco', child: Text('節能（DF2 fp16，建議 ≥6GB，~3-4GB 佔用）')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setDlg(() => _cfg.memoryMode = v);
+                  },
+                  decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
+                ),
+                Text('結論：選「自動」最省心；想保證邊看影片邊跑就選「節能」',
+                    style: Theme.of(ctx).textTheme.labelSmall?.copyWith(color: AppColors.textMuted)),
+                const SizedBox(height: 12),
                 Text('音軌名稱（輸出檔名）｜勾選 = 降噪（通常只有 Mic 需要）', style: Theme.of(ctx).textTheme.labelMedium),
                 for (int t = 1; t <= 6; t++)
                   Padding(

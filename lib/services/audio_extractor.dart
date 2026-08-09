@@ -68,11 +68,13 @@ class AudioExtractorConfig {
   Map<int, String> trackNames;
   Set<int> denoiseTracks;
   String deepFilterDevice;
+  // 記憶體模式: auto(依空閒RAM選) | quality | balanced | eco
+  String memoryMode;
   AudioExtractorConfig({
     this.sourceDir = '', this.outputDir = '', this.format = 'aac', this.bitrate = '384k',
     this.lufsTarget = -14, this.silenceThreshold = 10000, this.workers = 2,
     this.deepFilterPath = 'deepFilter', Map<int, String>? trackNames,
-    Set<int>? denoiseTracks, this.deepFilterDevice = 'cuda',
+    Set<int>? denoiseTracks, this.deepFilterDevice = 'cuda', this.memoryMode = 'auto',
   })  : trackNames = trackNames ?? {1: 'Mix', 2: 'Game', 3: 'Mic', 5: 'DC'},
         denoiseTracks = denoiseTracks ?? {3};
   Map<String, dynamic> toJson() => {
@@ -82,6 +84,7 @@ class AudioExtractorConfig {
     'trackNames': trackNames.map((k, v) => MapEntry('$k', v)),
     'denoiseTracks': denoiseTracks.toList(),
     'deepFilterDevice': deepFilterDevice,
+    'memoryMode': memoryMode,
   };
   factory AudioExtractorConfig.fromJson(Map<String, dynamic> j) => AudioExtractorConfig(
     sourceDir: j['sourceDir'] as String? ?? '',
@@ -95,6 +98,7 @@ class AudioExtractorConfig {
     trackNames: (j['trackNames'] as Map<String, dynamic>? ?? {}).map((k, v) => MapEntry(int.parse(k), v as String)),
     denoiseTracks: ((j['denoiseTracks'] as List<dynamic>?) ?? [3]).map((e) => (e as num).toInt()).toSet(),
     deepFilterDevice: j['deepFilterDevice'] as String? ?? 'cuda',
+    memoryMode: j['memoryMode'] as String? ?? 'auto',
   );
 }
 
@@ -363,8 +367,26 @@ class AudioExtractorEngine {
     });
   }
 
-  /// 三階段流水線: 抽出(並行4) → 批次 deepFilter(分段/一次載入) → 編碼(並行4)。
-  /// 取消全流程生效；progress 每條輸出恰計一次。
+  /// 回傳已解析的記憶體模式（auto 用可空閒 RAM 決定）
+  /// quality(≥18GB) / balanced(≥9GB) / eco(其餘)。
+  static Future<String> _resolveMemoryMode(AudioExtractorConfig cfg) async {
+    if (cfg.memoryMode != 'auto') return cfg.memoryMode;
+    try {
+      final r = await Process.run('powershell', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        "[math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB,1)"
+      ]).timeout(const Duration(seconds: 10));
+      final freeGb = double.tryParse((r.stdout as String).trim()) ?? 0;
+      if (freeGb >= 18) return 'quality';
+      if (freeGb >= 9) return 'balanced';
+      return 'eco';
+    } catch (_) {
+      return 'balanced';
+    }
+  }
+
+  /// 三階段流水線: 抽出(並行) → 常駐 DeepFilterDaemon → 編碼(並行)。
+  /// 依記憶體模式調整 daemon 模型/精度與 ffmpeg 並行度。
   static Future<void> runParallel({
     required List<({String src, int trackId, int sampleRate, String trackName, bool denoise})> jobs,
     required AudioExtractorConfig cfg,
@@ -373,8 +395,12 @@ class AudioExtractorEngine {
     required bool Function() canceled,
   }) async {
     if (jobs.isEmpty) return;
+    // 記憶體模式決定模型/精度/並行度（auto 依空閒 RAM）
+    final memMode = await _resolveMemoryMode(cfg);
+    final dfModel = memMode == 'eco' ? 'DeepFilterNet2' : 'DeepFilterNet3';
+    final dfHalf = memMode != 'quality';
+    final pool = memMode == 'quality' ? 2 : 1;
     final active = <Process>[];
-    const pool = 2;
     final fmt = switch (cfg.format) { 'm4a' => 'aac', 'wav' => 'wav', 'flac' => 'flac', _ => 'aac' };
     final ext = switch (fmt) { 'wav' => '.wav', 'flac' => '.flac', _ => '.m4a' };
 
@@ -432,11 +458,15 @@ class AudioExtractorEngine {
       }
     }));
 
-    // Phase 2: 批次 DeepFilter（長檔先切段，逐原檔處理）
+    // Phase 2: 常駐 DeepFilterDaemon — 一次載入模型處理全部 Mic 軌（根治 VRAM 累積）。
     if (deno.isNotEmpty && !canceled()) {
       final wavs0 = List.of(deno.map((e) => e.wav));
       var useCuda = await _resolveDevice(cfg) == 'cuda';
-      // 常駐 daemon：整個 run 只載入一次模型（根治 VRAM 逐批累積）
+      // 記憶體模式 → daemon 模型/精度與 ffmpeg 並行度
+      final memMode = await _resolveMemoryMode(cfg);
+      final dfModel = memMode == 'eco' ? 'DeepFilterNet2' : 'DeepFilterNet3';
+      final dfHalf = memMode != 'quality';
+      onLog('daemon> 模式=${memMode}（模型=$dfModel${dfHalf ? ' fp16' : ''}）');
       Process? daemon;
       final pending = <int, Completer<Map<String, dynamic>>>{};
       bool daemonAlive = false;
@@ -475,6 +505,8 @@ class AudioExtractorEngine {
         final env = <String, String>{
           ...Platform.environment,
           'PYTHONWARNINGS': 'ignore',
+          'DF_DF_MODEL': dfModel,
+          'DF_DAEMON_HALF': dfHalf ? '1' : '0',
           if (daemonCpu) 'CUDA_VISIBLE_DEVICES': '999999',
         };
         try {

@@ -22,9 +22,16 @@ def main() -> None:
     from df import enhance, init_df
     from df.io import load_audio, save_audio
 
-    model, df_state, _ = init_df(log_level="ERROR", log_file=None)
+    df_model = os.environ.get("DF_DF_MODEL", "DeepFilterNet3")
+    half = os.environ.get("DF_DAEMON_HALF", "0") == "1"
+    model, df_state, _ = init_df(
+        default_model=df_model, log_level="ERROR", log_file=None
+    )
+    if half and torch.cuda.is_available():
+        model = model.half()
+        df_state.config = df_state.config  # 保持設定object；內部 hop/fft 不受精度影響
     device = str(next(model.parameters()).device)
-    print(json.dumps({"ready": True, "device": device}), flush=True)
+    print(json.dumps({"ready": True, "device": device, "model": df_model, "half": half}), flush=True)
 
     for line in sys.stdin:
         line = line.strip()
@@ -47,8 +54,15 @@ def main() -> None:
             t = torch.as_tensor(audio)
             if t.ndim == 1:
                 t = t.unsqueeze(0)
-            out = enhance(model, df_state, t)
-            save_audio(tmp_path, out.squeeze(0), sr)
+            if half and torch.cuda.is_available():
+                t = t.half().cuda()
+                model_half = True
+            else:
+                t = t.float()
+                model_half = False
+            out = enhance(model, df_state, t) if not half else enhance(model, df_state, t)
+            out = out.float()
+            save_audio(tmp_path, out.squeeze(0).cpu(), sr)
             if os.path.exists(path):
                 os.replace(tmp_path, path)  # 原子替換，避免 crash 留半截 wav
             else:
