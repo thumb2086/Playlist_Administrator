@@ -739,7 +739,7 @@ class AudioExtractorEngine {
       String out, AudioExtractorConfig cfg, List<Process> active,
       bool Function()? cancelCheck) async {
     final fmt = cfg.format == 'm4a' ? 'aac' : cfg.format;
-    final args = [ffmpegExe(), '-y', '-i', job.src, '-map', '0:${job.trackId}', '-vn'];
+    final args = [ffmpegExe(), '-y', '-i', job.src, '-map', '0:${job.trackId}', '-vn', '-threads', '1'];
     if (fmt == 'aac') {
       args.addAll(['-c:a', 'aac', '-b:a', cfg.bitrate]);
       if (job.sampleRate > 0) args.addAll(['-ar', '${job.sampleRate}']);
@@ -757,7 +757,7 @@ class AudioExtractorEngine {
   static Future<String?> _encodeWav(String wav, String out, AudioExtractorConfig cfg,
       List<Process> active, bool Function()? cancelCheck) async {
     final fmt = cfg.format == 'm4a' ? 'aac' : cfg.format;
-    final args = [ffmpegExe(), '-y', '-i', wav, '-vn'];
+    final args = [ffmpegExe(), '-y', '-i', wav, '-vn', '-threads', '1'];
     if (fmt == 'aac') {
       args.addAll(['-c:a', 'aac', '-b:a', cfg.bitrate, '-ar', '48000']);
       args.addAll(['-af', 'loudnorm=I=${cfg.lufsTarget}:LRA=1:TP=-1']);
