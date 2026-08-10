@@ -11,6 +11,7 @@ from utils.version_checker import should_check_for_updates, perform_update_check
 from utils.version import get_version
 from core.library import UpdateStats, update_library_logic, export_usb_logic, get_detailed_stats
 from core.library import is_internal_playlist_name
+from core.favorites import is_favorite, toggle_favorite, FAVORITES_PLAYLIST
 
 # ===== Dark Theme Color System (Spotify-inspired) =====
 COLORS_DARK = {
@@ -781,16 +782,23 @@ class PlaylistApp:
 
         # 本地播放列表
         processed_names = [url_names.get(u, u) for u in urls]
+        fav_name = os.path.splitext(FAVORITES_PLAYLIST)[0]
         local_items = []
         for pl_file in pl_files:
             name = os.path.splitext(os.path.basename(pl_file))[0]
-            if name in processed_names or is_internal_playlist_name(name):
+            if name in processed_names:
+                continue
+            if is_internal_playlist_name(name) and name != fav_name:
                 continue
             is_complete, missing, total = report.get(pl_file, (True, 0, 0))
-            if is_complete:
-                status_text = f"📦 {name} ({_('local_complete')})"
+            if name == fav_name:
+                display_name = f"⭐ {_('player_favorite')}"
             else:
-                status_text = f"⚠️ {name} ({_('wait_download')}, 缺 {missing} 首)"
+                display_name = name
+            if is_complete:
+                status_text = f"📦 {display_name} ({_('local_complete')})"
+            else:
+                status_text = f"⚠️ {display_name} ({_('wait_download')}, 缺 {missing} 首)"
             local_items.append({'name': name, 'text': status_text})
 
         # 播放器下拉列表数据
@@ -799,7 +807,7 @@ class PlaylistApp:
             all_playlist_names.append(url_names.get(url, url))
         for pl_file in pl_files:
             name = os.path.splitext(os.path.basename(pl_file))[0]
-            if name not in all_playlist_names and not is_internal_playlist_name(name):
+            if name not in all_playlist_names and (not is_internal_playlist_name(name) or name == fav_name):
                 all_playlist_names.append(name)
         all_playlist_names.sort()
 
@@ -1230,6 +1238,18 @@ class PlaylistApp:
                                   activeforeground=COLORS['text'],
                                   relief="flat", cursor="hand2")
         self.next_btn.pack(side="left", padx=8)
+
+        # Favorite (我的最愛) toggle button
+        self.fav_btn = tk.Button(control_buttons, text="☆",
+                                 command=self.toggle_current_favorite,
+                                 width=4, height=1,
+                                 font=get_font(16),
+                                 bg=COLORS['elevated'], fg=COLORS['text_secondary'],
+                                 activebackground=COLORS['surface'],
+                                 activeforeground=COLORS['accent'],
+                                 relief="flat", cursor="hand2")
+        self.fav_btn.pack(side="left", padx=8)
+        self.fav_on_color = "#FFD700"
 
         # Shuffle checkbox with dark theme
         self.shuffle_var = tk.BooleanVar(value=False)
@@ -2569,6 +2589,28 @@ class PlaylistApp:
         finally:
             self.root.after(0, lambda: self.export_btn.config(state="normal", text=_('start_export_btn'), bg="#ffd0d0"))
 
+    def _update_fav_btn(self, song_path):
+        """Refresh the favorite star button for the given song."""
+        try:
+            fav = is_favorite(self.config, song_path)
+            self.fav_btn.config(text="★" if fav else "☆",
+                                fg=self.fav_on_color if fav else COLORS['text_secondary'])
+        except Exception:
+            self.fav_btn.config(text="☆", fg=COLORS['text_secondary'])
+
+    def toggle_current_favorite(self):
+        """Toggle favorite (我的最愛) for the currently playing song."""
+        song = getattr(self, 'current_playing', None)
+        if not song or not os.path.exists(song):
+            self.log(f"-> {_('player_fav_empty')}")
+            return
+        try:
+            now_fav = toggle_favorite(self.config, song)
+            self._update_fav_btn(song)
+            self.log(f"-> {_('player_fav_added') if now_fav else _('player_fav_removed')}: {os.path.basename(song)}")
+        except Exception as e:
+            self.log(f"-> 我的最愛更新失敗: {e}")
+
     def play_song(self, song_path):
         try:
             # 确保 Pygame 已初始化
@@ -2598,6 +2640,9 @@ class PlaylistApp:
             import urllib.parse
             display_name = urllib.parse.unquote(os.path.basename(song_path))
             self.now_playing_lbl.config(text=_('player_now_playing', display_name))
+
+            # Update favorite star state
+            self._update_fav_btn(song_path)
         
             # Update offset label
             current_offset = self.lyrics_offsets.get(song_path, 0.0)

@@ -1,7 +1,6 @@
 import os
 import json
 import requests
-from urllib.parse import quote as _uri_quote
 from bs4 import BeautifulSoup
 from zhconv import convert
 from utils.helpers import sanitize_filename
@@ -667,12 +666,9 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                             
 
                             # Standardization: Forward slashes (/) are best for M3U8 and avoid separator issues
+                            # Raw relative paths only — Echo Nightly does NOT decode %XX escapes,
+                            # so percent-encoding breaks playback (see commit cb0b61c revert).
                             m3u_entry_path = rel_path.replace('\\', '/')
-
-                            # Echo Nightly compatible: URI-encode the path so the player
-                            # can resolve Chinese / spaces / special chars (等於註解要的
-                            # "URI encoded paths"，之前一直沒做)
-                            m3u_entry_path = _uri_quote(m3u_entry_path, safe='/:@%')
 
                             # Write EXTINF and the relative path with LF (Echo Nightly compatible)
                             f.write(f"#EXTINF:-1,{clean_track}\n")

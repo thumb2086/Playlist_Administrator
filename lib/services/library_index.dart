@@ -414,7 +414,8 @@ class LibraryIndex {
     final exact = _findInIndex(tokens, _filenameIndex);
     if (exact != null) {
       final mp3Info = _fileInfoMap[exact];
-      if (!useMtime || (mp3Info != null && m4aInfo != null && mp3Info.mtime.compareTo(m4aInfo.mtime) >= 0)) {
+      if (_isValidMp3(exact, mp3Info) &&
+          (!useMtime || (m4aInfo != null && mp3Info != null && mp3Info.mtime.compareTo(m4aInfo.mtime) >= 0))) {
         return exact;
       }
     }
@@ -425,7 +426,8 @@ class LibraryIndex {
         for (final f in entry.value) {
           if (f.toLowerCase().endsWith('.mp3')) {
             final mp3Info = _fileInfoMap[f];
-            if (!useMtime || (mp3Info != null && m4aInfo != null && mp3Info.mtime.compareTo(m4aInfo.mtime) >= 0)) {
+            if (_isValidMp3(f, mp3Info) &&
+                (!useMtime || (mp3Info != null && m4aInfo != null && mp3Info.mtime.compareTo(m4aInfo.mtime) >= 0))) {
               return f;
             }
           }
@@ -444,7 +446,7 @@ class LibraryIndex {
           );
           if (metaMatch.isNotEmpty) {
             for (final f in _metadataIndex[metaMatch]!) {
-              if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
+              if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f) && _isValidMp3(f, _fileInfoMap[f])) return f;
             }
           }
           if (cachedMeta.artist != null && cachedMeta.artist!.isNotEmpty) {
@@ -455,7 +457,7 @@ class LibraryIndex {
             );
             if (combinedMatch.isNotEmpty) {
               for (final f in _filenameIndex[combinedMatch]!) {
-                if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
+                if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f) && _isValidMp3(f, _fileInfoMap[f])) return f;
               }
             }
           }
@@ -466,11 +468,16 @@ class LibraryIndex {
     return null;
   }
 
+  /// A 0-byte MP3 is a failed/corrupt conversion output — never treat it as
+  /// the converted product, so the M4A source gets re-converted.
+  bool _isValidMp3(String path, FileInfo? info) =>
+      info != null && info.size > 0;
+
   String? _findInIndex(List<String> tokens, Map<List<String>, List<String>> index) {
     for (final entry in index.entries) {
       if (_listEq(entry.key, tokens)) {
         for (final f in entry.value) {
-          if (f.toLowerCase().endsWith('.mp3') && _fileInfoMap.containsKey(f)) return f;
+          if (f.toLowerCase().endsWith('.mp3') && _isValidMp3(f, _fileInfoMap[f])) return f;
         }
       }
     }

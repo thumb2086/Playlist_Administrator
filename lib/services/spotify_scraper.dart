@@ -253,7 +253,8 @@ class SpotifyScraper {
         // Use local filename (no ext) as EXTINF title — avoids commas & encoding issues
         final localName = File(matched).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
         buffer.writeln('#EXTINF:-1,$localName');
-        // Write relative path from Playlists dir (URI-encoded for Echo Nightly compat)
+        // Write raw relative path from Playlists dir — Echo Nightly does NOT
+        // decode %XX escapes, so percent-encoding breaks playback.
         final absPath = File(matched).absolute.path;
         final absPl = File(m3uPath).parent.absolute.path;
         String relPath;
@@ -262,8 +263,7 @@ class SpotifyScraper {
         } catch (_) {
           relPath = matched;
         }
-        final encoded = Uri.encodeComponent(relPath).replaceAll('%2F', '/');
-        buffer.writeln(encoded);
+        buffer.writeln(relPath);
         resolved++;
       }
       // skip unmatched — consistent with Python pipeline behavior

@@ -117,6 +117,29 @@ class _PipelinePageState extends State<PipelinePage> {
     }
   }
 
+  Future<void> _runRagOnly() async {
+    if (_musicRunning) return;
+    setState(() { _musicRunning = true; _musicProgress = 0; _musicStep = 0; });
+    _musicState = PipelineState();
+    _musicLog('RAG 索引更新啟動中…');
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    try {
+      final orch = PipelineOrchestrator(
+        config: ConfigService.instance.config,
+        onLog: _musicLog,
+        onProgress: (c, t, stepIdx) {
+          try { if (mounted) setState(() { _musicProgress = t > 0 ? c / t : 0.0; _musicStep = stepIdx; }); } catch (_) {}
+        },
+        state: _musicState,
+      );
+      await orch.runRagOnly();
+    } catch (e) {
+      _musicLog('  ❌ RAG 更新錯誤: $e');
+    } finally {
+      if (mounted) setState(() { _musicRunning = false; _musicProgress = 0; });
+    }
+  }
+
   Future<void> _runPodcast() async {
     if (_podcastRunning) return;
     setState(() { _podcastRunning = true; _podcastProgress = 0; });
@@ -208,7 +231,7 @@ class _PipelinePageState extends State<PipelinePage> {
             _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1, toStep: 2), _musicRunning),
 _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2, toStep: 3), _musicRunning),
         _PButton(t('pipeline.run_podcast'), Icons.podcasts, _runPodcast, _podcastRunning, color: const Color(0xFFCE93D8)),
-        _PButton(t('pipeline.run_rag'), Icons.auto_awesome, () => _run(fromStep: 6, toStep: 7), _musicRunning, color: const Color(0xFF4DB6AC)),
+        _PButton(t('pipeline.run_rag'), Icons.auto_awesome, _runRagOnly, _musicRunning, color: const Color(0xFF4DB6AC)),
         _PButton(t('pipeline.run_opencode'), Icons.forum_outlined, _openOpencode, false, color: const Color(0xFF9575CD)),
             if (_musicRunning) ...[
               _PButton(t('pipeline.pause'), Icons.pause_rounded, () {

@@ -40,7 +40,7 @@ DEFAULT_ARTIST_ALIASES = {
     'show luo': '羅志祥',
 }
 
-INTERNAL_PLAYLIST_MARKERS = ("_unsorted", "single tracks", "_unsorted_songs")
+INTERNAL_PLAYLIST_MARKERS = ("_unsorted", "single tracks", "_unsorted_songs", "_favorites")
 
 
 def is_internal_playlist_name(name):
@@ -486,7 +486,7 @@ def _find_existing_mp3_for_source(src, mp3_index, metadata_index=None):
     # Quick filename-based match first (fast)
     original_name = os.path.splitext(os.path.basename(src))[0]
     found_by_name = find_song_exact_format(original_name, 'mp3', mp3_index)
-    if found_by_name and os.path.exists(found_by_name):
+    if found_by_name and _valid_mp3_file(found_by_name):
         return found_by_name
 
     # Use metadata_index for O(1) lookup (avoids iterating all MP3s)
@@ -497,10 +497,19 @@ def _find_existing_mp3_for_source(src, mp3_index, metadata_index=None):
             if src_title_tokens and src_title_tokens in metadata_index:
                 candidates = metadata_index[src_title_tokens]
                 for fp in candidates:
-                    if os.path.exists(fp):
+                    if _valid_mp3_file(fp):
                         return fp
 
     return None
+
+
+def _valid_mp3_file(path):
+    """A 0-byte MP3 is a corrupt/failed output — never treat it as converted,
+    so the M4A source gets re-converted."""
+    try:
+        return os.path.exists(path) and os.path.getsize(path) > 0
+    except Exception:
+        return False
 
 def convert_spotube_m4a_to_mp3(config, log_func, pause_event=None, stop_event=None, progress_cb=None, status_cb=None, source_files=None):
     """Convert Spotube M4A files to MP3, skipping cached or unmatched files."""
@@ -1935,14 +1944,13 @@ def move_unsorted_songs(config, log_func):
     if os.path.exists(single_tracks_dir):
         st_files = [f for f in os.listdir(single_tracks_dir) if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.webm'))]
         if st_files:
-            from urllib.parse import quote as _uri_quote
             with open(single_tracks_pl, 'w', encoding='utf-8', newline='\n') as f:
                 f.write("#EXTM3U\n")
                 for base in sorted(st_files):
                     name_no_ext = os.path.splitext(base)[0]
                     rel_path = f"../Music/Single Tracks/{base}"
                     f.write(f"#EXTINF:-1,{name_no_ext}\n")
-                    f.write(f"{_uri_quote(rel_path.replace(os.sep, '/'), safe='/:@%')}\n")
+                    f.write(f"{rel_path}\n")
     
     # Cleanup old legacy name if it exists
     old_m3u_path = os.path.join(playlists_path, "_Unsorted_Songs.m3u8")
@@ -1952,7 +1960,6 @@ def move_unsorted_songs(config, log_func):
     
     # Create playlist for unsorted songs (keep files in original location)
     if orphans:
-        from urllib.parse import quote as _uri_quote
         try:
             os.makedirs(playlists_path, exist_ok=True)
             with open(m3u_path, 'w', encoding='utf-8', newline='\n') as f:
@@ -1977,8 +1984,8 @@ def move_unsorted_songs(config, log_func):
                         # Fallback to absolute path if relative path fails
                         rel_path = abs_file_path
 
-                    # Echo Nightly compatible: URI-encode the path
-                    m3u_entry_path = _uri_quote(rel_path.replace('\\', '/'), safe='/:@%')
+                    # Raw relative path only — Echo Nightly does NOT decode %XX escapes
+                    m3u_entry_path = rel_path.replace('\\', '/')
                     
                     name_no_ext = os.path.splitext(os.path.basename(file_path))[0]
                     f.write(f"#EXTINF:-1,{name_no_ext}\n")

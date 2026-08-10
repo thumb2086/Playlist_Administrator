@@ -102,7 +102,7 @@ class LufsService {
 
   static bool _isInternalPlaylist(String path) {
     final name = File(path).uri.pathSegments.last.toLowerCase();
-    if (name.contains('_removed songs') || name.contains('_unsorted') || name.contains('single tracks')) return true;
+    if (name.contains('_removed songs') || name.contains('_unsorted') || name.contains('single tracks') || name.contains('_favorites')) return true;
     return false;
   }
 
@@ -193,7 +193,16 @@ class LufsService {
   Future<void> _normalizeOne(String absPath, String ffmpeg, double target,
       Map<String, double> cache, void Function(String) onLog,
       {bool Function()? isCancelled}) async {
-    if (!await File(absPath).exists()) return;
+    final file = File(absPath);
+    if (!await file.exists()) return;
+
+    // Skip 0-byte files (corrupt/failed output) instead of failing every run.
+    try {
+      if (await file.length() == 0) {
+        onLog('  ⚠️ 跳過 0-byte 空檔（未計入快取，需重新轉檔）: $absPath');
+        return;
+      }
+    } catch (_) {}
 
     final base = absPath.substring(0, absPath.lastIndexOf('.'));
     final tmp = '${base}_tmp.mp3';

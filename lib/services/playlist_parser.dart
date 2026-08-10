@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 class PlaylistParser {
-  static const _internalMarkers = ['_unsorted', 'single tracks', '_unsorted_songs'];
+  static const _internalMarkers = ['_unsorted', 'single tracks', '_unsorted_songs', '_favorites'];
 
   static bool isInternalPlaylist(String name) {
     final n = name.toLowerCase();

@@ -21,6 +21,7 @@ class AppConfig {
   String theme;
   String skippedVersion;
   bool setupCompleted;
+  bool podcastRagInMusic;
   String groqApiKey;
   int groqConcurrency;
   Map<String, String> podcastSubscriptions;
@@ -51,6 +52,7 @@ class AppConfig {
     this.theme = 'dark',
     this.skippedVersion = '',
     this.setupCompleted = false,
+    this.podcastRagInMusic = false,
     this.groqApiKey = '',
     this.groqConcurrency = 3,
     Map<String, String>? podcastSubscriptions,
@@ -121,6 +123,7 @@ class AppConfig {
         theme: json['theme'] as String? ?? 'dark',
         skippedVersion: json['skipped_version'] as String? ?? '',
         setupCompleted: json['setup_completed'] as bool? ?? false,
+        podcastRagInMusic: json['podcast_rag_in_music'] as bool? ?? false,
         groqApiKey: json['groq_api_key'] as String? ?? '',
         groqConcurrency: json['groq_concurrency'] as int? ?? 3,
         podcastSubscriptions: (json['podcast_subscriptions'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
@@ -153,6 +156,7 @@ class AppConfig {
         'theme': theme,
         'skipped_version': skippedVersion,
         'setup_completed': setupCompleted,
+        'podcast_rag_in_music': podcastRagInMusic,
         'groq_api_key': groqApiKey,
         'groq_concurrency': groqConcurrency,
         'podcast_subscriptions': podcastSubscriptions,

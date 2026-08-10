@@ -26,15 +26,19 @@ class PipelineOrchestrator {
   }) : state = state ?? PipelineState();
 
   Future<void> run({int fromStep = 0, int? toStep}) async {
-    final steps = [
-      ('Convert M4A → MP3', 25.0),
-      ('Scrape Spotify playlists', 20.0),
-      ('Prune missing tracks', 15.0),
-      ('Organize unsorted songs', 10.0),
-      ('Enrich metadata', 10.0),
-      ('Measure LUFS', 10.0),
-      ('Podcast RAG index', 10.0),
+    final steps = <(String, double, Future<void> Function(void Function(double)))>[
+      ('Convert M4A → MP3', 25.0, _stepConvert),
+      ('Scrape Spotify playlists', 20.0, _stepScrape),
+      ('Prune missing tracks', 15.0, _stepPrune),
+      ('Organize unsorted songs', 10.0, _stepUnsorted),
+      ('Enrich metadata', 10.0, _stepMetadata),
+      ('Measure LUFS', 10.0, _stepMeasureLufs),
     ];
+    // RAG 屬 podcast pipeline 的職責（PodcastPipeline 內已有 _updateRagIndex）。
+    // 音樂 pipeline 預設不執行；只有在 config 明確設定 podcast_rag_in_music 時才加入。
+    if (config.podcastRagInMusic) {
+      steps.add(('Podcast RAG index', 10.0, _stepRag));
+    }
 
     final end = toStep ?? steps.length;
     int doneWeight = 0;
@@ -51,7 +55,7 @@ class PipelineOrchestrator {
       onProgress(0, 100, i);
 
       try {
-        await _runStep(i, (pct) {
+        await steps[i].$3((pct) {
           final global = doneWeight + (pct / 100.0 * steps[i].$2);
           onProgress(global.toInt(), 100, i);
         });
@@ -71,16 +75,11 @@ class PipelineOrchestrator {
     }
   }
 
-  Future<void> _runStep(int index, void Function(double) progress) async {
-    switch (index) {
-      case 0: await _stepConvert(progress); break;
-      case 1: await _stepScrape(progress); break;
-      case 2: await _stepPrune(progress); break;
-      case 3: await _stepUnsorted(progress); break;
-      case 4: await _stepMetadata(progress); break;
-      case 5: await _stepMeasureLufs(progress); break;
-      case 6: await _stepRag(progress); break;
-    }
+  /// Standalone RAG index rebuild (index position varies when the RAG step is
+  /// toggled in the music pipeline, so run it directly).
+  Future<void> runRagOnly() async {
+    onLog('--- Podcast RAG index ---');
+    _stepRag((_) {});
   }
 
   Future<void> _stepConvert(void Function(double) progress) async {
@@ -440,11 +439,10 @@ class PipelineOrchestrator {
       } catch (_) {
         relPath = absFilePath;
       }
-      // Echo Nightly compatible: URI-encode the relative path
-      final encPath = Uri.encodeComponent(relPath).replaceAll('%2F', '/');
+      // Raw relative path only — Echo Nightly does NOT decode %XX escapes.
       final nameNoExt = File(filePath).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
       sb.writeln('#EXTINF:-1,$nameNoExt');
-      sb.writeln(encPath);
+      sb.writeln(relPath);
     }
 
     await File(unsortedPath).writeAsString(sb.toString(),

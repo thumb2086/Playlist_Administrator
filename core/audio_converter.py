@@ -323,6 +323,17 @@ def convert_audio_file(input_path, output_path, target_format, log_func=None, ff
             stderr = result.stderr
         
         if result.returncode == 0:
+            # Validate the output actually has data — a 0-byte result means a
+            # silently failed encode (should never be treated as converted).
+            try:
+                if os.path.exists(output_path) and os.path.getsize(output_path) == 0:
+                    os.remove(output_path)
+                    if log_func:
+                        log_func(f"  ❌ Conversion produced empty file, removed: {os.path.basename(output_path)}")
+                    return False
+            except Exception:
+                pass
+
             if log_func:
                 log_func(f"  ✅ Converted: {os.path.basename(input_path)} → {os.path.basename(output_path)}")
             

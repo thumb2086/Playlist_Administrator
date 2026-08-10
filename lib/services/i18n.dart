@@ -142,6 +142,10 @@ class I18N extends ChangeNotifier {
     'player.select_playlist': '請選擇播放清單',
     'player.no_lyrics': '(無同步歌詞)',
     'player.lyric_offset': '歌詞偏移',
+    'player.fave_add': '加入我的最愛',
+    'player.fave_remove': '移除我的最愛',
+    'player.fave_added': '已加入我的最愛',
+    'player.fave_removed': '已移除我的最愛',
 
     // Download
     'download.tab_podcast': 'Podcast',
@@ -301,6 +305,10 @@ class I18N extends ChangeNotifier {
     'player.select_playlist': 'Select a playlist',
     'player.no_lyrics': '(No synced lyrics)',
     'player.lyric_offset': 'Lyric Offset',
+    'player.fave_add': 'Add to Favorites',
+    'player.fave_remove': 'Remove from Favorites',
+    'player.fave_added': 'Added to Favorites',
+    'player.fave_removed': 'Removed from Favorites',
 
     // Download
     'download.tab_podcast': 'Podcast',

@@ -4,7 +4,9 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
+import '../services/favorites_service.dart';
 import '../services/i18n.dart';
+import '../services/smtc_service.dart';
 import '../services/lrc_parser.dart';
 import '../services/metadata_reader.dart';
 import '../services/spotube_controller.dart';
@@ -44,6 +46,7 @@ class _PlayerPageState extends State<PlayerPage> {
   final Map<String, List<LrcLine>> _lyricsCache = {};
   final Map<String, Uint8List?> _artworkCache = {};
   Uint8List? _currentArtwork;
+  Set<String> _favorites = {};
 
   @override
   void initState() {
@@ -67,12 +70,63 @@ class _PlayerPageState extends State<PlayerPage> {
     });
     _searchCtrl.addListener(_onSearchChanged);
     _refreshPlaylistNames();
+    _initSmtc();
+  }
+
+  void _initSmtc() {
+    SmtcService.instance.attach(
+      onPlayPause: () {
+        if (_songs.isEmpty) return;
+        _togglePlay();
+        _pushSmtcState();
+      },
+      onNext: () { _next(); _pushSmtcState(); },
+      onPrevious: () { _prev(); _pushSmtcState(); },
+      onStop: () {
+        if (_isPlaying) {
+          _player.pause();
+          setState(() => _isPlaying = false);
+          _pushSmtcState();
+        }
+      },
+    );
+    _pushSmtcState();
+  }
+
+  void _pushSmtcState() {
+    final song = _queueIndex >= 0 && _queueIndex < _playQueue.length
+        ? _playQueue[_queueIndex]
+        : null;
+    if (song == null) {
+      SmtcService.instance.update(playing: _isPlaying);
+      return;
+    }
+    final stem = File(song).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+    String title = stem;
+    String artist = '';
+    if (stem.contains(' - ')) {
+      final parts = stem.split(' - ');
+      if (parts.length >= 2) {
+        title = parts.first.trim();
+        artist = parts.sublist(1).join(' - ').trim();
+      }
+    }
+    SmtcService.instance.update(
+      title: title,
+      artist: artist,
+      album: _displayPlaylistName,
+      playing: _isPlaying,
+    );
   }
 
   Future<void> _refreshPlaylistNames() async {
     final plDir = Directory(ConfigService.instance.config.playlistsPath);
     final names = await _listPlaylists(plDir);
-    if (mounted) setState(() => _playlistNames = names);
+    final favs = await FavoritesService.load();
+    if (mounted) setState(() {
+      _playlistNames = names;
+      _favorites = favs;
+    });
   }
 
   @override
@@ -203,14 +257,15 @@ class _PlayerPageState extends State<PlayerPage> {
       final stem = File(path).uri.pathSegments.last;
       final qIdx = _playQueue.indexOf(path);
       final sIdx = _songs.indexOf(path);
-      setState(() {
-        _isPlaying = true;
-        _currentLyric = '';
-        _currentArtwork = _artworkCache[stem];
-        _queueIndex = qIdx >= 0 ? qIdx : 0;
-        _queueIndex = sIdx >= 0 ? sIdx : _queueIndex;
-      });
-      _loadLyrics(path);
+setState(() {
+      _isPlaying = true;
+      _currentLyric = '';
+      _currentArtwork = _artworkCache[stem];
+      _queueIndex = qIdx >= 0 ? qIdx : 0;
+      _queueIndex = sIdx >= 0 ? sIdx : _queueIndex;
+    });
+    _pushSmtcState();
+    _loadLyrics(path);
       _loadArtwork(path, stem);
       _scrollToCurrent();
     } catch (e) {
@@ -267,6 +322,7 @@ class _PlayerPageState extends State<PlayerPage> {
       _player.resume();
       setState(() => _isPlaying = true);
     }
+    _pushSmtcState();
   }
 
   void _next() {
@@ -303,6 +359,20 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   String _songName(String path) => File(path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+
+  bool _isFav(String path) =>
+      _favorites.contains(FavoritesService.normalize(File(path).absolute.path));
+
+  Future<void> _toggleFavorite(String path) async {
+    final nowFav = await FavoritesService.toggle(path);
+    final favs = await FavoritesService.load();
+    if (mounted) setState(() {
+      _favorites = favs;
+      _statusText = nowFav
+          ? '${t('player.fave_added')}: ${_songName(path)}'
+          : '${t('player.fave_removed')}: ${_songName(path)}';
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -452,6 +522,18 @@ class _PlayerPageState extends State<PlayerPage> {
             ),
             maxLines: 1, overflow: TextOverflow.ellipsis,
           ),
+          trailing: IconButton(
+            onPressed: () => _toggleFavorite(song),
+            tooltip: _isFav(song) ? t('player.fave_remove') : t('player.fave_add'),
+            icon: Icon(
+              _isFav(song) ? Icons.star_rounded : Icons.star_border_rounded,
+              color: _isFav(song) ? const Color(0xFFFFD700) : AppColors.textMuted,
+              size: 18,
+            ),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            visualDensity: VisualDensity.compact,
+          ),
           onTap: () {
             _songs = List.from(_displaySongs);
             _playQueue = List.from(_filteredSongs);
@@ -499,9 +581,25 @@ class _PlayerPageState extends State<PlayerPage> {
             ),
             const SizedBox(width: 16),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(currentName.isNotEmpty ? currentName : t('player.select_playlist'),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              Row(children: [
+                Expanded(
+                  child: Text(currentName.isNotEmpty ? currentName : t('player.select_playlist'),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+                if (currentSong != null)
+                  IconButton(
+                    onPressed: () => _toggleFavorite(currentSong),
+                    tooltip: _isFav(currentSong) ? t('player.fave_remove') : t('player.fave_add'),
+                    icon: Icon(
+                      _isFav(currentSong) ? Icons.star_rounded : Icons.star_border_rounded,
+                      color: _isFav(currentSong) ? const Color(0xFFFFD700) : AppColors.textMuted,
+                      size: 26,
+                    ),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+              ]),
               const SizedBox(height: 4),
               Text(_queueIndex >= 0 ? '${_queueIndex + 1}/${_playQueue.length}' : '',
                   style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),

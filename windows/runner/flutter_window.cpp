@@ -27,6 +27,10 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  // System Media Transport Controls: media keys / volume OSD integration.
+  smtc_controller_ = std::make_unique<SmtcController>(
+      flutter_controller_->engine()->messenger(), GetHandle());
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -43,6 +47,7 @@ void FlutterWindow::OnDestroy() {
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
+  smtc_controller_.reset();
 
   Win32Window::OnDestroy();
 }
@@ -64,6 +69,12 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   switch (message) {
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
+      break;
+    case WM_APP:
+      // Posted by SMTC when a system media button was pressed.
+      if (smtc_controller_ && wparam > 0) {
+        smtc_controller_->HandleSystemMediaButton(static_cast<int>(wparam));
+      }
       break;
   }
 

@@ -3,10 +3,11 @@ Version information for Playlist Administrator
 """
 
 # Current version - update this when releasing a new version
-# v1.5.2 - Fix M3U8 path encoding: remove URL encoding for Windows/Echo Nightly compatibility
+# v2.7.16 - Echo Nightly raw-path fix, favorites (我的最愛), SMTC Windows controls,
+#           music pipeline RAG decoupled, 0-byte corrupt MP3 auto re-conversion
 # NOTE: On CI builds, this file is automatically updated from the git tag.
 #       Manual changes here are only for development use.
-__version__ = "2.6.4"
+__version__ = "2.7.16"
 
 # GitHub repository info for update checking
 GITHUB_OWNER = "thumb2086"
