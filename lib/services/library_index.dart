@@ -410,6 +410,23 @@ class LibraryIndex {
 
     final m4aInfo = _fileInfoMap[m4aPath];
 
+    // 0. Own-stem zero-byte guard: if an MP3 with the exact same filename
+    // exists but is corrupt (0 bytes), force re-conversion instead of letting
+    // fuzzy/metadata matching skip this M4A (it could match a different song
+    // with a similar title, e.g. "Somebody Else" -> "Somebody Else - Diana Wang").
+    for (final entry in _filenameIndex.entries) {
+      if (_listEq(entry.key, tokens)) {
+        for (final own in entry.value) {
+          if (own.toLowerCase().endsWith('.mp3')) {
+            final ownInfo = _fileInfoMap[own];
+            if (ownInfo == null || ownInfo.size == 0) {
+              return null;
+            }
+          }
+        }
+      }
+    }
+
     // 1. Try exact filename match
     final exact = _findInIndex(tokens, _filenameIndex);
     if (exact != null) {

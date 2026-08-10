@@ -489,6 +489,13 @@ def _find_existing_mp3_for_source(src, mp3_index, metadata_index=None):
     if found_by_name and _valid_mp3_file(found_by_name):
         return found_by_name
 
+    # Own-stem zero-byte guard: if an MP3 with the exact same filename exists
+    # but is corrupt (0 bytes), force re-conversion. Metadata matching below
+    # could otherwise match a different song with a similar title (e.g.
+    # "Somebody Else" -> "Somebody Else - Diana Wang") and skip this M4A.
+    if found_by_name and os.path.exists(found_by_name):
+        return None
+
     # Use metadata_index for O(1) lookup (avoids iterating all MP3s)
     if metadata_index:
         src_id = _audio_metadata_identity(src)
