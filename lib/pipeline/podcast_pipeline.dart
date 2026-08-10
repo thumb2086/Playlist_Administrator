@@ -358,9 +358,18 @@ class PodcastPipeline {
       final text = await GroqService.instance.transcribeFile(
         filePath: audioPath, model: GroqService.instance.defaultModel, language: 'zh',
       );
+      // Garbage guard: a transcript with almost no content means the audio
+      // was bad/empty or ASR failed — do NOT mark done, retry next run.
+      final strippedLen = text.replaceAll(RegExp(r'\s+'), '').length;
+      if (strippedLen < 50) {
+        try { if (await File(txtPath).exists()) await File(txtPath).delete(); } catch (_) {}
+        cache[t.key] = {'srt': false, 'txt': false, 'yt_status': '', 'status': 'no_sub'};
+        onLog('      ⚠️ 逐字稿內容過短 ($strippedLen 字)，已跳過待下次重試');
+        return;
+      }
       await File(txtPath).writeAsString(text, flush: true);
       cache[t.key] = {'srt': false, 'txt': true, 'yt_status': 'not_found', 'status': 'ok'};
-      onLog('      ✅ (${text.length} 字)');
+      onLog('      ✅ ($strippedLen 字)');
     } catch (e) {
       onLog('      ❌ $e');
       // Record failure so the episode is retried on next run instead of
