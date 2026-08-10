@@ -125,25 +125,34 @@ class PodcastPipeline {
       final ep = episodes[i];
       final key = '$podcastName|${ep.title}';
       final name = PodcastService.normalizeFileName(ep.title);
-      final srtPath = _findSrt(podDir, name);
+      var srtPath = _findSrt(podDir, name);
       final txtPath = '$podDir\\$name.txt';
-      final hasSrt = srtPath != null;
-      final hasTxt = File(txtPath).existsSync();
+      var hasSrt = srtPath != null;
+      var hasTxt = File(txtPath).existsSync();
       if (hasSrt || hasTxt) {
         // Backfill missing txt right here (fast, local).
         if (hasSrt && !hasTxt) {
           await _srtToTxt(srtPath!, txtPath);
+          // _srtToTxt deletes garbage subtitles (<50 chars): re-detect so the
+          // episode is queued for a retry instead of being marked done.
+          srtPath = _findSrt(podDir, name);
+          hasSrt = srtPath != null;
+          hasTxt = File(txtPath).existsSync();
         }
         cache[key] = {
           'srt': hasSrt,
-          'txt': hasTxt || await File(txtPath).existsSync(),
+          'txt': hasTxt,
           'yt_status': hasSrt ? 'found' : (cache[key]?['yt_status'] ?? ''),
           'status': 'ok',
         };
         alreadyHave++;
         continue;
       }
-      if (!cache.containsKey(key) || (cache[key]!['srt'] != true && cache[key]!['txt'] != true)) {
+      // Files are gone but cache claims done (e.g. garbage subtitles were
+      // deleted) — re-queue so the episode gets a fresh attempt.
+      final cacheSaysDone = cache.containsKey(key) &&
+          (cache[key]!['srt'] == true || cache[key]!['txt'] == true);
+      if (!cacheSaysDone || (!hasSrt && !hasTxt)) {
         tasks.add(_PodTask(index: i, episode: ep, key: key));
       }
     }
@@ -241,7 +250,17 @@ class PodcastPipeline {
         textLines.add(clean);
         last = clean;
       }
-      await File(txtPath).writeAsString(textLines.join('\n'), flush: true);
+      final text = textLines.join('\n');
+      await File(txtPath).writeAsString(text, flush: true);
+      // Guard: a transcript with almost no content means the SRT was garbage
+      // (failed subtitle grab, e.g. only "[Music]"/"you"). Keeping it lets
+      // the RAG index treat it as "done" forever with zero-value data —
+      // delete it instead so the episode is retried on a later run.
+      final strippedLen = text.replaceAll(RegExp(r'\s+'), '').length;
+      if (strippedLen < 50) {
+        try { await File(txtPath).delete(); } catch (_) {}
+        try { await File(srtPath).delete(); } catch (_) {}
+      }
     } catch (_) {}
   }
 
@@ -274,7 +293,11 @@ class PodcastPipeline {
       // convert now so the transcript is available.
       if (srtPath != null && !await File(txtPath).exists()) {
         await _srtToTxt(srtPath, txtPath);
-        cache[t.key] = {'srt': true, 'txt': await File(txtPath).exists(), 'yt_status': 'found', 'status': 'ok'};
+        // Garbage subtitle? _srtToTxt deleted both files — reflect reality
+        // so the episode is re-queued on the next run.
+        final srtStill = _findSrt(podDir, name) != null;
+        final txtStill = await File(txtPath).exists();
+        cache[t.key] = {'srt': srtStill, 'txt': txtStill, 'yt_status': srtStill ? 'found' : '', 'status': 'ok'};
       }
       return false;
     }
@@ -302,7 +325,10 @@ class PodcastPipeline {
     final srtAfter = _findSrt(podDir, name);
     if (subResult == PodcastSubtitleResult.found && srtAfter != null) {
       await _srtToTxt(srtAfter, txtPath);
-      cache[t.key] = {'srt': true, 'txt': true, 'yt_status': 'found', 'status': 'ok'};
+      // Re-check: _srtToTxt deletes garbage subtitles (<50 chars).
+      final srtStill = _findSrt(podDir, name) != null;
+      final txtStill = await File(txtPath).exists();
+      cache[t.key] = {'srt': srtStill, 'txt': txtStill, 'yt_status': srtStill ? 'found' : '', 'status': 'ok'};
       return false; // SRT found, no Groq needed
     }
     if (subResult == PodcastSubtitleResult.notFound) {
