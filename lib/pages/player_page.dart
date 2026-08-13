@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
@@ -7,6 +8,7 @@ import '../services/config_service.dart';
 import '../services/favorites_service.dart';
 import '../services/i18n.dart';
 import '../services/smtc_service.dart';
+import '../services/discord_rpc_service.dart';
 import '../services/lrc_parser.dart';
 import '../services/metadata_reader.dart';
 import '../services/spotube_controller.dart';
@@ -91,6 +93,17 @@ class _PlayerPageState extends State<PlayerPage> {
       },
     );
     _pushSmtcState();
+    _initDiscordRpc();
+  }
+
+  void _initDiscordRpc() {
+    final enabled = ConfigService.instance.config.discordPresenceEnabled;
+    final appId = ConfigService.instance.config.discordApplicationId;
+    if (!enabled || appId.isEmpty) return;
+    DiscordRpcService.instance.attach(
+      enabled: true,
+      applicationId: appId,
+    );
   }
 
   void _pushSmtcState() {
@@ -116,6 +129,14 @@ class _PlayerPageState extends State<PlayerPage> {
       artist: artist,
       album: _displayPlaylistName,
       playing: _isPlaying,
+    );
+    DiscordRpcService.instance.update(
+      title: title,
+      artist: artist,
+      album: _displayPlaylistName,
+      artworkUrl: _currentArtworkUrl,
+      playing: _isPlaying,
+      position: _position,
     );
   }
 
@@ -267,10 +288,62 @@ setState(() {
     _pushSmtcState();
     _loadLyrics(path);
       _loadArtwork(path, stem);
+      _loadArtworkUrl(stem);
       _scrollToCurrent();
     } catch (e) {
       setState(() => _statusText = '播放錯誤: $e');
     }
+  }
+
+  String _currentArtworkUrl = '';
+
+  /// 從 spotify_cache 找對應封面的 URL（Discord RPC largeImage 用）。
+  Future<void> _loadArtworkUrl(String songPath) async {
+    final stem = File(songPath).uri.pathSegments.last
+        .replaceAll(RegExp(r'\.\w+$'), '');
+    if (stem.isEmpty) return;
+    final cacheDir =
+        '${ConfigService.instance.config.basePath}${Platform.pathSeparator}spotify_cache';
+    final dir = Directory(cacheDir);
+    if (!await dir.exists()) return;
+    final q = _tokenize(stem);
+    String? best = _currentArtworkUrl;
+    double bestScore = best.isNotEmpty ? 0.9 : 0.0;
+    await for (final f in dir.list()) {
+      if (!f.path.toLowerCase().endsWith('.json')) continue;
+      final fstem = f.uri.pathSegments.last
+          .replaceAll(RegExp(r'\.json$'), '');
+      final s = _jaccard(q, _tokenize(fstem));
+      if (s > bestScore) {
+        bestScore = s;
+        best = f.path;
+      }
+    }
+    if (bestScore < 0.8 || best == null) {
+      _currentArtworkUrl = '';
+      return;
+    }
+    try {
+      final data = jsonDecode(await File(best).readAsString())
+          as Map<String, dynamic>;
+      final url = data['cover_url'] as String?;
+      if (url != null && url.isNotEmpty && mounted) {
+        setState(() => _currentArtworkUrl = url);
+      }
+    } catch (_) {}
+  }
+
+  List<String> _tokenize(String s) {
+    final clean = s.toLowerCase().replaceAll(
+        RegExp(r'[^\w\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af ]'), ' ');
+    return clean.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toSet().toList();
+  }
+
+  double _jaccard(List<String> a, List<String> b) {
+    final sa = a.toSet(), sb = b.toSet();
+    if (sa.isEmpty || sb.isEmpty) return 0;
+    final inter = sa.intersection(sb).length;
+    return inter / sa.union(sb).length;
   }
 
   Future<void> _loadArtwork(String path, String stem) async {

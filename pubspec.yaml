@@ -1,7 +1,7 @@
 ﻿name: playlist_admin
 description: playlist-admin - Music library management & Spotube automation
 publish_to: 'none'
-version: 2.7.16
+version: 2.8.0
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -16,6 +16,7 @@ dependencies:
   ffi: ^2.1.0
   audioplayers: ^6.1.0
   file_picker: ^11.0.3
+  flutter_discord_rpc: ^1.1.0
 
 dev_dependencies:
   flutter_test:

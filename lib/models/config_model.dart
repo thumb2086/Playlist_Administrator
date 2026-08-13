@@ -24,6 +24,8 @@ class AppConfig {
   bool podcastRagInMusic;
   String groqApiKey;
   int groqConcurrency;
+  bool discordPresenceEnabled;
+  String discordApplicationId;
   Map<String, String> podcastSubscriptions;
   Map<String, String> podcastHistory;
   Map<String, String> urlNames;
@@ -55,6 +57,8 @@ class AppConfig {
     this.podcastRagInMusic = false,
     this.groqApiKey = '',
     this.groqConcurrency = 3,
+    this.discordPresenceEnabled = true,
+    this.discordApplicationId = '1537277062098980944',
     Map<String, String>? podcastSubscriptions,
     Map<String, String>? podcastHistory,
     Map<String, String>? urlNames,
@@ -126,6 +130,8 @@ class AppConfig {
         podcastRagInMusic: json['podcast_rag_in_music'] as bool? ?? false,
         groqApiKey: json['groq_api_key'] as String? ?? '',
         groqConcurrency: json['groq_concurrency'] as int? ?? 3,
+        discordPresenceEnabled: json['discord_presence_enabled'] as bool? ?? true,
+        discordApplicationId: json['discord_application_id'] as String? ?? '1537277062098980944',
         podcastSubscriptions: (json['podcast_subscriptions'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         podcastHistory: (json['podcast_history'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         urlNames: (json['url_names'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
@@ -159,6 +165,8 @@ class AppConfig {
         'podcast_rag_in_music': podcastRagInMusic,
         'groq_api_key': groqApiKey,
         'groq_concurrency': groqConcurrency,
+        'discord_presence_enabled': discordPresenceEnabled,
+        'discord_application_id': discordApplicationId,
         'podcast_subscriptions': podcastSubscriptions,
         'podcast_history': podcastHistory,
         'url_names': urlNames,

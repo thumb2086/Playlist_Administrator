@@ -3,15 +3,85 @@ import re
 import logging
 import subprocess
 from pathlib import Path
+from difflib import SequenceMatcher
 import yt_dlp
 from utils.helpers import sanitize_filename, download_image
-from core.library import find_song_in_library
+from core.library import find_song_in_library, get_normalized_tokens
 from core.dab_downloader import create_dab_downloader
 from core.metadata_enricher import create_metadata_enricher # Added import
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, APIC
 from mutagen.mp4 import MP4, MP4Cover
 from mutagen.easyid3 import EasyID3
+
+_OFFICIAL_RE = re.compile(
+    r'official\s(video|audio|music\svideo|lyric\svideo|visualizer)',
+    re.IGNORECASE,
+)
+_CJK_RE = re.compile(r'[\u4e00-\u9fff\u3040-\u30ff]')
+
+
+def _tokens_covered(q_set, name_set):
+    """query token 集合是否被 entry token 覆蓋。
+
+    因 get_normalized_tokens 會移除中日文間空格（如「孫盛希 希有樂團」
+    合併成「孫盛希希有樂團」），純集合比較會漏掉子字串案例，
+    故 CJK token 額外支援「被 entry token 包含」的寬鬆比對。
+    """
+    if not q_set:
+        return False
+    if q_set.issubset(name_set):
+        return True
+    cjk_q = [q for q in q_set if _CJK_RE.search(q)]
+    if not cjk_q:
+        return False
+    for q in cjk_q:
+        if q in name_set:
+            continue
+        if not any(q in t for t in name_set):
+            return False
+    return True
+
+
+def rank_yt_videos(entries, title, artist):
+    """排名 YouTube 搜尋結果（驗證過的演算法，見 tools/validate_matching.py 演算法 C）。
+
+    對每個 entry 計分：
+      - title token 全被 entry title 包含: +3
+      - artist token 全被 entry title 包含: +1
+      - entry 標題帶 official 標記: +1
+      - 同分用 SequenceMatcher ratio 決勝
+    同時試 (title, artist) 與 (artist, title) 兩個方向取最高分。
+    回傳 (best_entry, best_score)；score < 3 視為信心不足。
+    """
+    def score(e):
+        name = (e.get('title') or '').strip()
+        if not name:
+            return 0, 0.0
+        name_tokens = set(get_normalized_tokens(name))
+        title_set = set(get_normalized_tokens(title))
+        artist_set = set(get_normalized_tokens(artist))
+        best_sub = 0
+        for t, a in ((title_set, artist_set), (artist_set, title_set)):
+            sub = 0
+            if _tokens_covered(t, name_tokens):
+                sub += 3
+            if _tokens_covered(a, name_tokens):
+                sub += 1
+            best_sub = max(best_sub, sub)
+        if best_sub and _OFFICIAL_RE.search(name):
+            best_sub += 1
+        ratio = SequenceMatcher(None, title.lower(), name.lower()).ratio()
+        return best_sub, ratio
+
+    best_entry, best_score, best_ratio = None, 0, 0.0
+    for e in entries or []:
+        if not isinstance(e, dict):
+            continue
+        s, r = score(e)
+        if (s, r) > (best_score, best_ratio):
+            best_entry, best_score, best_ratio = e, s, r
+    return best_entry, best_score
 
 def strip_ansi(text):
     """Removes ANSI escape sequences from strings"""
@@ -741,8 +811,8 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         # 加入繞過 PO Token 限制的關鍵設定
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'web'],  # 使用多個客戶端繞過限制
-                'player_skip': ['webpage'],
+                'player_client': ['tv', 'web_embedded', 'android'],  # 使用多個客戶端繞過限制
+                'player_skip': ['webpage', 'configs'],
             }
         },
         'http_headers': {
@@ -828,28 +898,66 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         log_func(f"🔍 [Debug]   {i+1}. '{candidate}' (length: {len(candidate)})")
     
     all_candidates_failed = True  # Track if all candidates fail
-    
+
+    # --- 選片階段：新排名演算法 (rank_yt_videos) ---
+    # 解析 title / artist（支援 "Title - Artist" 與 "Artist - Title" 兩種順序）
+    title_str, artist_str = song_name, ''
+    if ' - ' in song_name:
+        t, a = song_name.rsplit(' - ', 1)
+        if len(t.strip()) >= 1 and len(a.strip()) >= 1:
+            title_str, artist_str = t.strip(), a.strip()
+
+    search_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'skip_download': True,
+        'extract_flat': True,
+        'logger': YdlLogger(log_func, stats),
+        'socket_timeout': 60,
+        'retries': 2,
+        'ignoreerrors': True,
+    }
+
+    target_url, target_query, target_score = None, None, 0
     for idx, current_query in enumerate(candidates):
-        is_last_candidate = (idx == len(candidates) - 1)
-        
-        # Check for cancellation before each candidate
         check_stop()
-        
-        max_retries = 2
-        for attempt in range(max_retries):
+        try:
+            with yt_dlp.YoutubeDL(search_opts) as sdl:
+                info = sdl.extract_info(f"ytsearch6:{current_query}", download=False)
+            entries = (info or {}).get('entries') or []
+            best_entry, best_score = rank_yt_videos(entries, title_str, artist_str)
+            top_title = (best_entry or {}).get('title', '')[:60] if best_entry else '(無結果)'
+            log_func(f"🔍 [Rank] query='{current_query[:40]}' → 分數={best_score} | {top_title}")
+            if best_score > target_score:
+                target_score = best_score
+                if best_entry and best_entry.get('id'):
+                    target_url = f"https://www.youtube.com/watch?v={best_entry['id']}"
+                target_query = current_query
+        except Exception as e:
+            log_func(f"⚠️ [搜尋失敗] {current_query}: {str(e)[:100]}")
+            continue
+
+    if not target_url:
+        log_func(f"❌ [無匹配] '{song_name}' 所有搜尋結果分數皆為 0，已正確拒絕下載")
+        return None
+    if target_score < 3:
+        log_func(f"⚠️ [低信心] '{song_name}' 最佳分數僅 {target_score}（<3），仍嘗試下載")
+
+    current_query = target_query
+    current_url = target_url
+    log_func(_('searching', f"{current_query} (匹配分數 {target_score})"))
+
+    max_retries = 2
+    for attempt in range(max_retries):
             try:
                 # Check for cancellation before each attempt
                 check_stop()
                 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     if attempt == 0:
-                        if idx == 0:
-                            log_func(_('searching', current_query))
-                        else:
-                            if is_last_candidate and attempt == max_retries - 1:
-                                log_func(f"⚠️ {_('dl_fail', 'No results')}. Trying: {current_query}...")
-                            else:
-                                log_func(_('searching', current_query))
+                        log_func(f"  ▶️ {_('searching', current_query)}")
+                    else:
+                        log_func(f"  🔁 重試: {current_query}")
                     
                     check_stop()
                     
@@ -858,7 +966,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     
                     # 階段1: 嘗試標準高品質下載
                     try:
-                        info = ydl.extract_info(f"ytsearch1:{current_query}", download=True)
+                        info = ydl.extract_info(current_url, download=True)
                         download_success = True
                     except yt_dlp.utils.DownloadError as de:
                         error_msg = str(de).lower()
@@ -932,7 +1040,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                             
                             try:
                                 with yt_dlp.YoutubeDL(fallback_opts) as fydl:
-                                    info = fydl.extract_info(f"ytsearch1:{current_query}", download=True)
+                                    info = fydl.extract_info(current_url, download=True)
                                     download_success = True
                                     log_func(f"✅ [Fallback Success] 使用寬鬆格式下載: {current_query}")
                             except Exception as fallback_error:
@@ -1007,7 +1115,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                                 
                                 try:
                                     with yt_dlp.YoutubeDL(final_opts) as fydl:
-                                        info = fydl.extract_info(f"ytsearch1:{current_query}", download=True)
+                                        info = fydl.extract_info(current_url, download=True)
                                         download_success = True
                                         log_func(f"✅ [Final Success] 使用基本格式下載: {current_query}")
                                 except Exception as final_error:
@@ -1185,10 +1293,8 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     log_func(_('bot_detect'))
                     return None # Stop trying if bot detected
                 else:
-                    # If it's the last candidate, log error before giving up
-                    if is_last_candidate:
-                        log_func(_('dl_fail', strip_ansi(str(e))))
-                    # Otherwise silently fail to let next candidate try
+                    # 單一選片目標失敗，記錄後結束
+                    log_func(_('dl_fail', strip_ansi(str(e))))
                     break 
         
         # If we reached here, it means this candidate failed (break or exhausted retries)

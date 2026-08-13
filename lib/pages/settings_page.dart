@@ -11,7 +11,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController _basePathCtrl, _workersCtrl, _ffmpegCtrl,
-      _spotubeDlCtrl, _lyricsFolderCtrl;
+      _spotubeDlCtrl, _lyricsFolderCtrl, _discordAppIdCtrl;
 
   void _onConfigChanged() { if (mounted) setState(() {}); }
 
@@ -24,6 +24,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _ffmpegCtrl = TextEditingController(text: c.ffmpegPath);
     _spotubeDlCtrl = TextEditingController(text: c.spotubeDownloadPath);
     _lyricsFolderCtrl = TextEditingController(text: c.lyricsFolderName);
+    _discordAppIdCtrl = TextEditingController(text: c.discordApplicationId);
     I18N.instance.addListener(_onConfigChanged);
     ConfigService.instance.addListener(_onConfigChanged);
   }
@@ -34,6 +35,7 @@ class _SettingsPageState extends State<SettingsPage> {
     ConfigService.instance.removeListener(_onConfigChanged);
     _basePathCtrl.dispose(); _workersCtrl.dispose(); _ffmpegCtrl.dispose();
     _spotubeDlCtrl.dispose(); _lyricsFolderCtrl.dispose();
+    _discordAppIdCtrl.dispose();
     super.dispose();
   }
 
@@ -44,6 +46,7 @@ class _SettingsPageState extends State<SettingsPage> {
     c.ffmpegPath = _ffmpegCtrl.text;
     c.spotubeDownloadPath = _spotubeDlCtrl.text;
     c.lyricsFolderName = _lyricsFolderCtrl.text.trim().isEmpty ? 'Lyrics' : _lyricsFolderCtrl.text.trim();
+    c.discordApplicationId = _discordAppIdCtrl.text.trim();
     ConfigService.instance.save();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('settings.saved')), duration: const Duration(seconds: 1)));
   }
@@ -88,6 +91,15 @@ class _SettingsPageState extends State<SettingsPage> {
         const SizedBox(height: 12),
         _Section(t('settings.lyrics_section'), [
           _Field(t('settings.lyrics_folder'), _lyricsFolderCtrl, 'Lyrics'),
+        ]),
+        const SizedBox(height: 12),
+        _Section('Discord Rich Presence', [
+          _Field('Discord Application ID', _discordAppIdCtrl, '到 discord.com/developers 申請'),
+          _Toggle('Discord Presence', c.discordPresenceEnabled, (v) {
+            c.discordPresenceEnabled = v;
+            _save();
+            setState(() {});
+          }),
         ]),
         const SizedBox(height: 20),
         Center(
