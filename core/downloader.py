@@ -7,7 +7,6 @@ from difflib import SequenceMatcher
 import yt_dlp
 from utils.helpers import sanitize_filename, download_image
 from core.library import find_song_in_library, get_normalized_tokens
-from core.dab_downloader import create_dab_downloader
 from core.metadata_enricher import create_metadata_enricher # Added import
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, APIC
@@ -557,87 +556,15 @@ def download_lyrics(song_name, output_path, log_func, failed_cache=None):
         return False
     return False
 
-def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None, progress_callback=None, current_dl=0, use_dab_lossless=False, use_dab_metadata=False, dab_credentials=None, config=None, artist_hint=None):
+def download_song(song_name, library_path, audio_format, log_func, file_list, stats=None, speed_display_callback=None, progress_callback=None, current_dl=0, config=None, artist_hint=None):
     """Downloads song in specified format (mp3 or flac)"""
     
     # Create a simple failed lyrics cache for this session
     lyrics_failed_cache = {}
     
-    # If DAB Music is requested and credentials are provided AND asking for FLAC
-    if use_dab_lossless and dab_credentials and audio_format == 'flac':
-        try:
-            # Extract artist name for better matching context
-            # Priority: 1. artist_hint, 2. extraction from song_name
-            actual_artist_hint = artist_hint
-            if not actual_artist_hint and ' - ' in song_name:
-                parts = song_name.split(' - ', 1)
-                if len(parts) == 2:
-                    actual_artist_hint = parts[0].strip()
-
-            dab_downloader = create_dab_downloader(dab_credentials['email'], dab_credentials['password'])
-            success = dab_downloader.download_song(
-                song_name, library_path, log_func, file_list, stats, 
-                progress_callback, current_dl, actual_artist_hint, config
-            )
-            dab_downloader.logout()
-            if success:
-                # DAB downloader should return the actual path
-                # If it returned True but no path, try to find the file
-                if isinstance(success, str):
-                    # success is actually the file path
-                    final_path = success
-                else:
-                    # success is True, need to find the file
-                    import glob
-                    lossless_dir = os.path.join(library_path, "Lossless")
-                    if os.path.exists(lossless_dir):
-                        # Look for recently downloaded FLAC files
-                        flac_files = glob.glob(os.path.join(lossless_dir, "*.flac"))
-                        if flac_files:
-                            # Get the most recently modified file
-                            final_path = max(flac_files, key=os.path.getmtime)
-                            log_func(f"  ✅ [DAB Found File] {os.path.basename(final_path)}")
-                        else:
-                            log_func(f"  ⚠️ [DAB Success but File Not Found] No FLAC files found.")
-                            return None
-                    else:
-                        log_func(f"  ⚠️ [DAB Success but File Not Found] Lossless directory not found.")
-                        return None
-                
-                # Verify the file exists
-                if os.path.exists(final_path):
-                    # Enriched metadata if requested
-                    if use_dab_metadata and config:
-                        log_func(f"  ✨ [DAB Download Success] Attempting metadata enrichment for {song_name}")
-                        try:
-                            # Re-extract/use artist hint if needed for enrichment
-                            if not actual_artist_hint and ' - ' in song_name:
-                                parts = song_name.split(' - ', 1)
-                                if len(parts) == 2:
-                                    actual_artist_hint = parts[0].strip()
-                                    
-                            enricher = create_metadata_enricher(config)
-                            enricher.enrich_file_metadata(final_path, song_name, log_func, actual_artist_hint)
-                            log_func(f"  ✅ [Metadata Enriched] {song_name}")
-                            enricher.cleanup()
-                        except Exception as e:
-                            log_func(f"  ⚠️ [DAB Metadata Enricher Error] {str(e)}")
-                    return final_path
-                else:
-                    log_func(f"  ⚠️ [DAB Success but File Not Found] {final_path}")
-                    return None
-            else:
-                log_func(f"  ❌ [FLAC Unavailable] {song_name} - DAB Music 無此歌曲的無損版本")
-                log_func(f"  ⚠️ [跳過] 無損音檔僅提供於 DAB Music，不降級到 YouTube")
-                return None  # 真正的 FLAC 失敗，不 fallback
-        except Exception as e:
-            log_func(f"  ❌ [DAB Error] {song_name}: {str(e)}")
-            log_func(f"  ⚠️ [跳過] DAB Music 服務異常，無法取得無損音檔")
-            return None  # 真正的 FLAC 失敗，不 fallback
-    
-    # 如果是 FLAC 但沒有 DAB Music，直接返回 None
-    if audio_format == 'flac' and not use_dab_lossless:
-        log_func(f"  ❌ [FLAC Disabled] {song_name} - FLAC 需要啟用 DAB Music")
+    # FLAC 不再支援（原 DAB 無損來源已移除）
+    if audio_format == 'flac':
+        log_func(f"  ❌ [FLAC Disabled] FLAC 已不再支援，請改用 mp3")
         return None
     
     # Use the requested format directly
@@ -1175,7 +1102,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     if os.path.exists(final_path):
                         log_func(f" -> {os.path.basename(final_path)}")
                         # Add metadata
-                        new_path = add_metadata_to_file(final_path, info, song_name, log_func, config, use_dab_metadata)
+                        new_path = add_metadata_to_file(final_path, info, song_name, log_func, config, False)
                         
                         # Auto-rename file based on metadata if metadata was added successfully
                         if new_path:
@@ -1203,7 +1130,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     if os.path.exists(filename):
                         log_func(f" -> {os.path.basename(filename)}")
                         # Add metadata
-                        new_path = add_metadata_to_file(filename, info, song_name, log_func, config, use_dab_metadata)
+                        new_path = add_metadata_to_file(filename, info, song_name, log_func, config, False)
                         
                         # Auto-rename file based on metadata if metadata was added successfully
                         if new_path:
@@ -1237,7 +1164,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                     
                     # Add metadata after download is complete
                     if os.path.exists(final_path):
-                        new_path = add_metadata_to_file(final_path, info, song_name, log_func, config, use_dab_metadata)
+                        new_path = add_metadata_to_file(final_path, info, song_name, log_func, config, False)
                         
                         # Auto-rename file based on metadata if metadata was added successfully
                         if new_path:

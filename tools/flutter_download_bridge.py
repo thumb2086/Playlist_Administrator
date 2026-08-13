@@ -289,15 +289,6 @@ def cmd_batch_download(args):
         emit_json({'type': 'error', 'message': 'Library path not configured'})
         return
 
-    use_dab_lossless = config.get('dab_use_lossless', False) and target_format == 'flac'
-    use_dab_metadata = config.get('dab_use_metadata', False) and target_format == 'flac'
-    dab_credentials = None
-    if use_dab_lossless:
-        dab_email = config.get('dab_email', '')
-        dab_password = config.get('dab_password', '')
-        if dab_email and dab_password:
-            dab_credentials = {'email': dab_email, 'password': dab_password}
-
     total = len(songs)
     successful = 0
     failed = 0
@@ -314,9 +305,7 @@ def cmd_batch_download(args):
         result = download_song(
             song_name, library_path, target_format, lambda msg: emit_json({
                 'type': 'log', 'message': msg
-            }), file_list=[], config=config,
-            use_dab_lossless=use_dab_lossless, use_dab_metadata=use_dab_metadata,
-            dab_credentials=dab_credentials
+            }), file_list=[], config=config
         )
 
         if result and os.path.exists(result):
