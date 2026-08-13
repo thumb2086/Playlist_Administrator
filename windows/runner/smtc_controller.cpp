@@ -197,7 +197,7 @@ void SmtcController::ApplyUpdate(const flutter::EncodableMap& map) {
     if (!artworkUrl.empty()) {
       try {
         auto ref = winrt::RandomAccessStreamReference::CreateFromUri(
-            winrt::Uri(winrt::hstring(artworkUrl)));
+            winrt::Windows::Foundation::Uri(winrt::hstring(artworkUrl)));
         updater.Thumbnail(ref);
       } catch (...) {
       }
