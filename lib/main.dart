@@ -10,6 +10,7 @@ import 'services/config_service.dart';
 import 'services/groq_service.dart';
 import 'services/i18n.dart';
 import 'services/log_manager.dart';
+import 'dart:ui' show PlatformDispatcher;
 
 int _foundHwnd = 0;
 
@@ -81,6 +82,14 @@ void main() async {
   _ensureSingleInstance();
   await ConfigService.instance.load();
   LogManager.instance.enable(ConfigService.instance.config.basePath);
+  FlutterError.onError = (details) {
+    LogManager.instance.error('FlutterError: ${details.exception}\n${details.stack}');
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    LogManager.instance.error('PlatformDispatcher: $error\n$stack');
+    return true;
+  };
   await GroqService.instance.loadFromEnv();
   if (GroqService.instance.apiKey != null && GroqService.instance.apiKey!.isNotEmpty) {
     ConfigService.instance.config.groqApiKey = GroqService.instance.apiKey!;
