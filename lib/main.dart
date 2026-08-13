@@ -9,6 +9,7 @@ import 'cli_main.dart' show runCli;
 import 'services/config_service.dart';
 import 'services/groq_service.dart';
 import 'services/i18n.dart';
+import 'services/log_manager.dart';
 
 int _foundHwnd = 0;
 
@@ -79,6 +80,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   _ensureSingleInstance();
   await ConfigService.instance.load();
+  LogManager.instance.enable(ConfigService.instance.config.basePath);
   await GroqService.instance.loadFromEnv();
   if (GroqService.instance.apiKey != null && GroqService.instance.apiKey!.isNotEmpty) {
     ConfigService.instance.config.groqApiKey = GroqService.instance.apiKey!;
