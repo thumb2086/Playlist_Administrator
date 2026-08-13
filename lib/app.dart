@@ -295,11 +295,11 @@ class _Sidebar extends StatelessWidget {
               child: Container(
                 margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-                decoration: BoxDecoration(color: AppColors.accentDim, borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(color: AppColors.accent, borderRadius: BorderRadius.circular(8)),
                 child: Row(children: [
-                  const Icon(Icons.check_circle, size: 12, color: AppColors.accent),
+                  const Icon(Icons.check_circle, size: 12, color: Color(0xFF000000)),
                   const SizedBox(width: 4),
-                  const Text('安裝更新', style: TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w600)),
+                  const Text('安裝更新', style: TextStyle(color: Color(0xFF000000), fontSize: 10, fontWeight: FontWeight.w600)),
                 ]),
               ),
             ),
