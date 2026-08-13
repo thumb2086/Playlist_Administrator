@@ -75,6 +75,10 @@ class _PlayerPageState extends State<PlayerPage> {
     _searchCtrl.addListener(_onSearchChanged);
     _refreshPlaylistNames();
     _initSmtc();
+    _positionTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || _songs.isEmpty) return;
+      _pushSmtcState();
+    });
   }
 
   void _initSmtc() {
@@ -574,6 +578,8 @@ setState(() {
 
   void _seek(double value) {
     _player.seek(Duration(seconds: value.toInt()));
+    _position = Duration(seconds: value.toInt());
+    _pushSmtcState();
   }
 
   String _fmt(Duration d) {
