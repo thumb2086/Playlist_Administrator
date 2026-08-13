@@ -6,10 +6,13 @@
 #include <array>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cwchar>
 #include <fstream>
 #include <string>
+
+#include <windows.h>
 
 // --- C++/WinRT (SMTC via UWP MediaPlayer) --------------------------------
 // Same route as Spotube's libwinmedia: a MediaPlayer instance registers its
@@ -201,10 +204,17 @@ void SmtcController::ApplyUpdate(const flutter::EncodableMap& map) {
         return std::wstring();
       }
       const auto* s = std::get_if<std::string>(&it->second);
-      if (s == nullptr) {
+      if (s == nullptr || s->empty()) {
         return std::wstring();
       }
-      return std::wstring(s->begin(), s->end());
+      // Flutter sends UTF-8 bytes; decode to UTF-16 or SMTC shows mojibake.
+      const int len = MultiByteToWideChar(CP_UTF8, 0, s->c_str(),
+                                          static_cast<int>(s->size()),
+                                          nullptr, 0);
+      std::wstring out(len, L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, s->c_str(),
+                          static_cast<int>(s->size()), &out[0], len);
+      return out;
     };
     auto getBool = [&map](const char* key, bool def) -> bool {
       auto it = map.find(flutter::EncodableValue(key));

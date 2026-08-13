@@ -33,6 +33,7 @@ class _PlayerPageState extends State<PlayerPage> {
   List<String> _playQueue = [];
   int _queueIndex = -1;
   bool _playInFlight = false;
+  int _loadGen = 0;
   bool _isPlaying = false;
   bool _shuffle = false;
   bool _loop = true;
@@ -59,6 +60,7 @@ class _PlayerPageState extends State<PlayerPage> {
     _statusText = t('spotube.status_ready');
     I18N.instance.addListener(() { if (mounted) setState(() {}); });
     _player.onPlayerComplete.listen((_) {
+      if (!mounted) return;
       if (_loop || _shuffle) {
         _next();
       } else {
@@ -196,14 +198,17 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Future<void> _loadPlaylist(String name, {bool browseOnly = false}) async {
+    final gen = ++_loadGen;
     final plPath = '${ConfigService.instance.config.playlistsPath}\\$name.m3u8';
     final file = File(plPath);
     if (!await file.exists()) {
+      if (gen != _loadGen) return;
       setState(() => _statusText = '找不到播放清單: $name');
       return;
     }
     final stat = await file.stat();
     if (stat.size == 0) {
+      if (gen != _loadGen) return;
       setState(() => _statusText = '播放清單是空的');
       return;
     }
@@ -212,6 +217,7 @@ class _PlayerPageState extends State<PlayerPage> {
     final songs = <String>[];
     final lib = ConfigService.instance.config.libraryPath;
     for (final line in lines) {
+      if (gen != _loadGen) return;
       final raw = line.trim();
       if (raw.isEmpty || raw.startsWith('#')) continue;
       // Echo Nightly playlists store URI-encoded paths — try both forms.
@@ -257,10 +263,12 @@ class _PlayerPageState extends State<PlayerPage> {
     }
 
     if (songs.isEmpty) {
+      if (gen != _loadGen) return;
       setState(() => _statusText = '播放清單中沒有可播放的歌曲');
       return;
     }
 
+    if (gen != _loadGen) return;
     setState(() {
       _displaySongs = songs;
       _filteredSongs = List.from(songs);
@@ -556,7 +564,8 @@ setState(() {
   }
 
   void _next() {
-    if (_playQueue.isEmpty) return;
+    if (_playQueue.isEmpty || _queueIndex < 0) return;
+    if (_queueIndex >= _playQueue.length) _queueIndex = 0;
     int next;
     if (_shuffle) {
       if (_playQueue.length <= 1) return;
@@ -571,7 +580,7 @@ setState(() {
   }
 
   void _prev() {
-    if (_playQueue.isEmpty) return;
+    if (_playQueue.isEmpty || _queueIndex < 0) return;
     final prev = (_queueIndex - 1 + _playQueue.length) % _playQueue.length;
     final path = _playQueue[prev];
     final sIdx = _songs.indexOf(path);

@@ -45,7 +45,8 @@ def jaccard_matches(name, mp3_map):
 
 def main():
     base = sys.argv[1] if len(sys.argv) > 1 else r'C:\Users\CPXru\Music\Spotube'
-    sn = json.load(open(os.path.join(base, 'snapshot_cache.json'), encoding='utf-8'))
+    snap_path = sys.argv[2] if len(sys.argv) > 2 else 'snapshot_cache.json'
+    sn = json.load(open(os.path.join(base, snap_path), encoding='utf-8'))
     playlists = sn.get('playlists', {})
     mp3_dir = os.path.join(base, 'mp3')
     mp3_stems = {}
