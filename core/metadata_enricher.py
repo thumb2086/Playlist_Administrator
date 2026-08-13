@@ -12,7 +12,6 @@ from mutagen.mp4 import MP4, MP4Cover
 from mutagen.easyid3 import EasyID3
 from mutagen import File as MutagenFile
 from utils.helpers import sanitize_filename, download_image
-from core.dab_client import DABMusicClient
 
 class MetadataEnricher:
     """Enriches metadata for existing audio files"""
@@ -20,21 +19,6 @@ class MetadataEnricher:
     def __init__(self, config=None):
         self.config = config
         self.dab_client = None
-        
-        # Initialize DAB client if credentials are available
-        if config and config.get('use_dab_music', False):
-            dab_email = config.get('dab_email', '')
-            dab_password = config.get('dab_password', '')
-            if dab_email and dab_password:
-                try:
-                    self.dab_client = DABMusicClient()
-                    if self.dab_client.login(dab_email, dab_password):
-                        print("DAB Music client initialized for metadata enrichment")
-                    else:
-                        self.dab_client = None
-                except Exception as e:
-                    print(f"Failed to initialize DAB client: {e}")
-                    self.dab_client = None
     
     def scan_files_missing_metadata(self, library_path, log_func):
         """Scan library for files missing essential metadata"""
@@ -168,115 +152,8 @@ class MetadataEnricher:
             return None
     
     def _enrich_with_dab_music(self, file_path, song_name, log_func, artist_hint=None):
-        """Try to enrich metadata using DAB Music API"""
-        try:
-            # Extract artist name if not provided
-            search_artist = artist_hint
-            search_title = song_name
-            if not search_artist and ' - ' in song_name:
-                parts = song_name.split(' - ', 1)
-                if len(parts) == 2:
-                    search_artist = parts[0].strip()
-                    search_title = parts[1].strip()
-
-            # Search for the track
-            track_info = self.dab_client.get_best_quality_match(search_title, search_artist)
-            # Search for the track
-            track_info = self.dab_client.get_best_quality_match(search_title, search_artist)
-            if not track_info:
-                return None
-            
-            # --- DURATION VERIFICATION ---
-            try:
-                # Check local file duration
-                audio = MutagenFile(file_path)
-                if audio and audio.info:
-                    local_duration = audio.info.length
-                    # DAB duration can be in seconds or minutes:seconds
-                    remote_duration_val = track_info.get('duration', 0)
-                    
-                    if isinstance(remote_duration_val, str) and ':' in remote_duration_val:
-                        parts = remote_duration_val.split(':')
-                        remote_duration = int(parts[0]) * 60 + int(parts[1])
-                    else:
-                        remote_duration = float(remote_duration_val)
-                    
-                    if remote_duration > 0:
-                        if abs(local_duration - remote_duration) > 15: # 15s tolerance
-                            log_func(f"  ⚠️ [Duration Mismatch] Local: {int(local_duration)}s, Remote: {int(remote_duration)}s. Skipping.")
-                            return None
-            except Exception as e:
-                log_func(f"  ⚠️ Duration check skipped: {e}")
-            # --- END DURATION VERIFICATION ---
-            
-            # Extract metadata
-            title = track_info.get('title', '')
-            artist = track_info.get('artist', '')
-            album = track_info.get('album', '')
-            year = track_info.get('year', '')
-            genre = track_info.get('genre', '')
-            
-            if not title or not artist:
-                return None
-            
-            # Apply metadata to file
-            success = self._apply_metadata_to_file(file_path, {
-                'title': title,
-                'artist': artist,
-                'album': album,
-                'year': year,
-                'genre': genre,
-                'album_art_url': track_info.get('image', ''),
-                'source': 'DAB Music'
-            }, log_func)
-            
-            if success:
-                log_func(f"  ✅ [DAB Enriched] {title} - {artist}")
-                
-                # Default return original path
-                final_path = file_path
-
-                # --- AUTO-RENAME LOGIC ---
-                if self.config and (self.config.get('auto_rename_files', True) or self.config.get('auto_rename', False)):
-                    try:
-                        old_filename = os.path.basename(file_path)
-                        file_ext = os.path.splitext(file_path)[1]
-                        
-                        # Clean title and artist for filename
-                        clean_title = sanitize_filename(title)
-                        clean_artist = sanitize_filename(artist)
-                        new_filename = f"{clean_artist} - {clean_title}{file_ext}"
-                        
-                        # Use loose matching to see if rename is needed
-                        from core.library import get_normalized_tokens
-                        old_tokens = set(get_normalized_tokens(os.path.splitext(old_filename)[0]))
-                        new_tokens = set(get_normalized_tokens(f"{artist} {title}"))
-                        
-                        # If overlap is low (less than 60%), it's a significant rename (fixing a wrong name)
-                        # Or if the old filename was very generic (e.g. just "城市之丘" vs "告五人 - 城市之丘")
-                        overlap = len(old_tokens & new_tokens)
-                        if overlap / max(1, len(new_tokens)) < 0.8 or len(old_tokens) < len(new_tokens) - 1:
-                            new_path = os.path.join(os.path.dirname(file_path), new_filename)
-                            
-                            # Check if destination exists
-                            if not os.path.exists(new_path) and new_filename != old_filename:
-                                os.rename(file_path, new_path)
-                                log_func(f"  🔄 [Auto-Renamed] {old_filename} -> {new_filename}")
-                                final_path = new_path
-                                # Note: file_path is no longer valid, but this is the end of processing for this file
-                            elif new_filename != old_filename:
-                                log_func(f"  ℹ️ [Rename Skipped] Target already exists: {new_filename}")
-                    except Exception as re:
-                        log_func(f"  ⚠️ Auto-rename failed: {re}")
-                # --- END AUTO-RENAME ---
-            
-                return final_path
-            
-            return None
-            
-        except Exception as e:
-            log_func(f"  ⚠️ DAB enrichment failed: {str(e)}")
-            return None
+        """DAB Music API 已移除 — 由 Spotify cache / MusicBrainz 路徑取代。"""
+        return None
     
     def _enrich_from_filename(self, file_path, song_name, log_func):
         """Enrich metadata by parsing filename or reading from Spotify cache"""
