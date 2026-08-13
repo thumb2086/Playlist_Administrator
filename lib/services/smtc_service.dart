@@ -58,6 +58,7 @@ class SmtcService {
     String? title,
     String? artist,
     String? album,
+    String? artworkUrl,
     bool playing = false,
   }) async {
     if (!_attached) return;
@@ -66,6 +67,7 @@ class SmtcService {
         'title': title ?? '',
         'artist': artist ?? '',
         'album': album ?? '',
+        'artworkUrl': artworkUrl ?? '',
         'playing': playing,
       });
     } catch (_) {}

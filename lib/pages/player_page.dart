@@ -130,6 +130,7 @@ class _PlayerPageState extends State<PlayerPage> {
       title: title,
       artist: artist,
       album: _displayPlaylistName,
+      artworkUrl: _currentArtworkUrl,
       playing: _isPlaying,
     );
     DiscordRpcService.instance.update(

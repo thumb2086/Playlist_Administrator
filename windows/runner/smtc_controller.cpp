@@ -12,9 +12,11 @@
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.h>
+#include <winrt/Windows.Storage.Streams.h>
 
 namespace winrt {
 using namespace winrt::Windows::Media;
+using winrt::Windows::Storage::Streams::RandomAccessStreamReference;
 }
 
 // ISystemMediaTransportControlsInterop lets desktop (non-UWP) apps obtain
@@ -178,6 +180,7 @@ void SmtcController::ApplyUpdate(const flutter::EncodableMap& map) {
     const std::wstring title = getStr("title");
     const std::wstring artist = getStr("artist");
     const std::wstring album = getStr("album");
+    const std::wstring artworkUrl = getStr("artworkUrl");
     const bool playing = getBool("playing", false);
 
     auto updater = impl_->smtc.DisplayUpdater();
@@ -190,6 +193,14 @@ void SmtcController::ApplyUpdate(const flutter::EncodableMap& map) {
     }
     if (!album.empty()) {
       updater.MusicProperties().AlbumTitle(winrt::hstring(album));
+    }
+    if (!artworkUrl.empty()) {
+      try {
+        auto ref = winrt::RandomAccessStreamReference::CreateFromUri(
+            winrt::Uri(winrt::hstring(artworkUrl)));
+        updater.Thumbnail(ref);
+      } catch (...) {
+      }
     }
     updater.Update();
 
