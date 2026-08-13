@@ -75,9 +75,16 @@ class DiscordRpcService {
     String? artworkUrl,
     bool playing = false,
     Duration? position,
+    Duration? duration,
   }) async {
     if (Platform.isWindows == false) return;
     if (title.isEmpty) return;
+    final elapsedMs = position?.inMilliseconds ?? 0;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final start = playing ? (nowMs - elapsedMs) ~/ 1000 : null;
+    final end = playing && duration != null
+        ? (nowMs - elapsedMs + duration.inMilliseconds) ~/ 1000
+        : null;
     final activity = RPCActivity(
       details: title,
       state: artist,
@@ -87,13 +94,7 @@ class DiscordRpcService {
             : "playlist-admin-logo",
         largeText: album ?? '',
       ),
-      timestamps: RPCTimestamps(
-        start: playing
-            ? (DateTime.now().millisecondsSinceEpoch -
-                    (position?.inMilliseconds ?? 0)) ~/
-                1000
-            : null,
-      ),
+      timestamps: RPCTimestamps(start: start, end: end),
       activityType: ActivityType.listening,
     );
     _pending = activity;

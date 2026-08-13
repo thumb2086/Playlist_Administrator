@@ -138,6 +138,7 @@ class _PlayerPageState extends State<PlayerPage> {
       artworkUrl: _currentArtworkUrl,
       playing: _isPlaying,
       position: _position,
+      duration: _duration,
     );
   }
 
