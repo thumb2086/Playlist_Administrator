@@ -362,48 +362,28 @@ def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enri
             audio.save()
             
         elif file_ext in ['.mp3', '.mp2', '.mp1']:
-            # Handle MP3 files
+            # Handle MP3 files — single ID3 object so frames AND cover persist
+            # together (EasyID3 -> ID3 handoff used to drop title/artist).
             try:
-                audio = EasyID3(file_path)
-            except:
                 audio = ID3(file_path)
+            except Exception:
+                audio = ID3()
             
             if title:
-                if isinstance(audio, EasyID3):
-                    audio['title'] = title
-                else:
-                    audio.add(TIT2(encoding=3, text=title))
-            
+                audio.add(TIT2(encoding=3, text=title))
             if artist:
-                if isinstance(audio, EasyID3):
-                    audio['artist'] = artist
-                else:
-                    audio.add(TPE1(encoding=3, text=artist))
-            
+                audio.add(TPE1(encoding=3, text=artist))
             if album:
-                if isinstance(audio, EasyID3):
-                    audio['album'] = album
-                else:
-                    audio.add(TALB(encoding=3, text=album))
-            
+                audio.add(TALB(encoding=3, text=album))
             if year:
-                if isinstance(audio, EasyID3):
-                    audio['date'] = year
-                else:
-                    audio.add(TDRC(encoding=3, text=year))
-            
+                audio.add(TDRC(encoding=3, text=year))
             if genre:
-                if isinstance(audio, EasyID3):
-                    audio['genre'] = genre
-                else:
-                    audio.add(TCON(encoding=3, text=genre))
+                audio.add(TCON(encoding=3, text=genre))
             
             # Add artwork
             if thumbnail_url:
                 artwork_data = download_image(thumbnail_url)
                 if artwork_data:
-                    if isinstance(audio, EasyID3):
-                        audio = ID3(file_path)
                     audio.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=artwork_data))
             
             audio.save()

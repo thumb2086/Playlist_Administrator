@@ -145,12 +145,18 @@ class FileRenamer:
             
             result['metadata'] = metadata
             
-            # Generate new filename
+# Generate new filename
             file_ext = Path(file_path).suffix.lower()
             new_filename = self.generate_new_filename(metadata, file_ext)
-            
+
             if not new_filename:
                 result['message'] = "Could not generate new filename"
+                return result
+
+            # No usable metadata → keep the original filename instead of "Unknown_Song".
+            if new_filename.startswith("Unknown_Song"):
+                result['success'] = True
+                result['message'] = "No metadata to rename after; keeping original name"
                 return result
             
             # Get new path

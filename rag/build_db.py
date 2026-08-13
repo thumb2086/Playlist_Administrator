@@ -144,19 +144,49 @@ def main() -> None:
         metadata={"hnsw:space": "cosine"},
     )
 
-    # 已索引的檔名 (resume 用) - 分段讀取避免 SQL 變數超限
-    done_files = set()
+    # 已索引內容 hash 去重 - 分段讀取避免 SQL 變數超限
+    done_sigs: set[str] = set()
     offset = 0
     while True:
         batch = col.get(limit=5000, offset=offset, include=["metadatas"])["metadatas"]
         if not batch:
             break
         for m in batch:
-            if m:
-                done_files.add(m.get("file", ""))
+            if m and m.get("sig"):
+                done_sigs.add(m["sig"])
         offset += 5000
         if offset > 1000000:
             break
+
+    # 一次性遷移: 舊版 chunks 沒有 sig — 從 metadata 的 path 讀檔補上，
+    # 避免 1662 篇全部被當新的重嵌入。
+    def file_sig(path: Path) -> str:
+        return hashlib.md5(path.read_bytes()).hexdigest()
+
+    migrated = 0
+    offset = 0
+    while True:
+        batch = col.get(limit=5000, offset=offset,
+                        include=["metadatas"])["metadatas"]
+        if not batch:
+            break
+        for m in batch:
+            if not m or m.get("sig"):
+                continue
+            p = m.get("path")
+            if not p or not os.path.exists(p):
+                continue
+            try:
+                sig = file_sig(Path(p))
+                done_sigs.add(sig)
+                migrated += 1
+            except Exception:
+                pass
+        offset += 5000
+        if offset > 1000000:
+            break
+    if migrated:
+        print(f"migrated {migrated} legacy chunks to content-sig dedup")
 
     # 無內容/失敗檔案的跳過清單:0 chunks 的檔案不會寫進 DB,
     # 若沒有持久狀態會每次 pipeline 都被當「待索引」重試。
@@ -169,13 +199,18 @@ def main() -> None:
         except Exception:
             skipped = set()
 
+    # 檔案內容 hash — 內容更新(來源切換)時 sig 變 → 重嵌入
+    def has_content(path: Path) -> bool:
+        return bool(make_chunks(split_sentences(read_text_file(path))))
+
     files = [
         f for f in sorted(Path(args.data).rglob("*.txt"))
-        if f.stem not in done_files and f.stem not in skipped
+        if file_sig(f) not in done_sigs
+        and not (f.stem in skipped and not has_content(f))
     ]
     if args.limit:
         files = files[: args.limit]
-    print(f"待索引 {len(files)} 篇 (已跳過 {len(done_files)} 篇, 無內容跳過 {len(skipped)} 篇)")
+    print(f"待索引 {len(files)} 篇 (已嵌入 {len(done_sigs)} 篇, 無內容跳過 {len(skipped)} 篇)")
 
     total_chunks = 0
     t_start = time.time()
@@ -200,6 +235,7 @@ def main() -> None:
             )
             continue
         meta = detect_meta(f)
+        sig = file_sig(f)
         try:
             kept_chunks, vectors = embed_texts(args.model, chunks, workers=args.workers)
         except requests.exceptions.HTTPError as e:
@@ -215,7 +251,7 @@ def main() -> None:
             for j in range(len(kept_chunks))
         ]
         metadatas = [
-            {**meta, "chunk": j, "chars": len(c), "path": str(f)}
+            {**meta, "sig": sig, "chunk": j, "chars": len(c), "path": str(f)}
             for j, c in enumerate(kept_chunks)
         ]
         col.add(ids=ids, documents=kept_chunks, metadatas=metadatas, embeddings=vectors)
