@@ -22,10 +22,11 @@ class MetadataReader {
         '-show_format',
         '-show_streams',
         filePath,
-      ]);
+      ], stdoutEncoding: null);
       if (result.exitCode != 0) return TrackMetadata();
 
-      final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      final json =
+          jsonDecode(utf8.decode(result.stdout as List<int>)) as Map<String, dynamic>;
       final format = json['format'] as Map<String, dynamic>?;
       final tags = format?['tags'] as Map<String, dynamic>?;
       final streams = json['streams'] as List<dynamic>?;
@@ -61,7 +62,7 @@ class MetadataReader {
         '-f', 'image2',
         '-c', 'copy',
         'pipe:1',
-      ]);
+      ], stdoutEncoding: null);
       if (result.exitCode == 0 && result.stdout is List<int>) {
         final bytes = result.stdout as List<int>;
         if (bytes.isNotEmpty) return Uint8List.fromList(bytes);
