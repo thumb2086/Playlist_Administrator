@@ -33,7 +33,22 @@ def clean_artist(name):
     return re.sub(r'^E(?=[A-Z\u4e00-\u9fff\u3040-\u30ff])', '', name)
 
 
-def fetch_playlist(sp_url, timeout=30):
+def first_image(obj, keys):
+    imgs = get_path(obj, keys)
+    if isinstance(imgs, list) and imgs:
+        first = imgs[0]
+        if isinstance(first, dict) and first.get('url'):
+            return first['url']
+        if isinstance(first, dict):
+            sources = first.get('sources')
+            if sources:
+                return sources[0].get('url')
+    if isinstance(imgs, dict) and imgs.get('sources'):
+        return imgs['sources'][0].get('url')
+    return None
+
+
+def fetch_playlist(sp_url, cache_dir, timeout=30):
     sp_id = sp_url.split('?')[0].split('playlist/')[-1]
     embed_url = f'https://open.spotify.com/embed/playlist/{sp_id}'
     resp = requests.get(embed_url, headers={
@@ -62,7 +77,27 @@ def fetch_playlist(sp_url, timeout=30):
         artist = clean_artist(artists[0].get('name')) if artists else \
             clean_artist(track.get('subtitle'))
         if title:
-            out.append(f'{title} - {artist}' if artist else title)
+            full = f'{title} - {artist}' if artist else title
+            out.append(full)
+            # Write spotify_cache so the native downloader can tag + cover the file.
+            try:
+                meta = {
+                    'title': title,
+                    'artist': artist or '',
+                    'album': get_path(track, ['album', 'name']) or
+                             (entity.get('name') if entity.get('type') == 'album' else ''),
+                    'release_date': get_path(track, ['album', 'release_date']) or '',
+                    'cover_url': first_image(track, ['album', 'images']) or
+                                 first_image(track, ['visualIdentity', 'image']) or
+                                 first_image(track, ['coverArt', 'image']),
+                }
+                if meta.get('cover_url'):
+                    os.makedirs(cache_dir, exist_ok=True)
+                    clean = re.sub(r'[<>:"/\\|?*]', '_', full).strip('. -')
+                    with open(os.path.join(cache_dir, f'{clean}.json'), 'w', encoding='utf-8') as mf:
+                        json.dump(meta, mf, ensure_ascii=False)
+            except Exception:
+                pass
     return name, out
 
 
@@ -76,12 +111,13 @@ def main():
 
     snapshot = {'version': '2.0-original', 'playlists': {}}
     out_dir = os.path.join(base, 'Playlists_Original')
+    cache_dir = os.path.join(base, 'spotify_cache')
     os.makedirs(out_dir, exist_ok=True)
     ok = fail = 0
     for i, url in enumerate(urls):
         try:
             print(f'[{i + 1}/{len(urls)}] fetching {url}', flush=True)
-            name, tracks = fetch_playlist(url)
+            name, tracks = fetch_playlist(url, cache_dir)
             if not tracks:
                 print(f'  !! no tracks for {url}')
                 fail += 1

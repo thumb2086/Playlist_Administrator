@@ -158,10 +158,24 @@ def main() -> None:
         if offset > 1000000:
             break
 
-    files = [f for f in sorted(Path(args.data).rglob("*.txt")) if f.stem not in done_files]
+    # 無內容/失敗檔案的跳過清單:0 chunks 的檔案不會寫進 DB,
+    # 若沒有持久狀態會每次 pipeline 都被當「待索引」重試。
+    skip_state_file = Path(args.db) / "_skipped_files.json"
+    skipped: set[str] = set()
+    if skip_state_file.exists():
+        try:
+            import json
+            skipped = set(json.loads(skip_state_file.read_text(encoding="utf-8")))
+        except Exception:
+            skipped = set()
+
+    files = [
+        f for f in sorted(Path(args.data).rglob("*.txt"))
+        if f.stem not in done_files and f.stem not in skipped
+    ]
     if args.limit:
         files = files[: args.limit]
-    print(f"待索引 {len(files)} 篇 (已跳過 {len(done_files)} 篇)")
+    print(f"待索引 {len(files)} 篇 (已跳過 {len(done_files)} 篇, 無內容跳過 {len(skipped)} 篇)")
 
     total_chunks = 0
     t_start = time.time()
@@ -176,6 +190,14 @@ def main() -> None:
             )
         chunks = final_chunks
         if not chunks:
+            # 空/太短內容: 標記為已跳過, 避免每次重試
+            skipped.add(f.stem)
+            import json
+            skip_state_file.parent.mkdir(parents=True, exist_ok=True)
+            skip_state_file.write_text(
+                json.dumps(sorted(skipped), ensure_ascii=False, indent=1),
+                encoding="utf-8",
+            )
             continue
         meta = detect_meta(f)
         try:
