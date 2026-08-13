@@ -4,30 +4,64 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
 #include <cwchar>
+#include <fstream>
 #include <string>
 
-// --- C++/WinRT (SMTC) implementation ------------------------------------
+// --- C++/WinRT (SMTC via UWP MediaPlayer) --------------------------------
+// Same route as Spotube's libwinmedia: a MediaPlayer instance registers its
+// SystemMediaTransportControls with the system media session manager, so the
+// media flyout shows up reliably (no GetForWindow interop quirks).
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.h>
+#include <winrt/Windows.Media.Playback.h>
 #include <winrt/Windows.Storage.Streams.h>
 
 namespace winrt {
 using namespace winrt::Windows::Media;
+using namespace winrt::Windows::Media::Playback;
 using winrt::Windows::Storage::Streams::RandomAccessStreamReference;
 }
 
-// ISystemMediaTransportControlsInterop lets desktop (non-UWP) apps obtain
-// an SMTC instance bound to a window handle.
-struct __declspec(uuid("ddb04759-cc74-4d5e-b6de-4b3c90d5bed6"))
-    ISystemMediaTransportControlsInterop : public IUnknown {
-  virtual HRESULT STDMETHODCALLTYPE GetForWindow(
-      HWND appWindow, REFIID riid, void** mediaTransportControl) = 0;
-};
+namespace {
+
+std::string NowStamp() {
+  using namespace std::chrono;
+  const auto t = system_clock::to_time_t(system_clock::now());
+  std::tm tm{};
+  localtime_s(&tm, &t);
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tm.tm_hour, tm.tm_min, tm.tm_sec);
+  return buf;
+}
+
+void SmtcLog(const std::string& msg) {
+  try {
+    size_t len = 0;
+    char* local = nullptr;
+    if (_dupenv_s(&local, &len, "LOCALAPPDATA") != 0 || local == nullptr) {
+      return;
+    }
+    std::wstring path(local, local + len - 1);
+    free(local);
+    path += L"\\playlist-admin\\smtc_debug.txt";
+    std::ofstream out(path, std::ios::app);
+    if (out) {
+      out << "[" << NowStamp() << "] " << msg << std::endl;
+    }
+  } catch (...) {
+  }
+}
+
+}  // namespace
 
 struct SmtcControllerImpl {
+  winrt::MediaPlayer player = nullptr;
   winrt::SystemMediaTransportControls smtc = nullptr;
   winrt::event_token buttonToken{};
 };
@@ -50,19 +84,12 @@ SmtcController::SmtcController(flutter::BinaryMessenger* messenger, HWND window)
       &SmtcController::HandleMethodCall, this, std::placeholders::_1,
       std::placeholders::_2));
 
-  // Create an SMTC instance bound to our top-level window.
+  SmtcLog("SmtcController::init begin (MediaPlayer route)");
   try {
-    auto interop =
-        winrt::get_activation_factory<winrt::SystemMediaTransportControls,
-                                      ISystemMediaTransportControlsInterop>();
-    winrt::SystemMediaTransportControls smtc{nullptr};
-    HRESULT hr = interop->GetForWindow(
-        window_, winrt::guid_of<winrt::SystemMediaTransportControls>(),
-        winrt::put_abi(smtc));
-    if (FAILED(hr)) {
-      return;
-    }
-    impl_->smtc = smtc;
+    impl_->player = winrt::MediaPlayer();
+    impl_->player.AudioCategory(winrt::MediaPlayerAudioCategory::Media);
+    impl_->smtc = impl_->player.SystemMediaTransportControls();
+    SmtcLog("SmtcController: MediaPlayer + SMTC acquired");
 
     impl_->smtc.IsEnabled(true);
     impl_->smtc.IsPlayEnabled(true);
@@ -98,7 +125,12 @@ SmtcController::SmtcController(flutter::BinaryMessenger* messenger, HWND window)
           }
           ::PostMessageW(window_, WM_APP, code, 0);
         });
+    SmtcLog("SmtcController::init OK");
+  } catch (const winrt::hresult_error& e) {
+    SmtcLog(std::string("SmtcController::init FAILED: ") +
+            winrt::to_string(e.message()));
   } catch (...) {
+    SmtcLog("SmtcController::init FAILED: unknown");
   }
 }
 
@@ -107,7 +139,12 @@ SmtcController::~SmtcController() {
     try {
       impl_->smtc.ButtonPressed(impl_->buttonToken);
       impl_->smtc.IsEnabled(false);
-      impl_->smtc = nullptr;
+    } catch (...) {
+    }
+  }
+  if (impl_->player) {
+    try {
+      impl_->player.Close();
     } catch (...) {
     }
   }
@@ -155,6 +192,7 @@ void SmtcController::HandleMethodCall(
 void SmtcController::ApplyUpdate(const flutter::EncodableMap& map) {
   try {
     if (!impl_->smtc) {
+      SmtcLog("ApplyUpdate: smtc is null");
       return;
     }
     auto getStr = [&map](const char* key) -> std::wstring {
@@ -199,7 +237,9 @@ void SmtcController::ApplyUpdate(const flutter::EncodableMap& map) {
         auto ref = winrt::RandomAccessStreamReference::CreateFromUri(
             winrt::Windows::Foundation::Uri(winrt::hstring(artworkUrl)));
         updater.Thumbnail(ref);
-      } catch (...) {
+      } catch (const winrt::hresult_error& e) {
+        SmtcLog(std::string("thumbnail FAILED: ") +
+                winrt::to_string(e.message()));
       }
     }
     updater.Update();
@@ -207,6 +247,9 @@ void SmtcController::ApplyUpdate(const flutter::EncodableMap& map) {
     impl_->smtc.PlaybackStatus(
         playing ? winrt::MediaPlaybackStatus::Playing
                 : winrt::MediaPlaybackStatus::Paused);
+  } catch (const winrt::hresult_error& e) {
+    SmtcLog(std::string("ApplyUpdate FAILED: ") + winrt::to_string(e.message()));
   } catch (...) {
+    SmtcLog("ApplyUpdate FAILED: unknown");
   }
 }

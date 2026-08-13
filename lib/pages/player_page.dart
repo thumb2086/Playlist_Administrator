@@ -32,6 +32,7 @@ class _PlayerPageState extends State<PlayerPage> {
   List<String> _filteredSongs = [];
   List<String> _playQueue = [];
   int _queueIndex = -1;
+  bool _playInFlight = false;
   bool _isPlaying = false;
   bool _shuffle = false;
   bool _loop = true;
@@ -276,6 +277,8 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Future<void> _play(String path) async {
+    if (_playInFlight) return;
+    _playInFlight = true;
     try {
       await _player.stop();
       await _player.play(DeviceFileSource(path));
@@ -297,6 +300,8 @@ setState(() {
       _scrollToCurrent();
     } catch (e) {
       setState(() => _statusText = '播放錯誤: $e');
+    } finally {
+      _playInFlight = false;
     }
   }
 
@@ -554,6 +559,7 @@ setState(() {
     if (_playQueue.isEmpty) return;
     int next;
     if (_shuffle) {
+      if (_playQueue.length <= 1) return;
       next = (_queueIndex + 1 + (DateTime.now().millisecondsSinceEpoch % (_playQueue.length - 1))) % _playQueue.length;
     } else {
       next = (_queueIndex + 1) % _playQueue.length;
