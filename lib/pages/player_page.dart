@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../services/config_service.dart';
 import '../services/favorites_service.dart';
 import '../services/i18n.dart';
@@ -296,6 +297,8 @@ setState(() {
   }
 
   String _currentArtworkUrl = '';
+  final Map<String, String> _coverUrlCache = {};
+  final Set<String> _coverUrlTried = {};
 
   /// 從 spotify_cache 找對應封面的 URL（Discord RPC largeImage 用）。
   Future<void> _loadArtworkUrl(String songPath) async {
@@ -305,32 +308,95 @@ setState(() {
     final cacheDir =
         '${ConfigService.instance.config.basePath}${Platform.pathSeparator}spotify_cache';
     final dir = Directory(cacheDir);
-    if (!await dir.exists()) return;
-    final q = _tokenize(stem);
-    String? best = _currentArtworkUrl;
-    double bestScore = best.isNotEmpty ? 0.9 : 0.0;
-    await for (final f in dir.list()) {
-      if (!f.path.toLowerCase().endsWith('.json')) continue;
-      final fstem = f.uri.pathSegments.last
-          .replaceAll(RegExp(r'\.json$'), '');
-      final s = _jaccard(q, _tokenize(fstem));
-      if (s > bestScore) {
-        bestScore = s;
-        best = f.path;
+    if (await dir.exists()) {
+      final q = _tokenize(stem);
+      String? best;
+      double bestScore = 0.0;
+      await for (final f in dir.list()) {
+        if (!f.path.toLowerCase().endsWith('.json')) continue;
+        final fstem = f.uri.pathSegments.last
+            .replaceAll(RegExp(r'\.json$'), '');
+        final s = _jaccard(q, _tokenize(fstem));
+        if (s > bestScore) {
+          bestScore = s;
+          best = f.path;
+        }
+      }
+      if (bestScore >= 0.8 && best != null) {
+        try {
+          final data = jsonDecode(await File(best).readAsString())
+              as Map<String, dynamic>;
+          final url = data['cover_url'] as String?;
+          if (url != null && url.isNotEmpty) {
+            _currentArtworkUrl = url;
+            if (mounted) setState(() {});
+            _pushSmtcState();
+            return;
+          }
+        } catch (_) {}
       }
     }
-    if (bestScore < 0.8 || best == null) {
-      _currentArtworkUrl = '';
-      return;
+    final fallback = await _resolveCoverUrl(stem);
+    if (fallback != null) {
+      _currentArtworkUrl = fallback;
+      if (mounted) setState(() {});
+      _pushSmtcState();
     }
+  }
+
+  /// iTunes Search API 補封面（免 key）。檔案名格式「歌名 - 藝人」。
+  Future<String?> _resolveCoverUrl(String stem) async {
+    final cached = _coverUrlCache[stem];
+    if (cached != null) return cached.isEmpty ? null : cached;
+    if (_coverUrlTried.contains(stem)) return null;
+    _coverUrlTried.add(stem);
+    final parts = stem.split(' - ');
+    final title = parts.first.trim();
+    final artist = parts.length > 1 ? parts.sublist(1).join(' - ').trim() : '';
+    if (title.isEmpty) return null;
     try {
-      final data = jsonDecode(await File(best).readAsString())
-          as Map<String, dynamic>;
-      final url = data['cover_url'] as String?;
-      if (url != null && url.isNotEmpty && mounted) {
-        setState(() => _currentArtworkUrl = url);
+      final term = artist.isNotEmpty ? '$title $artist' : title;
+      final res = await http.get(Uri.parse(
+          'https://itunes.apple.com/search?term=${Uri.encodeQueryComponent(term)}&entity=song&limit=10'));
+      if (res.statusCode != 200) return null;
+      final list = (jsonDecode(utf8.decode(res.bodyBytes))['results']
+              as List<dynamic>?)
+          ?.cast<Map<String, dynamic>>() ??
+          const [];
+      if (list.isEmpty) return null;
+      final q = _tokenize(title);
+      String? bestUrl;
+      double bestScore = 0.0;
+      for (final r in list) {
+        final t = (r['trackName'] as String?) ?? '';
+        final a = (r['artistName'] as String?) ?? '';
+        double s = 0.0;
+        if (q.isNotEmpty) {
+          final inter =
+              q.where((tok) => t.toLowerCase().contains(tok)).length;
+          s = inter / q.length;
+        }
+        if (a.isNotEmpty &&
+            (a.toLowerCase() == artist.toLowerCase() ||
+                a.contains(artist) ||
+                artist.contains(a))) {
+          s += 0.3;
+        }
+        final u = (r['artworkUrl100'] as String?) ?? '';
+        if (u.isNotEmpty && s > bestScore) {
+          bestScore = s;
+          bestUrl = u.replaceAll('100x100bb', '600x600bb');
+        }
       }
-    } catch (_) {}
+      if (bestScore < 0.4 || bestUrl == null) {
+        _coverUrlCache[stem] = '';
+        return null;
+      }
+      _coverUrlCache[stem] = bestUrl;
+      return bestUrl;
+    } catch (_) {
+      return null;
+    }
   }
 
   List<String> _tokenize(String s) {
@@ -351,11 +417,25 @@ setState(() {
       setState(() => _currentArtwork = _artworkCache[stem]);
       return;
     }
+    Uint8List? artwork;
     try {
       final meta = await MetadataReader.read(path);
-      _artworkCache[stem] = meta.artwork;
-      if (mounted) setState(() => _currentArtwork = meta.artwork);
+      artwork = meta.artwork;
     } catch (_) {}
+    if (artwork == null || artwork.isEmpty) {
+      final cleanStem = stem.replaceAll(RegExp(r'\.\w+$'), '');
+      final url = await _resolveCoverUrl(cleanStem);
+      if (url != null) {
+        try {
+          final res = await http.get(Uri.parse(url));
+          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+            artwork = res.bodyBytes;
+          }
+        } catch (_) {}
+      }
+    }
+    _artworkCache[stem] = artwork;
+    if (mounted) setState(() => _currentArtwork = artwork);
   }
 
   Future<void> _loadLyrics(String songPath) async {
