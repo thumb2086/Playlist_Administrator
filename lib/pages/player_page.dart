@@ -75,10 +75,6 @@ class _PlayerPageState extends State<PlayerPage> {
     _searchCtrl.addListener(_onSearchChanged);
     _refreshPlaylistNames();
     _initSmtc();
-    _positionTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted || _songs.isEmpty) return;
-      _pushSmtcState();
-    });
   }
 
   void _initSmtc() {
