@@ -320,7 +320,7 @@ setState(() {
     }
     final bytes = _artworkCache[File(songPath).uri.pathSegments.last];
     if (bytes != null && bytes.isNotEmpty) {
-      final url = await _uploadToCatbox(bytes);
+      final url = await _uploadCover(bytes);
       if (url != null) {
         _coverUrlCache[stem] = url;
         _currentArtworkUrl = url;
@@ -377,28 +377,37 @@ setState(() {
     }
   }
 
-  /// 上傳圖片到 catbox.moe（匿名，不需 key，echo-discord 同款圖床）。
-  Future<String?> _uploadToCatbox(Uint8List bytes) async {
+  /// 上傳圖片到 uguu.se（匿名、URL 帶副檔名、回傳正確 image/* MIME；
+  /// catbox 的 URL 無副檔名會被 Discord 拒絕）。
+  Future<String?> _uploadCover(Uint8List bytes) async {
     if (bytes.length > 5 * 1024 * 1024) return null;
     try {
+      final isJpeg = bytes.length > 3 &&
+          bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
+      final isPng = bytes.length > 4 &&
+          bytes[0] == 0x89 && bytes[1] == 0x50 &&
+          bytes[2] == 0x4E && bytes[3] == 0x47;
+      final ext = isJpeg ? 'jpg' : (isPng ? 'png' : 'jpg');
       final req = http.MultipartRequest(
-          'POST', Uri.parse('https://catbox.moe/user/api.php'))
-        ..fields['reqtype'] = 'fileupload';
-      final mime = (bytes.length > 3 &&
-              bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
-          ? 'image/jpeg'
-          : 'image/png';
-      req.files.add(http.MultipartFile.fromBytes(
-        'fileToUpload',
-        bytes,
-        filename: 'cover.$mime',
-        contentType: MediaType('image', mime == 'image/jpeg' ? 'jpeg' : 'png'),
-      ));
-      final res = await req.send().timeout(const Duration(seconds: 20));
+          'POST', Uri.parse('https://uguu.se/upload'))
+        ..files.add(http.MultipartFile.fromBytes(
+          'files[]',
+          bytes,
+          filename: 'cover.$ext',
+          contentType: MediaType('image', ext),
+        ));
+      final res = await req.send().timeout(const Duration(seconds: 30));
       final body = await res.stream.bytesToString();
-      if (res.statusCode == 200 && body.startsWith('https://')) return body.trim();
-    } catch (_) {}
-    return null;
+      if (res.statusCode != 200) return null;
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      final files = (json['files'] as List<dynamic>?) ?? const [];
+      if (files.isEmpty) return null;
+      final url = (files.first as Map<String, dynamic>)['url'] as String?;
+      if (url == null || !url.startsWith('https://')) return null;
+      return url;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// iTunes Search API 補封面（免 key）。檔案名格式「歌名 - 藝人」。
