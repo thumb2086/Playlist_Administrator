@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../services/config_service.dart';
 import '../services/favorites_service.dart';
 import '../services/i18n.dart';
@@ -302,11 +303,32 @@ setState(() {
   final Map<String, String> _coverUrlCache = {};
   final Set<String> _coverUrlTried = {};
 
-  /// 從 spotify_cache 找對應封面的 URL（Discord RPC largeImage 用）。
+  /// Discord largeImage 用：內嵌圖優先（上傳 catbox 取 URL），
+  /// 再退回 spotify_cache，最後 iTunes API。
   Future<void> _loadArtworkUrl(String songPath) async {
     final stem = File(songPath).uri.pathSegments.last
         .replaceAll(RegExp(r'\.\w+$'), '');
     if (stem.isEmpty) return;
+    final cached = _coverUrlCache[stem];
+    if (cached != null) {
+      if (cached.isNotEmpty) {
+        _currentArtworkUrl = cached;
+        if (mounted) setState(() {});
+        _pushSmtcState();
+      }
+      return;
+    }
+    final bytes = _artworkCache[File(songPath).uri.pathSegments.last];
+    if (bytes != null && bytes.isNotEmpty) {
+      final url = await _uploadToCatbox(bytes);
+      if (url != null) {
+        _coverUrlCache[stem] = url;
+        _currentArtworkUrl = url;
+        if (mounted) setState(() {});
+        _pushSmtcState();
+        return;
+      }
+    }
     final cacheDir =
         '${ConfigService.instance.config.basePath}${Platform.pathSeparator}spotify_cache';
     final dir = Directory(cacheDir);
@@ -330,6 +352,7 @@ setState(() {
               as Map<String, dynamic>;
           final url = data['cover_url'] as String?;
           if (url != null && url.isNotEmpty) {
+            _coverUrlCache[stem] = url;
             _currentArtworkUrl = url;
             if (mounted) setState(() {});
             _pushSmtcState();
@@ -340,14 +363,42 @@ setState(() {
     }
     final fallback = await _resolveCoverUrl(stem);
     if (fallback != null) {
+      _coverUrlCache[stem] = fallback;
       _currentArtworkUrl = fallback;
       if (mounted) setState(() {});
       _pushSmtcState();
-    } else if (_currentArtworkUrl.isNotEmpty) {
-      _currentArtworkUrl = '';
-      if (mounted) setState(() {});
-      _pushSmtcState();
+    } else {
+      _coverUrlCache[stem] = '';
+      if (_currentArtworkUrl.isNotEmpty) {
+        _currentArtworkUrl = '';
+        if (mounted) setState(() {});
+        _pushSmtcState();
+      }
     }
+  }
+
+  /// 上傳圖片到 catbox.moe（匿名，不需 key，echo-discord 同款圖床）。
+  Future<String?> _uploadToCatbox(Uint8List bytes) async {
+    if (bytes.length > 5 * 1024 * 1024) return null;
+    try {
+      final req = http.MultipartRequest(
+          'POST', Uri.parse('https://catbox.moe/user/api.php'))
+        ..fields['reqtype'] = 'fileupload';
+      final mime = (bytes.length > 3 &&
+              bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+          ? 'image/jpeg'
+          : 'image/png';
+      req.files.add(http.MultipartFile.fromBytes(
+        'fileToUpload',
+        bytes,
+        filename: 'cover.$mime',
+        contentType: MediaType('image', mime == 'image/jpeg' ? 'jpeg' : 'png'),
+      ));
+      final res = await req.send().timeout(const Duration(seconds: 20));
+      final body = await res.stream.bytesToString();
+      if (res.statusCode == 200 && body.startsWith('https://')) return body.trim();
+    } catch (_) {}
+    return null;
   }
 
   /// iTunes Search API 補封面（免 key）。檔案名格式「歌名 - 藝人」。
@@ -442,6 +493,11 @@ setState(() {
     }
     _artworkCache[stem] = artwork;
     if (mounted) setState(() => _currentArtwork = artwork);
+    if (artwork != null &&
+        artwork.isNotEmpty &&
+        !_coverUrlCache.containsKey(stem.replaceAll(RegExp(r'\.\w+$'), ''))) {
+      _loadArtworkUrl(path);
+    }
   }
 
   Future<void> _loadLyrics(String songPath) async {
