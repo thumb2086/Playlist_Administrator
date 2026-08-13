@@ -89,8 +89,9 @@ class DiscordRpcService {
       ),
       timestamps: RPCTimestamps(
         start: playing
-            ? DateTime.now().millisecondsSinceEpoch -
-                (position?.inMilliseconds ?? 0)
+            ? (DateTime.now().millisecondsSinceEpoch -
+                    (position?.inMilliseconds ?? 0)) ~/
+                1000
             : null,
       ),
       activityType: ActivityType.listening,
