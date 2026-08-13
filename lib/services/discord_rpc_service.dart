@@ -79,26 +79,12 @@ class DiscordRpcService {
   }) async {
     if (Platform.isWindows == false) return;
     if (title.isEmpty) return;
-    if (!playing) {
-      _pending = null;
-      if (_initialized &&
-          _connected &&
-          FlutterDiscordRPC.instance.isConnected) {
-        try {
-          await FlutterDiscordRPC.instance.clearActivity();
-          LogManager.instance.info('DiscordRPC cleared (paused)');
-        } catch (e) {
-          LogManager.instance.error('DiscordRPC clear on pause FAILED: $e');
-        }
-      }
-      return;
-    }
     final elapsedMs = position?.inMilliseconds ?? 0;
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final start = playing ? (nowMs - elapsedMs) ~/ 1000 : null;
-    final end = playing && duration != null
-        ? (nowMs - elapsedMs + duration.inMilliseconds) ~/ 1000
-        : null;
+    // 播放與暫停都送 start：播放時從現在起算（累計），
+    // 暫停時 start = now - 已播 → Discord 顯示的秒數凍結在暫停位置（Spotify 行為）。
+    final start = (nowMs - elapsedMs) ~/ 1000;
+    final end = duration != null ? (nowMs - elapsedMs + duration.inMilliseconds) ~/ 1000 : null;
     final activity = RPCActivity(
       details: title,
       state: artist,
