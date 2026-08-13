@@ -2,6 +2,7 @@ import 'dart:io';
 import '../models/playlist.dart';
 
 class AppConfig {
+  static const String defaultDiscordAppId = '1537277062098980944';
   String basePath;
   String language;
   String audioFormat;
@@ -58,7 +59,7 @@ class AppConfig {
     this.groqApiKey = '',
     this.groqConcurrency = 3,
     this.discordPresenceEnabled = true,
-    this.discordApplicationId = '1537277062098980944',
+    this.discordApplicationId = defaultDiscordAppId,
     Map<String, String>? podcastSubscriptions,
     Map<String, String>? podcastHistory,
     Map<String, String>? urlNames,
@@ -131,7 +132,10 @@ class AppConfig {
         groqApiKey: json['groq_api_key'] as String? ?? '',
         groqConcurrency: json['groq_concurrency'] as int? ?? 3,
         discordPresenceEnabled: json['discord_presence_enabled'] as bool? ?? true,
-        discordApplicationId: json['discord_application_id'] as String? ?? '1537277062098980944',
+        discordApplicationId: (json['discord_application_id'] as String?)
+                ?.isNotEmpty == true
+            ? json['discord_application_id'] as String
+            : defaultDiscordAppId,
         podcastSubscriptions: (json['podcast_subscriptions'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         podcastHistory: (json['podcast_history'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         urlNames: (json['url_names'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},

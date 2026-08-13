@@ -97,12 +97,12 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   void _initDiscordRpc() {
-    final enabled = ConfigService.instance.config.discordPresenceEnabled;
-    final appId = ConfigService.instance.config.discordApplicationId;
-    if (!enabled || appId.isEmpty) return;
+    final config = ConfigService.instance.config;
+    if (!config.discordPresenceEnabled) return;
     DiscordRpcService.instance.attach(
       enabled: true,
-      applicationId: appId,
+      applicationId: config.discordApplicationId,
+      onReady: _pushSmtcState,
     );
   }
 

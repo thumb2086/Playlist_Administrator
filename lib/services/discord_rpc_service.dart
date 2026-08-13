@@ -13,15 +13,20 @@ class DiscordRpcService {
   bool _initialized = false;
   bool _enabled = false;
   bool _connected = false;
+  RPCActivity? _pending;
 
   bool get usable => _initialized && _enabled;
 
   Future<void> attach({
     required bool enabled,
     required String applicationId,
+    void Function()? onReady,
   }) async {
     if (Platform.isWindows == false) return;
-    if (enabled == _enabled && _initialized) return;
+    if (enabled == _enabled && _initialized) {
+      if (onReady != null && _connected) onReady();
+      return;
+    }
 
     _enabled = enabled;
 
@@ -38,6 +43,8 @@ class DiscordRpcService {
         unawaited(
           FlutterDiscordRPC.instance.connect(autoRetry: true).then((_) {
             _connected = true;
+            if (onReady != null) onReady();
+            _pump();
           }).catchError((_) {
             _connected = false;
           }),
@@ -62,33 +69,43 @@ class DiscordRpcService {
     Duration? position,
   }) async {
     if (Platform.isWindows == false) return;
+    if (title.isEmpty) return;
+    final activity = RPCActivity(
+      details: title,
+      state: artist,
+      assets: RPCAssets(
+        largeImage: artworkUrl?.isNotEmpty == true
+            ? artworkUrl!
+            : "playlist-admin-logo",
+        largeText: album ?? '',
+      ),
+      timestamps: RPCTimestamps(
+        start: playing
+            ? DateTime.now().millisecondsSinceEpoch -
+                (position?.inMilliseconds ?? 0)
+            : null,
+      ),
+      activityType: ActivityType.listening,
+    );
+    _pending = activity;
     if (!usable || !_connected) return;
     if (!FlutterDiscordRPC.instance.isConnected) return;
-    if (title.isEmpty) return;
     try {
-      await FlutterDiscordRPC.instance.setActivity(
-        activity: RPCActivity(
-          details: title,
-          state: artist,
-          assets: RPCAssets(
-            largeImage: artworkUrl?.isNotEmpty == true
-                ? artworkUrl!
-                : "playlist-admin-logo",
-            largeText: album ?? '',
-          ),
-          timestamps: RPCTimestamps(
-            start: playing
-                ? DateTime.now().millisecondsSinceEpoch -
-                    (position?.inMilliseconds ?? 0)
-                : null,
-          ),
-          activityType: ActivityType.listening,
-        ),
-      );
+      await FlutterDiscordRPC.instance.setActivity(activity: activity);
+    } catch (_) {}
+  }
+
+  /// 連線完成後把最後一次狀態補送（避免連線前播放被吞掉）。
+  void _pump() {
+    if (!usable || !_connected || _pending == null) return;
+    if (!FlutterDiscordRPC.instance.isConnected) return;
+    try {
+      FlutterDiscordRPC.instance.setActivity(activity: _pending!);
     } catch (_) {}
   }
 
   Future<void> clear() async {
+    _pending = null;
     if (!usable) return;
     try {
       if (FlutterDiscordRPC.instance.isConnected) {
