@@ -277,6 +277,7 @@ class _PlayerPageState extends State<PlayerPage> {
       await _player.stop();
       await _player.play(DeviceFileSource(path));
       final stem = File(path).uri.pathSegments.last;
+      _currentArtworkUrl = '';
       final qIdx = _playQueue.indexOf(path);
       final sIdx = _songs.indexOf(path);
 setState(() {
@@ -339,6 +340,10 @@ setState(() {
     final fallback = await _resolveCoverUrl(stem);
     if (fallback != null) {
       _currentArtworkUrl = fallback;
+      if (mounted) setState(() {});
+      _pushSmtcState();
+    } else if (_currentArtworkUrl.isNotEmpty) {
+      _currentArtworkUrl = '';
       if (mounted) setState(() {});
       _pushSmtcState();
     }
