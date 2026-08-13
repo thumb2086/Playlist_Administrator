@@ -52,8 +52,22 @@ class FavoritesService {
 
   static String normalize(String p) => _norm(p);
 
-  static String _norm(String p) =>
-      p.replaceAll('\\', '/').toLowerCase();
+  static String _norm(String p) {
+    final segs = p.replaceAll('\\', '/').split('/');
+    final parts = <String>[];
+    for (final seg in segs) {
+      if (seg == '..') {
+        if (parts.isNotEmpty &&
+            parts.last != '..' &&
+            !parts.last.contains(':')) {
+          parts.removeLast();
+        }
+      } else if (seg.isNotEmpty && seg != '.') {
+        parts.add(seg);
+      }
+    }
+    return parts.join('/').toLowerCase();
+  }
 
   static Future<void> _write(Set<String> favs) async {
     final plAbs = Directory(ConfigService.instance.config.playlistsPath).absolute.path;
