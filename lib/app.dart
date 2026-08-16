@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'widgets/dark_theme.dart';
+import 'pages/home_page.dart';
+import 'pages/search_page.dart';
 import 'pages/library_page.dart';
 import 'pages/pipeline_page.dart';
 import 'pages/stats_page.dart';
@@ -12,6 +14,7 @@ import 'services/i18n.dart';
 import 'services/config_service.dart';
 import 'services/update_service.dart';
 import 'services/version_checker.dart';
+import 'services/spotify_session.dart';
 import 'widgets/update_dialog.dart';
 
 class PlaylistAdminApp extends StatefulWidget {
@@ -65,6 +68,8 @@ class _MainShellState extends State<MainShell> {
   late List<_NavItemData> _navItems;
 
   final _pages = const [
+    HomePage(),
+    SearchPage(),
     LibraryPage(),
     PlayerPage(),
     PipelinePage(),
@@ -123,6 +128,8 @@ class _MainShellState extends State<MainShell> {
   void _rebuildNav() {
     setState(() {
       _navItems = [
+        _NavItemData(Icons.home_outlined, Icons.home, '首頁'),
+        _NavItemData(Icons.search_outlined, Icons.search, '搜尋'),
         _NavItemData(Icons.library_music_outlined, Icons.library_music, t('app.sidebar.library')),
         _NavItemData(Icons.music_note_outlined, Icons.music_note, t('app.sidebar.player')),
         _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, t('app.sidebar.pipeline')),

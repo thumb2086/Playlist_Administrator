@@ -298,12 +298,12 @@ def add_metadata_to_file(file_path, info, song_name, log_func, config=None, enri
                 
         # --- NEW: Check for cached Spotify metadata to override yt-dlp ---
         try:
-            from utils.config import CONFIG_DIR
+            from utils.config import get_spotify_cache_dir
             from utils.helpers import sanitize_filename
             import json
             
             clean_filename = sanitize_filename(song_name)
-            cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+            cache_dir = get_spotify_cache_dir()
             meta_file = os.path.join(cache_dir, f"{clean_filename}.json")
             
             if os.path.exists(meta_file):
@@ -708,7 +708,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': effective_audio_format,
-            'preferredquality': '0' if effective_audio_format == 'flac' else '320',
+            'preferredquality': '0' if effective_audio_format == 'flac' else '0',
         }],
         'logger': YdlLogger(log_func, stats),
         'progress_hooks': [progress_hook],
@@ -924,7 +924,7 @@ def download_song(song_name, library_path, audio_format, log_func, file_list, st
                                     'postprocessors': [{
                                         'key': 'FFmpegExtractAudio',
                                         'preferredcodec': effective_audio_format,
-                                        'preferredquality': '0' if effective_audio_format == 'flac' else '320',
+                                        'preferredquality': '0' if effective_audio_format == 'flac' else '0',
                                     }],
                                     'logger': YdlLogger(log_func, stats),
                                     'progress_hooks': [progress_hook],

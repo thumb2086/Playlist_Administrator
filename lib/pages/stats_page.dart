@@ -6,6 +6,7 @@ import '../services/config_service.dart';
 import '../services/groq_service.dart';
 import '../services/i18n.dart';
 import '../services/history_recorder.dart';
+import '../services/playback_history.dart';
 import '../widgets/dark_theme.dart';
 
 class StatsPage extends StatefulWidget {
@@ -15,11 +16,11 @@ class StatsPage extends StatefulWidget {
 }
 
 class _StatsPageState extends State<StatsPage> {
-  int _mp3 = 0, _m4a = 0, _flac = 0, _txt = 0, _podcast = 0, _playlists = 0, _entries = 0, _dual = 0, _duplicates = 0;
+  int _mp3 = 0, _flac = 0, _txt = 0, _podcast = 0, _playlists = 0, _entries = 0, _dual = 0, _duplicates = 0;
   double _sizeGb = 0, _savedGb = 0;
   bool _loading = false;
   List<Snapshot> _history = [];
-  List<double> _m4aLufs = [], _mp3Lufs = [];
+  List<double> _mp3Lufs = [];
   bool _lufsReady = false;
 
   @override
@@ -37,7 +38,7 @@ class _StatsPageState extends State<StatsPage> {
       final pl = ConfigService.instance.config.playlistsPath;
       int mp3 = 0, m4a = 0, flac = 0, txt = 0, podcast = 0;
 
-      final podcastDir = Directory('${ConfigService.instance.config.basePath}\\podcast_downloads');
+      final podcastDir = Directory('${ConfigService.instance.config.podcastsPath}');
       if (await podcastDir.exists()) {
         await for (final e in podcastDir.list(recursive: true, followLinks: false)) {
           if (e is File) {
@@ -69,7 +70,6 @@ class _StatsPageState extends State<StatsPage> {
               savedGb += lenGb;
             }
             if (low.endsWith('.mp3')) { mp3++; nameExts[stem]!.add('mp3'); }
-            else if (low.endsWith('.m4a')) { m4a++; nameExts[stem]!.add('m4a'); }
             else if (low.endsWith('.flac')) { flac++; nameExts[stem]!.add('flac'); }
             else if (low.endsWith('.txt')) { txt++; nameExts[stem]!.add('txt'); }
           }
@@ -90,7 +90,7 @@ class _StatsPageState extends State<StatsPage> {
           }
         }
       }
-      setState(() { _mp3 = mp3; _m4a = m4a; _flac = flac; _txt = txt; _podcast = podcast; _playlists = plCount; _entries = entries; _dual = dual; _sizeGb = size; _savedGb = savedGb; _duplicates = duplicates; _loading = false; });
+      setState(() { _mp3 = mp3; _flac = flac; _txt = txt; _podcast = podcast; _playlists = plCount; _entries = entries; _dual = dual; _sizeGb = size; _savedGb = savedGb; _duplicates = duplicates; _loading = false; });
     } catch (_) { setState(() => _loading = false); }
     _loadLufsCache();
   }
@@ -105,15 +105,14 @@ class _StatsPageState extends State<StatsPage> {
         return json.values.whereType<num>().map((e) => e.toDouble()).toList();
       } catch (_) { return []; }
     }
-    final m4a = loadOne('m4a');
     final mp3 = loadOne('mp3');
-    if (mounted) setState(() { _m4aLufs = m4a; _mp3Lufs = mp3; _lufsReady = true; });
+    if (mounted) setState(() { _mp3Lufs = mp3; _lufsReady = true; });
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    final total = _mp3 + _m4a + _flac + _txt;
+    final total = _mp3 + _flac + _txt;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
@@ -123,8 +122,6 @@ class _StatsPageState extends State<StatsPage> {
           Expanded(child: _MetricCard(t('stats.total_files'), '$total', Icons.audio_file_rounded, Colors.white, _loading)),
           const SizedBox(width: 10),
           Expanded(child: _MetricCard(t('stats.mp3'), '$_mp3', Icons.music_note_rounded, const Color(0xFF4FC3F7), _loading)),
-          const SizedBox(width: 10),
-          Expanded(child: _MetricCard(t('stats.m4a'), '$_m4a', Icons.music_video_rounded, const Color(0xFFFFB74D), _loading)),
           const SizedBox(width: 10),
           Expanded(child: _MetricCard(t('stats.flac'), '$_flac', Icons.library_music_rounded, const Color(0xFFCE93D8), _loading)),
           const SizedBox(width: 10),
@@ -174,7 +171,6 @@ class _StatsPageState extends State<StatsPage> {
                     child: PieChart(PieChartData(
                       sections: [
                         if (_mp3 > 0) PieChartSectionData(value: _mp3.toDouble(), color: const Color(0xFF4FC3F7), title: '', radius: 50),
-                        if (_m4a > 0) PieChartSectionData(value: _m4a.toDouble(), color: const Color(0xFFFFB74D), title: '', radius: 50),
                         if (_flac > 0) PieChartSectionData(value: _flac.toDouble(), color: const Color(0xFFCE93D8), title: '', radius: 50),
                         if (_txt > 0) PieChartSectionData(value: _txt.toDouble(), color: const Color(0xFFA5D6A7), title: '', radius: 50),
                       ],
@@ -189,20 +185,17 @@ class _StatsPageState extends State<StatsPage> {
                   child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
                     _Legend('MP3', '$_mp3', const Color(0xFF4FC3F7)),
                     const SizedBox(height: 6),
-                    _Legend('M4A', '$_m4a', const Color(0xFFFFB74D)),
-                    const SizedBox(height: 6),
                     _Legend('FLAC', '$_flac', const Color(0xFFCE93D8)),
                     const SizedBox(height: 6),
                     _Legend('TXT', '$_txt', const Color(0xFFA5D6A7)),
                   ]),
                 ),
               ]),
-              if (_txt > 0 || _mp3 > 0 || _m4a > 0 || _flac > 0) ...[
+              if (_txt > 0 || _mp3 > 0 || _flac > 0) ...[
                 const Divider(height: 24),
                 _buildTextDistribution(),
                 if (_lufsReady) ...[
                   if (_mp3Lufs.isNotEmpty) _buildLufsSection('MP3', _mp3Lufs),
-                  if (_m4aLufs.isNotEmpty) _buildLufsSection('M4A', _m4aLufs),
                 ],
               ],
             ]),
@@ -221,6 +214,168 @@ class _StatsPageState extends State<StatsPage> {
           ),
         ),
         const SizedBox(height: 24),
+        _buildPlaybackStats(),
+        const SizedBox(height: 14),
+        _buildDownloadStats(),
+        const SizedBox(height: 24),
+      ]),
+    );
+  }
+
+  Widget _buildDownloadStats() {
+    final cfg = ConfigService.instance.config;
+    final f = File('${cfg.cachePath}\\downloads_log.json');
+    if (!f.existsSync()) return const SizedBox.shrink();
+    Map<String, dynamic> log = {};
+    try {
+      log = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+    } catch (_) {
+      return const SizedBox.shrink();
+    }
+    final runs = (log['runs'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    if (runs.isEmpty) return const SizedBox.shrink();
+    final totalOk = runs.fold<int>(0, (s, r) => s + ((r['ok'] as num?)?.toInt() ?? 0));
+    final totalFail = runs.fold<int>(0, (s, r) => s + ((r['fail'] as num?)?.toInt() ?? 0));
+    final totalAll = totalOk + totalFail;
+    final rate = totalAll > 0 ? (totalOk / totalAll * 100).toStringAsFixed(1) : '0';
+    final last = runs.last;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card, borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('⬇️ 下載統計', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: _MiniStat('總下載', '$totalAll', Icons.download_rounded)),
+          const SizedBox(width: 8),
+          Expanded(child: _MiniStat('成功', '$totalOk', Icons.check_circle_outline)),
+          const SizedBox(width: 8),
+          Expanded(child: _MiniStat('失敗', '$totalFail', Icons.error_outline)),
+          const SizedBox(width: 8),
+          Expanded(child: _MiniStat('成功率', '$rate%', Icons.percent_rounded)),
+        ]),
+        const SizedBox(height: 12),
+        ...runs.reversed.take(10).map((r) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(children: [
+                Expanded(
+                  child: Text('${(r['time'] as String? ?? '').substring(0, 16).replaceAll('T', ' ')}',
+                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted, fontFamily: 'Consolas')),
+                ),
+                Text('${r['ok']}/${r['total']} (${r['success_rate']}%)',
+                    style: const TextStyle(fontSize: 11)),
+              ]),
+            )),
+      ]),
+    );
+  }
+
+  int _historyWindow = 0; // 0 = all time, 7, 30
+
+  Widget _buildPlaybackStats() {
+    final ph = PlaybackHistory.instance;
+    final window = _historyWindow == 0 ? null : _historyWindow;
+    final top = ph.topTracks(windowDays: window, limit: 10);
+    final unique = ph.uniqueCount(windowDays: window);
+    final mins = ph.totalMinutes(windowDays: window);
+    final recent = ph.recent(limit: 8);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card, borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text('🎧 播放統計', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          const Spacer(),
+          SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 0, label: Text('全部')),
+              ButtonSegment(value: 7, label: Text('7天')),
+              ButtonSegment(value: 30, label: Text('30天')),
+            ],
+            selected: {_historyWindow},
+            onSelectionChanged: (s) => setState(() => _historyWindow = s.first),
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: _MiniStat('聆聽分鐘', '$mins', Icons.timer_outlined)),
+          const SizedBox(width: 8),
+          Expanded(child: _MiniStat('唯一曲目', '${unique.tracks}', Icons.music_note_rounded)),
+          const SizedBox(width: 8),
+          Expanded(child: _MiniStat('唯一藝人', '${unique.artists}', Icons.person_outline_rounded)),
+        ]),
+        if (top.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          const Text('最常播放 Top 10', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          ...top.asMap().entries.map((e) {
+            final i = e.key + 1;
+            final t = e.value;
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(children: [
+                SizedBox(width: 24, child: Text('$i', style: const TextStyle(color: AppColors.textMuted, fontSize: 12, fontFamily: 'Consolas'))),
+                Expanded(
+                  child: Text('${t.title}${t.artist.isNotEmpty ? ' - ${t.artist}' : ''}',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                ),
+                Text('${t.count} 次', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+              ]),
+            );
+          }),
+        ],
+        if (recent.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          const Text('最近播放', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          ...recent.map((r) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(children: [
+                  Expanded(
+                    child: Text('${r.title}${r.artist.isNotEmpty ? ' - ${r.artist}' : ''}',
+                        maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                  ),
+                  Text('${r.playedAt.month}/${r.playedAt.day} ${r.playedAt.hour}:${r.playedAt.minute.toString().padLeft(2, '0')}',
+                      style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                ]),
+              )),
+        ],
+        if (ph.entries.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('尚無播放紀錄 — 播放歌曲超過一半時會自動記錄',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+          ),
+      ]),
+    );
+  }
+
+  Widget _MiniStat(String label, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF080808),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(children: [
+        Icon(icon, color: AppColors.accent, size: 16),
+        const SizedBox(width: 8),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+        ]),
       ]),
     );
   }
@@ -229,7 +384,7 @@ class _StatsPageState extends State<StatsPage> {
     final spots = <FlSpot>[];
     double minY = double.infinity, maxY = 0;
     for (int i = 0; i < _history.length; i++) {
-      final v = (_history[i].mp3 + _history[i].m4a + _history[i].flac).toDouble();
+      final v = (_history[i].mp3 + _history[i].flac).toDouble();
       spots.add(FlSpot(i.toDouble(), v));
       if (v < minY) minY = v; if (v > maxY) maxY = v;
     }
@@ -266,7 +421,6 @@ class _StatsPageState extends State<StatsPage> {
   Widget _buildTextDistribution() {
     final items = <MapEntry<String, int>>[];
     if (_mp3 > 0) items.add(MapEntry('MP3', _mp3));
-    if (_m4a > 0) items.add(MapEntry('M4A', _m4a));
     if (_flac > 0) items.add(MapEntry('FLAC', _flac));
     if (_txt > 0) items.add(MapEntry('TXT', _txt));
     final totalItems = items.fold(0, (sum, e) => sum + e.value);

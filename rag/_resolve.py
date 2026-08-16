@@ -22,15 +22,15 @@ def find_base() -> Path:
                 return Path(bp)
     except Exception:
         pass
-    return Path(r"C:\Users\CPXru\Music\Spotube")
+    return Path(r"C:\Users\CPXru\Music\playlist-admin")
 
 
 def podcast_downloads_dir() -> Path:
-    return find_base() / "podcast_downloads"
+    return find_base() / "podcasts"
 
 
 def rag_data_dir() -> Path:
-    return find_base() / "podcast_downloads" / "podcast_rag"
+    return find_base() / "cache" / "podcast"
 
 
 def chroma_db_dir() -> Path:

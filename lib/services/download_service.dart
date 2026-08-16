@@ -35,7 +35,7 @@ class DownloadService {
 
   Future<void> downloadSong({
     required String songName,
-    required String libraryPath,
+    String? libraryPath,
     String format = 'mp3',
     required void Function(String log) onLog,
     required void Function(double progress) onProgress,
@@ -43,11 +43,15 @@ class DownloadService {
     final bridge = _bridgePath;
     if (bridge.isEmpty) throw Exception('Base path not configured');
 
+    // Download to music library directory
+    final cfg = ConfigService.instance.config;
+    final effectivePath = libraryPath ?? cfg.musicPath;
+
     final env = Map<String, String>.from(Platform.environment);
     env['PYTHONIOENCODING'] = 'utf-8';
     final proc = await Process.start(
       _pythonPath,
-      [bridge, 'download-song', songName, libraryPath, format],
+      [bridge, 'download-song', songName, effectivePath, format],
       runInShell: true,
       workingDirectory: ConfigService.instance.config.basePath,
       environment: env,

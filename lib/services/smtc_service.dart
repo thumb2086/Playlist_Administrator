@@ -1,7 +1,7 @@
 import 'package:flutter/services.dart';
 
 /// Bridge to the native Windows SMTC controller (system media overlay,
-/// media keys). Works only on Windows; no-ops elsewhere.
+/// media keys, timeline seek). Works only on Windows; no-ops elsewhere.
 class SmtcService {
   static final SmtcService instance = SmtcService._();
   SmtcService._();
@@ -12,16 +12,18 @@ class SmtcService {
   VoidCallback? _onNext;
   VoidCallback? _onPrevious;
   VoidCallback? _onStop;
+  void Function(Duration position)? _onSeek;
   bool _attached = false;
 
   bool get isAttached => _attached;
 
-  /// Register handlers driven by the OS media buttons.
+  /// Register handlers driven by the OS media buttons and timeline.
   void attach({
     required VoidCallback onPlayPause,
     required VoidCallback onNext,
     required VoidCallback onPrevious,
     VoidCallback? onStop,
+    void Function(Duration position)? onSeek,
   }) {
     if (_attached) return;
     _attached = true;
@@ -29,6 +31,7 @@ class SmtcService {
     _onNext = onNext;
     _onPrevious = onPrevious;
     _onStop = onStop;
+    _onSeek = onSeek;
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
         case 'onButton':
@@ -48,18 +51,25 @@ class SmtcService {
               break;
           }
           break;
+        case 'onSeek':
+          final args = call.arguments as Map? ?? const {};
+          final ms = (args['positionMs'] as num?)?.toInt() ?? 0;
+          _onSeek?.call(Duration(milliseconds: ms));
+          break;
       }
       return null;
     });
   }
 
-  /// Push metadata + playback state to the Windows media overlay.
+  /// Push metadata + playback state + timeline to the Windows media overlay.
   Future<void> update({
     String? title,
     String? artist,
     String? album,
     String? artworkUrl,
     bool playing = false,
+    Duration? position,
+    Duration? duration,
   }) async {
     if (!_attached) return;
     try {
@@ -69,6 +79,8 @@ class SmtcService {
         'album': album ?? '',
         'artworkUrl': artworkUrl ?? '',
         'playing': playing,
+        'positionMs': position?.inMilliseconds ?? 0,
+        'endTimeMs': duration?.inMilliseconds ?? 0,
       });
     } catch (_) {}
   }

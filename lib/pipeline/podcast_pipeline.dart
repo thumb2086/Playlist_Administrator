@@ -21,7 +21,7 @@ class PodcastPipeline {
   }) : state = state ?? PipelineState();
 
   String get _cachePath =>
-      '${ConfigService.instance.config.basePath}\\podcast_processed_cache.json';
+      '${ConfigService.instance.config.cachePath}\\podcast\\podcast_processed_cache.json';
 
   Map<String, Map<String, dynamic>> _loadCache() {
     try {

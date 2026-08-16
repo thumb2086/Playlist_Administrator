@@ -11,7 +11,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController _basePathCtrl, _workersCtrl, _ffmpegCtrl,
-      _spotubeDlCtrl, _lyricsFolderCtrl, _discordAppIdCtrl;
+      _lyricsFolderCtrl, _discordAppIdCtrl;
 
   void _onConfigChanged() { if (mounted) setState(() {}); }
 
@@ -22,7 +22,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _basePathCtrl = TextEditingController(text: c.basePath);
     _workersCtrl = TextEditingController(text: c.maxThreads.toString());
     _ffmpegCtrl = TextEditingController(text: c.ffmpegPath);
-    _spotubeDlCtrl = TextEditingController(text: c.spotubeDownloadPath);
     _lyricsFolderCtrl = TextEditingController(text: c.lyricsFolderName);
     _discordAppIdCtrl = TextEditingController(text: c.discordApplicationId);
     I18N.instance.addListener(_onConfigChanged);
@@ -34,8 +33,7 @@ class _SettingsPageState extends State<SettingsPage> {
     I18N.instance.removeListener(_onConfigChanged);
     ConfigService.instance.removeListener(_onConfigChanged);
     _basePathCtrl.dispose(); _workersCtrl.dispose(); _ffmpegCtrl.dispose();
-    _spotubeDlCtrl.dispose(); _lyricsFolderCtrl.dispose();
-    _discordAppIdCtrl.dispose();
+    _lyricsFolderCtrl.dispose(); _discordAppIdCtrl.dispose();
     super.dispose();
   }
 
@@ -44,7 +42,6 @@ class _SettingsPageState extends State<SettingsPage> {
     c.basePath = _basePathCtrl.text;
     c.maxThreads = int.tryParse(_workersCtrl.text) ?? 4;
     c.ffmpegPath = _ffmpegCtrl.text;
-    c.spotubeDownloadPath = _spotubeDlCtrl.text;
     c.lyricsFolderName = _lyricsFolderCtrl.text.trim().isEmpty ? 'Lyrics' : _lyricsFolderCtrl.text.trim();
     c.discordApplicationId = _discordAppIdCtrl.text.trim();
     ConfigService.instance.save();
@@ -58,7 +55,7 @@ class _SettingsPageState extends State<SettingsPage> {
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       child: ListView(children: [
         _Section(t('settings.general'), [
-          _Field(t('settings.library_path'), _basePathCtrl, 'C:\\Users\\CPXru\\Music\\Spotube'),
+          _Field(t('settings.library_path'), _basePathCtrl, 'C:\\Users\\CPXru\\Music\\playlist-admin'),
           _Field(t('settings.thread_count'), _workersCtrl, '4'),
           _Field(t('settings.ffmpeg_path'), _ffmpegCtrl, 'bin/ffmpeg.exe'),
           // Language
@@ -81,12 +78,6 @@ class _SettingsPageState extends State<SettingsPage> {
           _Toggle(t('settings.metadata_enrich'), c.enableMetadataEnrichment, (v) { c.enableMetadataEnrichment = v; _save(); setState(() {}); }),
           _Toggle(t('settings.auto_update_check'), c.autoUpdateCheck, (v) { c.autoUpdateCheck = v; _save(); setState(() {}); }),
           _Toggle('自動下載更新', c.autoDownloadUpdate, (v) { c.autoDownloadUpdate = v; _save(); setState(() {}); }),
-        ]),
-        const SizedBox(height: 12),
-        _Section(t('settings.spotube'), [
-          _Field(t('settings.spotube_dl_path'), _spotubeDlCtrl, r'%USERPROFILE%\Downloads\Spotube'),
-          _Toggle(t('settings.exact_match'), c.spotubeExactMatch, (v) { c.spotubeExactMatch = v; _save(); setState(() {}); }),
-          _Toggle(t('settings.convert_matched_only'), c.spotubeConvertMatchedOnly, (v) { c.spotubeConvertMatchedOnly = v; _save(); setState(() {}); }),
         ]),
         const SizedBox(height: 12),
         _Section(t('settings.lyrics_section'), [

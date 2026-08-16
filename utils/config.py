@@ -113,15 +113,8 @@ def load_config():
         'dab_email': "",
         'dab_password': "",
         'auto_metadata': False,
-        'spotube_folder_name': 'spotube',
-        'spotube_exact_match': True,  # Use simple filename matching for Spotube downloads
-        'spotube_convert_matched_only': False,  # Only convert M4A files that match playlist entries
-        'spotube_strict_matching': True,  # Strict filename matching for M4A->MP3 conversion (True=exact only, False=allow fuzzy)
         'debug_mode': False,  # Enable debug output for troubleshooting
-        'spotube_exe_path': '',  # Path to Spotube.exe (auto-detect if empty)
-        'spotube_download_path': '',  # Where Spotube saves downloads (default: ~/Downloads/Spotube)
-        'spotube_coords': {},  # UI coordinate overrides for Spotube automation
-        'search_names': {},  # Override search terms for specific playlists (e.g. {"日本流行樂合輯": "J-Pop Mix"})
+        'search_names': {},  # Override search terms for specific playlists (e.g. {"?�本流�?樂�?�?: "J-Pop Mix"})
         'podcast_rag_in_music': False,  # Run Podcast RAG index inside the music pipeline (default: off)
     }
     for key, value in defaults.items():
@@ -155,7 +148,7 @@ def derive_paths(config):
             return False
 
         lower_entries = {e.lower() for e in entries}
-        if 'spotube' in lower_entries:
+        if 'music' in lower_entries:
             return True
         if {'m4a', 'mp3'} & lower_entries and 'playlists' in lower_entries:
             return True
@@ -168,13 +161,11 @@ def derive_paths(config):
                 return True
         return False
 
-    library_root = base_path if _looks_like_music_root(base_path) else os.path.join(base_path, 'Music')
+    library_root = base_path if _looks_like_music_root(base_path) else os.path.join(base_path, 'music')
     config['library_path'] = os.path.normpath(library_root)
-    config['playlists_path'] = os.path.normpath(os.path.join(base_path, 'Playlists'))
-    config['export_path'] = os.path.normpath(os.path.join(base_path, 'USB_Output'))
-    config['lyrics_path'] = os.path.normpath(os.path.join(library_root, config.get('lyrics_folder_name', 'Lyrics')))
-    if os.path.basename(base_path).lower() == 'spotube' and config.get('spotube_folder_name', 'spotube') == 'spotube':
-        config['spotube_folder_name'] = ''
+    config['playlists_path'] = os.path.normpath(os.path.join(base_path, 'playlists'))
+    config['export_path'] = os.path.normpath(os.path.join(base_path, 'exports'))
+    config['lyrics_path'] = os.path.normpath(os.path.join(base_path, config.get('lyrics_folder_name', 'Lyrics')))
     return config
 
 def get_lyrics_dir(config):
@@ -198,6 +189,20 @@ def get_data_file(filename):
     if not os.path.exists(CONFIG_DIR):
         os.makedirs(CONFIG_DIR)
     return os.path.join(CONFIG_DIR, filename)
+
+
+def get_spotify_cache_dir(config=None):
+    """Spotify metadata cache lives under base_path/cache/spotify."""
+    config = config or load_config()
+    base = config.get('base_path') or CONFIG_DIR
+    return os.path.join(base, 'cache', 'spotify')
+
+def get_spotify_cache_dir(config=None):
+    """Spotify metadata cache lives under base_path/cache/spotify."""
+    config = config or load_config()
+    base = config.get('base_path') or CONFIG_DIR
+    return os.path.join(base, 'cache', 'spotify')
+
 
 def prompt_and_set_base_path(config):
     from utils.i18n import _

@@ -9,12 +9,7 @@ class AppConfig {
   int maxThreads;
   bool debugMode;
   bool enableMetadataEnrichment;
-  bool spotubeExactMatch;
-  bool spotubeConvertMatchedOnly;
   String ffmpegPath;
-  String spotubeExePath;
-  String spotubeDownloadPath;
-  String spotubeFolderName;
   String lyricsFolderName;
   bool autoUpdateCheck;
   bool autoDownloadUpdate;
@@ -27,11 +22,15 @@ class AppConfig {
   int groqConcurrency;
   bool discordPresenceEnabled;
   String discordApplicationId;
+  double volume;
+  bool crossfadeEnabled;
+  double crossfadeSeconds;
+  bool streamCacheEnabled;
+  int streamCacheMaxMb;
   Map<String, String> podcastSubscriptions;
   Map<String, String> podcastHistory;
   Map<String, String> urlNames;
   Map<String, String> searchNames;
-  Map<String, List<int>> spotubeCoords;
   Map<String, String> lastUpdated;
   Map<String, double> lyricsOffsets;
 
@@ -42,12 +41,7 @@ class AppConfig {
     this.maxThreads = 4,
     this.debugMode = false,
     this.enableMetadataEnrichment = false,
-    this.spotubeExactMatch = true,
-    this.spotubeConvertMatchedOnly = false,
     this.ffmpegPath = 'bin/ffmpeg.exe',
-    this.spotubeExePath = '',
-    this.spotubeDownloadPath = '',
-    this.spotubeFolderName = 'spotube',
     this.lyricsFolderName = 'Lyrics',
     this.autoUpdateCheck = true,
     this.autoDownloadUpdate = false,
@@ -60,53 +54,48 @@ class AppConfig {
     this.groqConcurrency = 3,
     this.discordPresenceEnabled = true,
     this.discordApplicationId = defaultDiscordAppId,
+    this.volume = 0.7,
+    this.crossfadeEnabled = false,
+    this.crossfadeSeconds = 3.0,
+    this.streamCacheEnabled = false,
+    this.streamCacheMaxMb = 2048,
     Map<String, String>? podcastSubscriptions,
     Map<String, String>? podcastHistory,
     Map<String, String>? urlNames,
     Map<String, String>? searchNames,
-    Map<String, List<int>>? spotubeCoords,
     Map<String, String>? lastUpdated,
     Map<String, double>? lyricsOffsets,
   })  : podcastSubscriptions = podcastSubscriptions ?? {},
         podcastHistory = podcastHistory ?? {},
         urlNames = urlNames ?? {},
         searchNames = searchNames ?? {},
-        spotubeCoords = spotubeCoords ?? {},
         lastUpdated = lastUpdated ?? {},
         lyricsOffsets = lyricsOffsets ?? {};
 
   List<PlaylistConfig> get playlists =>
       urlNames.entries.map((e) => PlaylistConfig(url: e.key, name: e.value)).toList();
 
-  String get libraryPath {
-    final music = '$basePath${Platform.pathSeparator}Music';
-    if (Directory(music).existsSync()) return music;
+  /// Music library root — the single directory for all audio files.
+  String get musicPath {
+    final p = '$basePath${Platform.pathSeparator}music';
+    if (Directory(p).existsSync()) return p;
+    final legacy = '$basePath${Platform.pathSeparator}native';
+    if (Directory(legacy).existsSync()) return legacy;
     return basePath;
   }
-  String get playlistsPath => '$basePath${Platform.pathSeparator}Playlists';
-  String get exportPath => '$basePath${Platform.pathSeparator}USB_Output';
-  String get m4aPath {
-    final p = '$libraryPath${Platform.pathSeparator}m4a';
-    if (!Directory(p).existsSync() && Directory('$basePath${Platform.pathSeparator}m4a').existsSync()) {
-      return '$basePath${Platform.pathSeparator}m4a';
-    }
-    return p;
-  }
-  String get mp3Path {
-    final p = '$libraryPath${Platform.pathSeparator}mp3';
-    if (!Directory(p).existsSync() && Directory('$basePath${Platform.pathSeparator}mp3').existsSync()) {
-      return '$basePath${Platform.pathSeparator}mp3';
-    }
-    return p;
-  }
-  String get lyricsPath => '$libraryPath${Platform.pathSeparator}$lyricsFolderName';
 
-  String get resolvedSpotubeDownloadPath {
-    if (spotubeDownloadPath.isNotEmpty) return spotubeDownloadPath;
-    final userProfile = Platform.environment['USERPROFILE'] ?? 'C:\\Users\\Default';
-    final folder = spotubeFolderName.isNotEmpty ? spotubeFolderName : 'spotube';
-    return '$userProfile\\Downloads\\$folder';
-  }
+  /// Legacy alias — same as musicPath.
+  String get libraryPath => musicPath;
+
+  String get playlistsPath => '$basePath${Platform.pathSeparator}playlists';
+  String get exportPath => '$basePath${Platform.pathSeparator}exports';
+  String get lyricsPath => '$basePath${Platform.pathSeparator}$lyricsFolderName';
+  String get cachePath => '$basePath${Platform.pathSeparator}cache';
+  String get spotifyCachePath => '$cachePath${Platform.pathSeparator}spotify';
+  String get lufsCachePath => '$cachePath${Platform.pathSeparator}lufs';
+  String get streamCachePath => '$cachePath${Platform.pathSeparator}stream';
+  String get podcastsPath => '$basePath${Platform.pathSeparator}podcasts';
+  String get toolsPath => '$basePath${Platform.pathSeparator}tools';
 
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
         basePath: json['base_path'] as String? ?? '',
@@ -115,12 +104,7 @@ class AppConfig {
         maxThreads: json['max_threads'] as int? ?? 4,
         debugMode: json['debug_mode'] as bool? ?? false,
         enableMetadataEnrichment: json['enable_metadata_enrichment'] as bool? ?? false,
-        spotubeExactMatch: json['spotube_exact_match'] as bool? ?? true,
-        spotubeConvertMatchedOnly: json['spotube_convert_matched_only'] as bool? ?? false,
         ffmpegPath: json['ffmpeg_path'] as String? ?? 'bin/ffmpeg.exe',
-        spotubeExePath: json['spotube_exe_path'] as String? ?? '',
-        spotubeDownloadPath: json['spotube_download_path'] as String? ?? '',
-        spotubeFolderName: json['spotube_folder_name'] as String? ?? 'spotube',
         lyricsFolderName: json['lyrics_folder_name'] as String? ?? 'Lyrics',
         autoUpdateCheck: json['auto_update_check'] as bool? ?? true,
         autoDownloadUpdate: json['auto_download_update'] as bool? ?? false,
@@ -136,12 +120,15 @@ class AppConfig {
                 ?.isNotEmpty == true
             ? json['discord_application_id'] as String
             : defaultDiscordAppId,
+        volume: (json['volume'] as num?)?.toDouble() ?? 0.7,
+        crossfadeEnabled: json['crossfade_enabled'] as bool? ?? false,
+        crossfadeSeconds: (json['crossfade_seconds'] as num?)?.toDouble() ?? 3.0,
+        streamCacheEnabled: json['stream_cache_enabled'] as bool? ?? false,
+        streamCacheMaxMb: json['stream_cache_max_mb'] as int? ?? 2048,
         podcastSubscriptions: (json['podcast_subscriptions'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         podcastHistory: (json['podcast_history'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         urlNames: (json['url_names'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         searchNames: (json['search_names'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
-        spotubeCoords: (json['spotube_coords'] as Map<String, dynamic>?)?.map(
-                (k, v) => MapEntry(k, (v as List<dynamic>).cast<int>())) ?? {},
         lastUpdated: (json['last_updated'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         lyricsOffsets: (json['lyrics_offsets'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, (v as num).toDouble())) ?? {},
       );
@@ -153,12 +140,7 @@ class AppConfig {
         'max_threads': maxThreads,
         'debug_mode': debugMode,
         'enable_metadata_enrichment': enableMetadataEnrichment,
-        'spotube_exact_match': spotubeExactMatch,
-        'spotube_convert_matched_only': spotubeConvertMatchedOnly,
         'ffmpeg_path': ffmpegPath,
-        'spotube_exe_path': spotubeExePath,
-        'spotube_download_path': spotubeDownloadPath,
-        'spotube_folder_name': spotubeFolderName,
         'lyrics_folder_name': lyricsFolderName,
         'auto_update_check': autoUpdateCheck,
         'auto_download_update': autoDownloadUpdate,
@@ -171,11 +153,15 @@ class AppConfig {
         'groq_concurrency': groqConcurrency,
         'discord_presence_enabled': discordPresenceEnabled,
         'discord_application_id': discordApplicationId,
+        'volume': volume,
+        'crossfade_enabled': crossfadeEnabled,
+        'crossfade_seconds': crossfadeSeconds,
+        'stream_cache_enabled': streamCacheEnabled,
+        'stream_cache_max_mb': streamCacheMaxMb,
         'podcast_subscriptions': podcastSubscriptions,
         'podcast_history': podcastHistory,
         'url_names': urlNames,
         'search_names': searchNames,
-        'spotube_coords': spotubeCoords.map((k, v) => MapEntry(k, v)),
         'last_updated': lastUpdated,
         'lyrics_offsets': lyricsOffsets,
       };

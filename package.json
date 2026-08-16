@@ -1,7 +1,7 @@
 {
   "name": "playlist-admin",
   "version": "2.7.15",
-  "description": "playlist-admin CLI - thin launcher for the Flutter app engine (pipeline, podcast, spotube) + podcast RAG query",
+  "description": "playlist-admin CLI - thin launcher for the Flutter app engine (pipeline, podcast) + podcast RAG query",
   "type": "module",
   "bin": {
     "playlist-admin": "./cli/index.js"
@@ -9,11 +9,7 @@
   "scripts": {
     "pipeline": "node cli/index.js pipeline",
     "podcast": "node cli/index.js podcast",
-    "status": "node cli/index.js status",
-    "spotube-download": "node cli/index.js spotube-download",
-    "spotube-download-all": "node cli/index.js spotube-download-all",
-    "spotube-move": "node cli/index.js spotube-move",
-    "spotube-cleanup": "node cli/index.js spotube-cleanup"
+    "status": "node cli/index.js status"
   },
   "files": [
     "cli/index.js",

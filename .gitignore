@@ -27,3 +27,8 @@ music/
 *.pyc
 __pycache__/
 .venv/
+
+tools/_yt_pick_cache.json
+# vendored webview_windows build artifacts
+vendor/webview_windows/build/
+

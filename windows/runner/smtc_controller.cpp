@@ -67,6 +67,9 @@ struct SmtcControllerImpl {
   winrt::MediaPlayer player = nullptr;
   winrt::SystemMediaTransportControls smtc = nullptr;
   winrt::event_token buttonToken{};
+  winrt::event_token seekToken{};
+  // Last seek position requested from the OS, posted to the UI thread.
+  int64_t pendingSeekMs = 0;
 };
 
 // Button codes posted from the SMTC event thread to the UI thread.
@@ -75,6 +78,7 @@ enum {
   kMediaButtonNext = 2,
   kMediaButtonPrevious = 3,
   kMediaButtonStop = 4,
+  kMediaSeek = 5,
 };
 
 SmtcController::SmtcController(flutter::BinaryMessenger* messenger, HWND window)
@@ -128,6 +132,19 @@ SmtcController::SmtcController(flutter::BinaryMessenger* messenger, HWND window)
           }
           ::PostMessageW(window_, WM_APP, code, 0);
         });
+
+    // Timeline seek: when the user drags the progress bar in the media
+    // flyout, the OS asks for a new playback position.
+    impl_->seekToken = impl_->smtc.PlaybackPositionChangeRequested(
+        [this](winrt::SystemMediaTransportControls const&,
+               winrt::PlaybackPositionChangeRequestedEventArgs const& evt) {
+          const auto requested = evt.RequestedPlaybackPosition();
+          // TimeSpan is a chrono duration with 100ns ticks.
+          impl_->pendingSeekMs =
+              std::chrono::duration_cast<std::chrono::milliseconds>(requested)
+                  .count();
+          ::PostMessageW(window_, WM_APP, kMediaSeek, 0);
+        });
     SmtcLog("SmtcController::init OK");
   } catch (const winrt::hresult_error& e) {
     SmtcLog(std::string("SmtcController::init FAILED: ") +
@@ -141,6 +158,7 @@ SmtcController::~SmtcController() {
   if (impl_->smtc) {
     try {
       impl_->smtc.ButtonPressed(impl_->buttonToken);
+      impl_->smtc.PlaybackPositionChangeRequested(impl_->seekToken);
       impl_->smtc.IsEnabled(false);
     } catch (...) {
     }
@@ -154,6 +172,16 @@ SmtcController::~SmtcController() {
 }
 
 void SmtcController::HandleSystemMediaButton(int buttonCode) {
+  if (buttonCode == kMediaSeek) {
+    // Send seek position as a separate channel event with ms value.
+    flutter::EncodableMap payload;
+    payload[flutter::EncodableValue("positionMs")] =
+        flutter::EncodableValue(impl_->pendingSeekMs);
+    channel_->InvokeMethod(
+        "onSeek",
+        std::make_unique<flutter::EncodableValue>(payload));
+    return;
+  }
   SendButtonEvent([&]() -> std::string {
     switch (buttonCode) {
       case kMediaButtonPlayPause:
@@ -231,6 +259,30 @@ void SmtcController::ApplyUpdate(const flutter::EncodableMap& map) {
     const std::wstring artworkUrl = getStr("artworkUrl");
     const bool playing = getBool("playing", false);
 
+    // Timeline: positionMs/endTimeMs let the OS media flyout render a
+    // progress bar with a draggable seek thumb.
+    auto getInt = [&map](const char* key, int64_t def) -> int64_t {
+      auto it = map.find(flutter::EncodableValue(key));
+      if (it == map.end()) {
+        return def;
+      }
+      const auto* d = std::get_if<int64_t>(&it->second);
+      if (d != nullptr) {
+        return *d;
+      }
+      const auto* i = std::get_if<int32_t>(&it->second);
+      if (i != nullptr) {
+        return static_cast<int64_t>(*i);
+      }
+      const auto* db = std::get_if<double>(&it->second);
+      if (db != nullptr) {
+        return static_cast<int64_t>(*db);
+      }
+      return def;
+    };
+    const int64_t positionMs = getInt("positionMs", 0);
+    const int64_t endTimeMs = getInt("endTimeMs", 0);
+
     auto updater = impl_->smtc.DisplayUpdater();
     updater.Type(winrt::MediaPlaybackType::Music);
     if (!title.empty()) {
@@ -253,6 +305,21 @@ void SmtcController::ApplyUpdate(const flutter::EncodableMap& map) {
       }
     }
     updater.Update();
+
+    // Update timeline first, then playback status (order matters for the
+    // flyout to render the progress bar).
+    if (endTimeMs > 0) {
+      try {
+        auto timeline = winrt::SystemMediaTransportControlsTimelineProperties();
+        timeline.StartTime(std::chrono::milliseconds(0));
+        timeline.EndTime(std::chrono::milliseconds(endTimeMs));
+        timeline.Position(std::chrono::milliseconds(positionMs));
+        impl_->smtc.UpdateTimelineProperties(timeline);
+      } catch (const winrt::hresult_error& e) {
+        SmtcLog(std::string("timeline FAILED: ") +
+                winrt::to_string(e.message()));
+      }
+    }
 
     impl_->smtc.PlaybackStatus(
         playing ? winrt::MediaPlaybackStatus::Playing

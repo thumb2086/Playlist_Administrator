@@ -9,7 +9,6 @@ class LibraryIndex {
   Map<List<String>, List<String>> _metadataIndex = {};
   Map<String, FileInfo> _fileInfoMap = {};
   int _mp3Count = 0;
-  int _m4aCount = 0;
   int _podcastMp3Count = 0;
   int _podcastOtherCount = 0;
   bool _built = false;
@@ -25,7 +24,6 @@ class LibraryIndex {
   static Set<String>? _cachedFingerprint;
 
   int get mp3Count => _mp3Count;
-  int get m4aCount => _m4aCount;
   int get podcastMp3Count => _podcastMp3Count;
   int get podcastOtherCount => _podcastOtherCount;
   bool get isBuilt => _built;
@@ -92,13 +90,13 @@ class LibraryIndex {
     // Check static in-memory cache first
     if (_cache != null && _cacheKey == _resolvePath(libraryPath)) {
       _copyFrom(_cache!);
-      log('MP3: $_mp3Count, M4A: $_m4aCount (記憶體快取)${_podcastSummary()}');
+      log('MP3: $_mp3Count (記憶體快取)${_podcastSummary()}');
       return;
     }
 
     log('掃描音檔…');
     final allFiles = await _walkDir(libraryPath);
-    // Also scan basePath if it's different (mp3/m4a might be there instead of libraryPath)
+    // Also scan basePath if it's different
     if (basePath != null && basePath != libraryPath) {
       final baseFiles = await _walkDir(basePath);
       for (final f in baseFiles) {
@@ -106,15 +104,12 @@ class LibraryIndex {
       }
     }
     final mp3s = <String>[];
-    final m4as = <String>[];
     for (final f in allFiles) {
       final low = f.toLowerCase();
       if (low.endsWith('.mp3')) { mp3s.add(f); }
-      else if (low.endsWith('.m4a')) { m4as.add(f); }
     }
 
     _mp3Count = mp3s.length;
-    _m4aCount = m4as.length;
     _fileInfoMap = {};
     for (final f in allFiles) {
       final file = File(f);
@@ -159,7 +154,7 @@ class LibraryIndex {
     }
 
     if (changedStems.isEmpty && _cachedFingerprint != null) {
-      log('MP3: $_mp3Count, M4A: $_m4aCount (無變動，載入快取索引)${_podcastSummary()}');
+      log('MP3: $_mp3Count (無變動，載入快取索引)${_podcastSummary()}');
       final cached = _loadMetaIndex(libraryPath);
       if (cached != null) {
         _metadataIndex = <List<String>, List<String>>{};
@@ -175,7 +170,7 @@ class LibraryIndex {
     }
 
     // Build metadata index (only for new/changed mp3s, plus unchanged from cache)
-    log('MP3: $_mp3Count, M4A: $_m4aCount${_podcastSummary()}');
+    log('MP3: $_mp3Count${_podcastSummary()}');
     log('建立檔名索引…');
 
     if (changedStems.isNotEmpty) {
@@ -257,7 +252,6 @@ class LibraryIndex {
     _metadataIndex = other._metadataIndex;
     _fileInfoMap = other._fileInfoMap;
     _mp3Count = other._mp3Count;
-    _m4aCount = other._m4aCount;
     _podcastMp3Count = other._podcastMp3Count;
     _podcastOtherCount = other._podcastOtherCount;
     _built = true;
@@ -283,7 +277,7 @@ class LibraryIndex {
             // Podcast audio is NOT part of the music library: excluding it
             // prevents M4As from being fuzzy-matched against podcast files.
             // Track it separately so podcast stats stay visible.
-            if (low.contains('podcast_downloads') || low.contains('podcast_rag')) {
+            if (low.contains('podcasts') || low.contains('podcast_rag')) {
               if (low.endsWith('.mp3')) {
                 _podcastMp3Count++;
               } else {

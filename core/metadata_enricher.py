@@ -120,8 +120,8 @@ class MetadataEnricher:
                     return success
             
             # --- NEW: Fallback to Spotify Cache (High Quality) ---
-            from utils.config import CONFIG_DIR
-            cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+            from utils.config import get_spotify_cache_dir
+            cache_dir = get_spotify_cache_dir()
             if os.path.exists(cache_dir):
                 from utils.helpers import sanitize_filename
                 clean_name = sanitize_filename(song_name)
@@ -180,13 +180,13 @@ class MetadataEnricher:
             
             # --- NEW: Check for cached Spotify metadata ---
             try:
-                from utils.config import CONFIG_DIR
+                from utils.config import get_spotify_cache_dir
                 from utils.helpers import sanitize_filename
                 
                 # Check for exact file name match
                 clean_filename = sanitize_filename(song_name)
                 # Or check if filename starts with song name
-                cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+                cache_dir = get_spotify_cache_dir()
                 meta_file = os.path.join(cache_dir, f"{clean_filename}.json")
                 
                 if os.path.exists(meta_file):

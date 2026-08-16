@@ -316,8 +316,8 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                                 
                                 # --- NEW: Metadata caching for single track ---
                                 try:
-                                    from utils.config import CONFIG_DIR
-                                    cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+                                    from utils.config import get_spotify_cache_dir
+                                    cache_dir = get_spotify_cache_dir()
                                     os.makedirs(cache_dir, exist_ok=True)
                                     
                                     meta = {
@@ -374,8 +374,8 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                             
                             # Cache basic meta from HG/OG tags
                             try:
-                                from utils.config import CONFIG_DIR
-                                cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+                                from utils.config import get_spotify_cache_dir
+                                cache_dir = get_spotify_cache_dir()
                                 os.makedirs(cache_dir, exist_ok=True)
                                 
                                 meta = {'title': title, 'artist': artist}
@@ -470,8 +470,8 @@ def scrape_via_spotify_embed(config, stats, log_func, target_urls=None, skip_syn
                                         # --- NEW: Extract and save rich metadata ---
                                         try:
                                             # Try to create a cache directory for Spotify metadata
-                                            from utils.config import CONFIG_DIR
-                                            cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+                                            from utils.config import get_spotify_cache_dir
+                                            cache_dir = get_spotify_cache_dir()
                                             os.makedirs(cache_dir, exist_ok=True)
                                             
                                             meta = {

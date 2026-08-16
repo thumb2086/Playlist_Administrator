@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import '../services/config_service.dart';
@@ -13,7 +14,7 @@ import '../services/smtc_service.dart';
 import '../services/discord_rpc_service.dart';
 import '../services/lrc_parser.dart';
 import '../services/metadata_reader.dart';
-import '../services/spotube_controller.dart';
+import '../services/playback_history.dart';
 import '../widgets/dark_theme.dart';
 
 class PlayerPage extends StatefulWidget {
@@ -40,6 +41,14 @@ class _PlayerPageState extends State<PlayerPage> {
   double _volume = 0.7;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
+  String _smtcTitle = '';
+  String _smtcArtist = '';
+  Timer? _smtcTimer;
+  String _recordedSongKey = '';
+  String _recordedSongTitle = '';
+  String _recordedSongArtist = '';
+  Timer? _sleepTimer;
+  DateTime? _sleepEndsAt;
   List<LrcLine> _lyrics = [];
   double _lyricsOffset = 0.0;
   String _currentLyric = '';
@@ -57,7 +66,10 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void initState() {
     super.initState();
-    _statusText = t('spotube.status_ready');
+    _volume = ConfigService.instance.config.volume.clamp(0.0, 1.0);
+    _player.setVolume(_volume);
+    _loadQueue();
+    _statusText = t('common.done');
     I18N.instance.addListener(() { if (mounted) setState(() {}); });
     _player.onPlayerComplete.listen((_) {
       if (!mounted) return;
@@ -71,6 +83,7 @@ class _PlayerPageState extends State<PlayerPage> {
       if (!mounted) return;
       setState(() => _position = p);
       _updateLyrics(p);
+      _checkPlaybackRecord(p);
     });
     _player.onDurationChanged.listen((d) {
       if (mounted) setState(() => _duration = d);
@@ -96,9 +109,30 @@ class _PlayerPageState extends State<PlayerPage> {
           _pushSmtcState();
         }
       },
+      onSeek: (pos) {
+        if (_queueIndex < 0 || _queueIndex >= _playQueue.length) return;
+        _seekTo(pos);
+      },
     );
     _pushSmtcState();
     _initDiscordRpc();
+    // Keep the OS timeline in sync while playing (throttled).
+    _smtcTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      if (!_isPlaying) return;
+      final pos = await _player.getCurrentPosition();
+      final dur = await _player.getDuration();
+      if ((pos == null || pos.inMilliseconds <= 0) &&
+          (dur == null || dur.inMilliseconds <= 0)) return;
+      SmtcService.instance.update(
+        title: _smtcTitle,
+        artist: _smtcArtist,
+        album: _displayPlaylistName,
+        artworkUrl: _currentArtworkUrl,
+        playing: true,
+        position: pos ?? Duration.zero,
+        duration: dur ?? Duration.zero,
+      );
+    });
   }
 
   void _initDiscordRpc() {
@@ -111,7 +145,7 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  void _pushSmtcState() {
+  void _pushSmtcState() async {
     final song = _queueIndex >= 0 && _queueIndex < _playQueue.length
         ? _playQueue[_queueIndex]
         : null;
@@ -129,12 +163,20 @@ class _PlayerPageState extends State<PlayerPage> {
         artist = parts.sublist(1).join(' - ').trim();
       }
     }
+    _smtcTitle = title;
+    _smtcArtist = artist;
+    final pos = await _player.getCurrentPosition();
+    final dur = await _player.getDuration();
+    _position = pos ?? Duration.zero;
+    _duration = dur ?? Duration.zero;
     SmtcService.instance.update(
       title: title,
       artist: artist,
       album: _displayPlaylistName,
       artworkUrl: _currentArtworkUrl,
       playing: _isPlaying,
+      position: _position,
+      duration: _duration,
     );
     DiscordRpcService.instance.update(
       title: title,
@@ -161,6 +203,7 @@ class _PlayerPageState extends State<PlayerPage> {
   void dispose() {
     _positionSub?.cancel();
     _positionTimer?.cancel();
+    _smtcTimer?.cancel();
     _player.dispose();
     _playlistCtrl.dispose();
     _searchCtrl.dispose();
@@ -215,24 +258,20 @@ class _PlayerPageState extends State<PlayerPage> {
 
     final lines = await file.readAsLines();
     final songs = <String>[];
-    final lib = ConfigService.instance.config.libraryPath;
+    final musicDir = ConfigService.instance.config.musicPath;
     for (final line in lines) {
       if (gen != _loadGen) return;
       final raw = line.trim();
       if (raw.isEmpty || raw.startsWith('#')) continue;
-      // Echo Nightly playlists store URI-encoded paths — try both forms.
       String decodePath(String s) {
         try { return Uri.decodeComponent(s); } catch (_) { return s; }
       }
       final trimmed = decodePath(raw);
       if (File(trimmed).existsSync()) { songs.add(trimmed); continue; }
       final fname = File(trimmed).uri.pathSegments.last;
-      String resolved = '$lib\\$fname';
-      if (await File(resolved).exists()) { songs.add(resolved); continue; }
       bool found = false;
       for (final ext in ['.mp3', '.m4a', '.flac']) {
-        if (await File('$resolved$ext').exists()) { songs.add('$resolved$ext'); found = true; break; }
-        if (await File('$lib\\mp3\\$fname$ext').exists()) { songs.add('$lib\\mp3\\$fname$ext'); found = true; break; }
+        if (await File('$musicDir\\$fname$ext').exists()) { songs.add('$musicDir\\$fname$ext'); found = true; break; }
       }
       if (found) continue;
       final stem = fname.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
@@ -241,20 +280,16 @@ class _PlayerPageState extends State<PlayerPage> {
         if (parts.length >= 2) {
           final rev = '${parts[1]} - ${parts[0]}';
           for (final ext in ['.mp3', '.m4a', '.flac']) {
-            if (await File('$lib\\$rev$ext').exists()) { songs.add('$lib\\$rev$ext'); break; }
-            if (await File('$lib\\mp3\\$rev$ext').exists()) { songs.add('$lib\\mp3\\$rev$ext'); break; }
+            if (await File('$musicDir\\$rev$ext').exists()) { songs.add('$musicDir\\$rev$ext'); break; }
           }
         }
         final titlePart = parts[0].trim().toLowerCase();
-        if (titlePart.length >= 2) {
-          final mp3Dir = Directory('$lib\\mp3');
-          if (await mp3Dir.exists()) {
-            await for (final f in mp3Dir.list()) {
-              if (f is File) {
-                final fn = f.uri.pathSegments.last.toLowerCase();
-                if (fn.contains(titlePart) && fn.endsWith('.mp3')) {
-                  songs.add(f.path); break;
-                }
+        if (titlePart.length >= 2 && await Directory(musicDir).exists()) {
+          await for (final f in Directory(musicDir).list()) {
+            if (f is File) {
+              final fn = f.uri.pathSegments.last.toLowerCase();
+              if (fn.contains(titlePart) && fn.endsWith('.mp3')) {
+                songs.add(f.path); break;
               }
             }
           }
@@ -279,6 +314,7 @@ class _PlayerPageState extends State<PlayerPage> {
         _songs = songs;
         _playQueue = List.from(songs);
         _queueIndex = 0;
+        _persistQueue();
       }
     });
     if (!browseOnly && songs.isNotEmpty) _play(songs[0]);
@@ -287,6 +323,7 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _play(String path) async {
     if (_playInFlight) return;
     _playInFlight = true;
+    _recordedSongKey = '';
     try {
       await _player.stop();
       await _player.play(DeviceFileSource(path));
@@ -576,7 +613,45 @@ setState(() {
     final path = _playQueue[next];
     final sIdx = _songs.indexOf(path);
     setState(() { _queueIndex = next; _queueIndex = sIdx >= 0 ? sIdx : _queueIndex; });
-    _play(path);
+    final cf = ConfigService.instance.config;
+    if (cf.crossfadeEnabled && cf.crossfadeSeconds >= 1.0 && _isPlaying) {
+      _crossfadePlay(path);
+    } else {
+      _play(path);
+    }
+  }
+
+  /// Fade-out current → switch → fade-in next (audioplayers single-instance
+  /// limitation; a soft crossfade instead of true overlap).
+  Future<void> _crossfadePlay(String path) async {
+    if (_playInFlight) return;
+    _playInFlight = true;
+    try {
+      final total = Duration(milliseconds:
+          (ConfigService.instance.config.crossfadeSeconds * 1000).round());
+      final half = total ~/ 2;
+      await _fadePlayer(_player, _volume, 0.0, half);
+      await _player.stop();
+      await _player.setVolume(0.0);
+      await _player.play(DeviceFileSource(path));
+      final stem = File(path).uri.pathSegments.last;
+      _currentArtworkUrl = '';
+      setState(() {
+        _isPlaying = true;
+        _currentLyric = '';
+        _currentArtwork = _artworkCache[stem];
+      });
+      _pushSmtcState();
+      _loadLyrics(path);
+      _loadArtwork(path, stem);
+      _loadArtworkUrl(stem);
+      _scrollToCurrent();
+      await _fadePlayer(_player, 0.0, _volume, half);
+    } catch (e) {
+      setState(() => _statusText = '播放錯誤: $e');
+    } finally {
+      _playInFlight = false;
+    }
   }
 
   void _prev() {
@@ -589,9 +664,198 @@ setState(() {
   }
 
   void _seek(double value) {
-    _player.seek(Duration(seconds: value.toInt()));
-    _position = Duration(seconds: value.toInt());
+    _seekTo(Duration(seconds: value.toInt()));
+  }
+
+  void _seekTo(Duration target) {
+    _player.seek(target);
+    _position = target;
     _pushSmtcState();
+  }
+
+  /// Records a play once the user has listened to at least half the track
+  /// (or 4 minutes, whichever is less) — the scrobble rule from Spotube.
+  void _checkPlaybackRecord(Duration position) {
+    final song = _queueIndex >= 0 && _queueIndex < _playQueue.length
+        ? _playQueue[_queueIndex]
+        : null;
+    if (song == null) return;
+    final stem = File(song).uri.pathSegments.last
+        .replaceAll(RegExp(r'\.\w+$'), '');
+    if (_recordedSongKey == stem) return;
+    if (_duration.inMilliseconds <= 0) return;
+    final thresholdMs = (_duration.inMilliseconds ~/ 2)
+        .clamp(0, const Duration(minutes: 4).inMilliseconds);
+    if (position.inMilliseconds < thresholdMs) return;
+    _recordedSongKey = stem;
+    String title = stem;
+    String artist = '';
+    if (stem.contains(' - ')) {
+      final parts = stem.split(' - ');
+      if (parts.length >= 2) {
+        title = parts.first.trim();
+        artist = parts.sublist(1).join(' - ').trim();
+      }
+    }
+    _recordedSongTitle = title;
+    _recordedSongArtist = artist;
+    PlaybackHistory.instance.record(title, artist, _duration);
+  }
+
+  // --- Queue management ------------------------------------------------
+  void _persistQueue() {
+    try {
+      final f = File('${ConfigService.instance.config.cachePath}\\queue.json');
+      f.createSync(recursive: true);
+      f.writeAsStringSync(jsonEncode({
+        'index': _queueIndex,
+        'playlist': _displayPlaylistName,
+        'queue': _playQueue,
+      }));
+    } catch (_) {}
+  }
+
+  void _loadQueue() {
+    try {
+      final f = File('${ConfigService.instance.config.cachePath}\\queue.json');
+      if (!f.existsSync()) return;
+      final data = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+      final q = (data['queue'] as List? ?? [])
+          .whereType<String>()
+          .where((p) => File(p).existsSync())
+          .toList();
+      if (q.isEmpty) return;
+      _playQueue = q;
+      _queueIndex = ((data['index'] as num?)?.toInt() ?? 0).clamp(0, q.length - 1);
+      _songs = List.from(q);
+      _filteredSongs = List.from(q);
+      _displayPlaylistName = (data['playlist'] as String?) ?? '';
+    } catch (_) {}
+  }
+
+  void _openQueuePanel() {
+    if (_playQueue.isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      isScrollControlled: true,
+      builder: (_) => _QueuePanel(
+        queue: _playQueue,
+        currentIndex: _queueIndex,
+        onReorder: (oldIndex, newIndex) {
+          setState(() {
+            final item = _playQueue.removeAt(oldIndex);
+            _playQueue.insert(newIndex, item);
+            if (oldIndex == _queueIndex) {
+              _queueIndex = newIndex;
+            } else if (oldIndex < _queueIndex && newIndex >= _queueIndex) {
+              _queueIndex--;
+            } else if (oldIndex > _queueIndex && newIndex <= _queueIndex) {
+              _queueIndex++;
+            }
+          });
+          _persistQueue();
+        },
+        onRemove: (index) {
+          setState(() {
+            if (_queueIndex == index) {
+              if (_playQueue.length > 1) {
+                _queueIndex = index.clamp(0, _playQueue.length - 2);
+                _play(_playQueue[_queueIndex]);
+              }
+            } else if (index < _queueIndex) {
+              _queueIndex--;
+            }
+            _playQueue.removeAt(index);
+          });
+          _persistQueue();
+        },
+        onJump: (index) {
+          setState(() => _queueIndex = index);
+          _play(_playQueue[index]);
+        },
+      ),
+    );
+  }
+
+  void _playNext(String path) {
+    if (_playQueue.isEmpty || _queueIndex < 0) return;
+    final insertAt = _queueIndex + 1;
+    setState(() {
+      _playQueue.insert(insertAt, path);
+    });
+    _persistQueue();
+  }
+
+  // --- Sleep timer --------------------------------------------------------
+  void _setSleepTimer(Duration? duration) {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    setState(() => _sleepEndsAt = null);
+    if (duration == null) return;
+    _sleepTimer = Timer(duration, () {
+      if (!mounted) return;
+      if (_isPlaying) {
+        _player.pause();
+        setState(() => _isPlaying = false);
+        _pushSmtcState();
+      }
+      setState(() => _sleepEndsAt = null);
+    });
+    setState(() => _sleepEndsAt = DateTime.now().add(duration));
+  }
+
+  String _sleepRemaining() {
+    final end = _sleepEndsAt;
+    if (end == null) return '';
+    final left = end.difference(DateTime.now());
+    if (left.isNegative) return '';
+    final m = left.inMinutes.remainder(60);
+    final h = left.inHours;
+    return h > 0 ? '$h時$m分' : '$m分';
+  }
+
+  void _showSleepMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.all(14),
+            child: Text('睡眠定時器', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
+          ...const [15, 30, 60, 120].map((m) => ListTile(
+                dense: true,
+                leading: const Icon(Icons.timer_outlined, color: AppColors.textMuted, size: 18),
+                title: Text('$m 分鐘', style: const TextStyle(fontSize: 13)),
+                onTap: () { Navigator.pop(ctx); _setSleepTimer(Duration(minutes: m)); },
+              )),
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.stop_circle_outlined, color: AppColors.error, size: 18),
+            title: const Text('取消定時器', style: TextStyle(fontSize: 13)),
+            onTap: () { Navigator.pop(ctx); _setSleepTimer(null); },
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // --- Crossfade ----------------------------------------------------------
+  Future<void> _fadePlayer(AudioPlayer p, double from, double to,
+      Duration duration) async {
+    final steps = 20;
+    final dt = duration.inMilliseconds ~/ steps;
+    for (var i = 0; i <= steps; i++) {
+      final v = from + (to - from) * i / steps;
+      await p.setVolume(v);
+      await Future.delayed(Duration(milliseconds: dt));
+    }
   }
 
   String _fmt(Duration d) {
@@ -621,13 +885,40 @@ setState(() {
     final currentSong = _queueIndex >= 0 && _queueIndex < _playQueue.length ? _playQueue[_queueIndex] : null;
     final currentName = currentSong != null ? _songName(currentSong) : '';
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-      child: Row(children: [
-        Expanded(flex: 3, child: _buildPlaylistPanel()),
-        const SizedBox(width: 16),
-        Expanded(flex: 5, child: _buildPlayerPanel(currentName, currentSong)),
-      ]),
+    return CallbackShortcuts(
+      bindings: {
+        // Space: play/pause
+        const SingleActivator(LogicalKeyboardKey.space): () {
+          if (_songs.isNotEmpty) _togglePlay();
+        },
+        // Arrow left/right: seek ±5s
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () {
+          if (_queueIndex < 0) return;
+          _seekTo(_position + const Duration(seconds: 5));
+        },
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
+          if (_queueIndex < 0) return;
+          _seekTo(_position - const Duration(seconds: 5));
+        },
+        // N: next track, P: previous track
+        const SingleActivator(LogicalKeyboardKey.keyN): () {
+          if (_songs.isNotEmpty) _next();
+        },
+        const SingleActivator(LogicalKeyboardKey.keyP): () {
+          if (_songs.isNotEmpty) _prev();
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+          child: Row(children: [
+            Expanded(flex: 3, child: _buildPlaylistPanel()),
+            const SizedBox(width: 16),
+            Expanded(flex: 5, child: _buildPlayerPanel(currentName, currentSong)),
+          ]),
+        ),
+      ),
     );
   }
 
@@ -909,6 +1200,30 @@ setState(() {
                   color: _loop ? AppColors.accent : AppColors.textMuted, size: 20),
               tooltip: _loop ? '循環播放' : '單曲循環',
             ),
+            IconButton(
+              onPressed: _openQueuePanel,
+              icon: const Icon(Icons.queue_music_rounded, color: AppColors.text, size: 20),
+              tooltip: '播放佇列 (${_playQueue.length})',
+            ),
+            IconButton(
+              onPressed: _showSleepMenu,
+              icon: Icon(_sleepEndsAt != null ? Icons.bedtime_rounded : Icons.bedtime_outlined,
+                  color: _sleepEndsAt != null ? AppColors.error : AppColors.textMuted, size: 20),
+              tooltip: _sleepEndsAt != null ? '睡眠定時器 (${_sleepRemaining()})' : '睡眠定時器',
+            ),
+            IconButton(
+              onPressed: () {
+                final c = ConfigService.instance.config;
+                c.crossfadeEnabled = !c.crossfadeEnabled;
+                ConfigService.instance.save();
+                setState(() {});
+              },
+              icon: Icon(Icons.linear_scale_rounded,
+                  color: ConfigService.instance.config.crossfadeEnabled ? AppColors.accent : AppColors.textMuted, size: 20),
+              tooltip: ConfigService.instance.config.crossfadeEnabled
+                  ? 'Crossfade 開啟 (${ConfigService.instance.config.crossfadeSeconds}s)'
+                  : 'Crossfade 關閉',
+            ),
             const SizedBox(width: 8),
             Icon(Icons.volume_up_rounded, color: AppColors.textMuted, size: 16),
             Expanded(
@@ -918,7 +1233,13 @@ setState(() {
                   value: _volume,
                   max: 1.0,
                   activeColor: AppColors.accent,
-                  onChanged: (v) { setState(() => _volume = v); _player.setVolume(v); },
+                  onChanged: (v) {
+                    setState(() => _volume = v);
+                    _player.setVolume(v);
+                    final c = ConfigService.instance.config;
+                    c.volume = v;
+                    ConfigService.instance.save();
+                  },
                 ),
               ),
             ),
@@ -967,6 +1288,97 @@ setState(() {
                 ),
               ),
             ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _QueuePanel extends StatefulWidget {
+  final List<String> queue;
+  final int currentIndex;
+  final void Function(int oldIndex, int newIndex) onReorder;
+  final void Function(int index) onRemove;
+  final void Function(int index) onJump;
+
+  const _QueuePanel({
+    required this.queue,
+    required this.currentIndex,
+    required this.onReorder,
+    required this.onRemove,
+    required this.onJump,
+  });
+
+  @override
+  State<_QueuePanel> createState() => _QueuePanelState();
+}
+
+class _QueuePanelState extends State<_QueuePanel> {
+  @override
+  Widget build(BuildContext context) {
+    final height = (widget.queue.length * 52.0 + 80).clamp(200.0, 560.0);
+    return SizedBox(
+      height: height,
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 12, 4),
+          child: Row(children: [
+            const Icon(Icons.queue_music_rounded, color: AppColors.textMuted, size: 18),
+            const SizedBox(width: 8),
+            Text('播放佇列 (${widget.queue.length})',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, color: AppColors.textMuted, size: 18),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ]),
+        ),
+        Expanded(
+          child: ReorderableListView.builder(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            itemCount: widget.queue.length,
+            onReorder: widget.onReorder,
+            itemBuilder: (ctx, i) {
+              final path = widget.queue[i];
+              final stem = File(path).uri.pathSegments.last
+                  .replaceAll(RegExp(r'\.\w+$'), '');
+              final isCurrent = i == widget.currentIndex;
+              return ListTile(
+                key: ValueKey('$path-$i'),
+                dense: true,
+                leading: ReorderableDragStartListener(
+                  index: i,
+                  child: const Icon(Icons.drag_handle_rounded,
+                      color: AppColors.textMuted, size: 18),
+                ),
+                title: Text(stem,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isCurrent ? AppColors.accent : AppColors.text,
+                      fontWeight: isCurrent ? FontWeight.w600 : FontWeight.normal,
+                    )),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (!isCurrent)
+                    IconButton(
+                      icon: const Icon(Icons.play_arrow_rounded,
+                          color: AppColors.textMuted, size: 18),
+                      onPressed: () => widget.onJump(i),
+                      tooltip: '播放此曲',
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        color: AppColors.textMuted, size: 18),
+                    onPressed: () => widget.onRemove(i),
+                    tooltip: '從佇列移除',
+                  ),
+                ]),
+                onTap: isCurrent ? null : () => widget.onJump(i),
+              );
+            },
           ),
         ),
       ]),

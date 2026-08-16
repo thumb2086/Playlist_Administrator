@@ -17,12 +17,13 @@ class PodcastService {
   String get _pythonPath => 'python';
 
   String _podcastDir(String? podcastName) {
-    final base = ConfigService.instance.config.basePath;
+    final cfg = ConfigService.instance.config;
+    final base = cfg.podcastsPath;
     if (base.isEmpty) return '';
     final sub = podcastName != null && podcastName.isNotEmpty
         ? podcastName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
         : '';
-    final path = sub.isNotEmpty ? '$base\\podcast_downloads\\$sub' : '$base\\podcast_downloads';
+    final path = sub.isNotEmpty ? '$base\\$sub' : base;
     Directory(path).createSync(recursive: true);
     return path;
   }
@@ -266,7 +267,7 @@ class PodcastService {
 
   String podcastDir(String? podcastName) => _podcastDir(podcastName);
 
-  static String relativePodcastPath = 'podcast_downloads';
+  static String relativePodcastPath = 'podcasts';
 
   Future<List<PodcastSearchResult>> searchPodcasts(String query) async {
     final url = Uri.parse(

@@ -92,7 +92,7 @@ def _enrich_metadata_from_spotify_cache(file_path, log_func=None):
     """
     try:
         import json
-        from utils.config import CONFIG_DIR
+        from utils.config import get_spotify_cache_dir
         from utils.helpers import sanitize_filename
         from mutagen.easyid3 import EasyID3
         from mutagen.mp3 import MP3
@@ -100,7 +100,7 @@ def _enrich_metadata_from_spotify_cache(file_path, log_func=None):
         
         # Get filename without extension for cache lookup
         base_name = Path(file_path).stem
-        cache_dir = os.path.join(CONFIG_DIR, 'spotify_cache')
+        cache_dir = get_spotify_cache_dir()
         
         if not os.path.exists(cache_dir):
             return False

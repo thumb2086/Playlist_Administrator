@@ -163,7 +163,7 @@ def cmd_download_youtube(args):
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': audio_format,
-            'preferredquality': '320',
+            'preferredquality': '0',
         }],
         'progress_hooks': [progress_hook],
         'keepvideo': False,
@@ -184,6 +184,40 @@ def cmd_download_youtube(args):
                 emit_json({'type': 'complete', 'path': os.path.join(dir_path, candidates[0])})
             else:
                 emit_json({'type': 'error', 'message': 'Output file not found'})
+    except Exception as e:
+        emit_json({'type': 'error', 'message': str(e)})
+
+
+def cmd_stream_resolve(args):
+    """Resolve a playable audio URL for a song query via yt-dlp.
+
+    Prints a JSON line with the resolved direct audio URL (bestaudio).
+    The Dart side serves it through a local HTTP proxy (or plays directly).
+    """
+    query = args[0]
+    import yt_dlp
+
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f'ytsearch1:{query}', download=False)
+            entry = info['entries'][0] if info.get('entries') else info
+            url = entry.get('url') or entry.get('webpage_url')
+            if not url:
+                emit_json({'type': 'error', 'message': 'no stream URL'})
+                return
+            emit_json({
+                'type': 'complete',
+                'url': url,
+                'title': entry.get('title', ''),
+                'ext': entry.get('ext', ''),
+                'duration': entry.get('duration', 0),
+            })
     except Exception as e:
         emit_json({'type': 'error', 'message': str(e)})
 
@@ -707,7 +741,16 @@ def cmd_groq_transcribe(args):
             emit_json({'type': 'error', 'message': err_msg[:300]})
             # Also write to log file
             try:
-                log_dir = os.path.expanduser(r'~\Music\Spotube\logs')
+                cfg = None
+                try:
+                    from utils.config import load_config
+                    cfg = load_config()
+                except Exception:
+                    pass
+                if cfg and cfg.get('base_path'):
+                    log_dir = os.path.join(cfg['base_path'], 'logs')
+                else:
+                    log_dir = os.path.expanduser(r'~\Music\playlist-admin\logs')
                 os.makedirs(log_dir, exist_ok=True)
                 with open(os.path.join(log_dir, 'stt_errors.log'), 'a', encoding='utf-8') as lf:
                     lf.write(f'\n--- {time.strftime("%Y-%m-%d %H:%M:%S")} ---\n')
@@ -949,6 +992,8 @@ def main():
             cmd_normalize_mp3_lufs(args)
         elif command == 'youtube-subs':
             cmd_youtube_subs(args)
+        elif command == 'stream-resolve':
+            cmd_stream_resolve(args)
         elif command == 'rag-query':
             cmd_rag_query(args)
         elif command == 'rag-build':

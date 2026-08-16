@@ -42,7 +42,7 @@ class _DownloadPageState extends State<DownloadPage> {
               children: [
                 _tabButton(0, Icons.podcasts, t('download.tab_podcast')),
                 _tabButton(1, Icons.music_note, t('download.tab_song')),
-                _tabButton(2, Icons.download, 'Spotube'),
+                _tabButton(2, Icons.download, '批量下載'),
               ],
             ),
           ),
@@ -613,7 +613,7 @@ class _SongDownloadTabState extends State<_SongDownloadTab> {
     setState(() { _running = true; _progress = 0; _logs.clear(); });
     final cfg = ConfigService.instance.config;
     try {
-      await DownloadService.instance.downloadSong(songName: query, libraryPath: cfg.libraryPath, format: 'mp3',
+      await DownloadService.instance.downloadSong(songName: query, format: 'mp3',
         onLog: _log, onProgress: (p) { if (mounted) setState(() => _progress = p); });
     } catch (e) { _log('❌ $e'); }
     setState(() => _running = false);

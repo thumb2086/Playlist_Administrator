@@ -16,10 +16,6 @@ Usage:
   playlist-admin pipeline [--step N]     Run full pipeline (or from step N)
   playlist-admin podcast                 Run podcast pipeline
   playlist-admin status                  Show status
-  playlist-admin spotube-download <name> Download one playlist
-  playlist-admin spotube-download-all    Download all playlists
-  playlist-admin spotube-move            Move M4A files
-  playlist-admin spotube-cleanup         Remove metadata-renamed mp3 duplicates
   playlist-admin favorite list           List favorite songs
   playlist-admin favorite toggle <song>  Toggle favorite (我的最愛)
   playlist-admin rag build [--reset]     Build podcast RAG vector DB

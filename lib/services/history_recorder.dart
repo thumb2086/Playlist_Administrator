@@ -7,7 +7,6 @@ import 'app_data_dir.dart';
 class Snapshot {
   final DateTime time;
   final int mp3;
-  final int m4a;
   final int flac;
   final double sizeGb;
   final Map<String, int> playlistTotals;  // name -> total tracks
@@ -16,7 +15,6 @@ class Snapshot {
   Snapshot({
     required this.time,
     required this.mp3,
-    required this.m4a,
     required this.flac,
     required this.sizeGb,
     required this.playlistTotals,
@@ -25,7 +23,7 @@ class Snapshot {
 
   Map<String, dynamic> toJson() => {
     'time': time.toIso8601String(),
-    'mp3': mp3, 'm4a': m4a, 'flac': flac,
+    'mp3': mp3, 'flac': flac,
     'sizeGb': sizeGb,
     'playlistTotals': playlistTotals,
     'playlistMatched': playlistMatched,
@@ -33,7 +31,7 @@ class Snapshot {
 
   factory Snapshot.fromJson(Map<String, dynamic> j) => Snapshot(
     time: DateTime.parse(j['time'] as String),
-    mp3: j['mp3'] as int, m4a: j['m4a'] as int, flac: j['flac'] as int,
+    mp3: j['mp3'] as int, flac: j['flac'] as int,
     sizeGb: (j['sizeGb'] as num).toDouble(),
     playlistTotals: (j['playlistTotals'] as Map<String, dynamic>).map((k, v) => MapEntry(k, v as int)),
     playlistMatched: (j['playlistMatched'] as Map<String, dynamic>).map((k, v) => MapEntry(k, v as int)),
@@ -65,7 +63,7 @@ class HistoryRecorder {
   static Future<Snapshot> collect() async {
     final cfg = ConfigService.instance.config;
     final libDir = Directory(cfg.libraryPath);
-    int mp3 = 0, m4a = 0, flac = 0;
+    int mp3 = 0, flac = 0;
     double size = 0;
     final libStems = <String>{};
 
@@ -77,7 +75,6 @@ class HistoryRecorder {
           size += await e.length() / (1024 * 1024 * 1024);
           final stem = File(e.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
           if (low.endsWith('.mp3')) { mp3++; libStems.add(stem); }
-          else if (low.endsWith('.m4a')) { m4a++; libStems.add(stem); }
           else if (low.endsWith('.flac')) { flac++; libStems.add(stem); }
         }
       }
@@ -86,9 +83,7 @@ class HistoryRecorder {
     await scanDir(libDir);
     final baseDir = Directory(cfg.basePath);
     if (baseDir.path.toLowerCase() != libDir.path.toLowerCase() && await baseDir.exists()) {
-      for (final sub in ['mp3', 'm4a', 'flac']) {
-        await scanDir(Directory('${cfg.basePath}\\$sub'));
-      }
+      await scanDir(Directory('${cfg.basePath}\\native'));
     }
 
     // Playlist stats (use pre-built stem set for O(1) lookup)
@@ -117,7 +112,7 @@ class HistoryRecorder {
 
     return Snapshot(
       time: DateTime.now(),
-      mp3: mp3, m4a: m4a, flac: flac, sizeGb: size,
+      mp3: mp3, flac: flac, sizeGb: size,
       playlistTotals: playlistTotals,
       playlistMatched: playlistMatched,
     );

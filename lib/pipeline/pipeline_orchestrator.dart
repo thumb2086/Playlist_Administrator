@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import '../models/pipeline_step.dart';
 import '../models/config_model.dart';
@@ -27,15 +28,13 @@ class PipelineOrchestrator {
 
   Future<void> run({int fromStep = 0, int? toStep}) async {
     final steps = <(String, double, Future<void> Function(void Function(double)))>[
-      ('Convert M4A → MP3', 25.0, _stepConvert),
-      ('Scrape Spotify playlists', 20.0, _stepScrape),
+      ('Scrape Spotify playlists', 25.0, _stepScrape),
+      ('Download missing tracks', 30.0, _stepDownload),
       ('Prune missing tracks', 15.0, _stepPrune),
       ('Organize unsorted songs', 10.0, _stepUnsorted),
       ('Enrich metadata', 10.0, _stepMetadata),
       ('Measure LUFS', 10.0, _stepMeasureLufs),
     ];
-    // RAG 屬 podcast pipeline 的職責（PodcastPipeline 內已有 _updateRagIndex）。
-    // 音樂 pipeline 預設不執行；只有在 config 明確設定 podcast_rag_in_music 時才加入。
     if (config.podcastRagInMusic) {
       steps.add(('Podcast RAG index', 10.0, _stepRag));
     }
@@ -82,152 +81,103 @@ class PipelineOrchestrator {
     _stepRag((_) {});
   }
 
-  Future<void> _stepConvert(void Function(double) progress) async {
-    final m4aDir = Directory(config.m4aPath);
-    final mp3Dir = Directory(config.mp3Path);
-    if (!await m4aDir.exists()) {
-      onLog('M4A 資料夾不存在: ${config.m4aPath}');
+  Future<void> _stepDownload(void Function(double) progress) async {
+    final musicDir = Directory(config.musicPath);
+    await musicDir.create(recursive: true);
+
+    // Load snapshot to get song list
+    final snapFile = File('${config.basePath}\\original_snapshot.json');
+    if (!await snapFile.exists()) {
+      onLog('找不到 original_snapshot.json，跳過下載');
       progress(100); return;
     }
-    await mp3Dir.create(recursive: true);
+    final snap = jsonDecode(await snapFile.readAsString()) as Map<String, dynamic>;
+    final playlists = snap['playlists'] as Map<String, dynamic>? ?? {};
 
-    final m4aFiles = <String>[];
-    await for (final e in m4aDir.list(recursive: true, followLinks: false)) {
-      if (e is File && e.path.toLowerCase().endsWith('.m4a')) {
-        m4aFiles.add(e.path);
+    // Collect all unique songs from playlists
+    final allSongs = <String>{};
+    for (final tracks in playlists.values) {
+      for (final t in (tracks as List<dynamic>)) {
+        allSongs.add(t as String);
       }
     }
-    if (m4aFiles.isEmpty) {
-      // Fallback: scan library root for M4A
-      final libM4a = <String>[];
-      final libDir = Directory(config.libraryPath);
-      if (await libDir.exists()) {
-        await for (final e in libDir.list(recursive: true, followLinks: false)) {
-          if (e is File && e.path.toLowerCase().endsWith('.m4a')) {
-            libM4a.add(e.path);
-          }
+    onLog('播放清單共 ${allSongs.length} 首歌曲');
+
+    // Check which already exist in musicPath
+    final existing = <String>{};
+    if (await musicDir.exists()) {
+      await for (final f in musicDir.list()) {
+        if (f is File) {
+          final stem = File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+          existing.add(stem);
         }
       }
-      if (libM4a.isEmpty) {
-        onLog('找不到任何 M4A 檔案');
-        progress(100); return;
-      }
-      onLog('在音樂庫根目錄找到 ${libM4a.length} 個 M4A 檔案');
-      m4aFiles.addAll(libM4a);
-    } else {
-      onLog('找到 ${m4aFiles.length} 個 M4A 檔案');
+    }
+    onLog('已有 ${existing.length} 首，需下載 ${allSongs.length - existing.length} 首');
+
+    if (existing.length >= allSongs.length) {
+      onLog('所有歌曲已下載');
+      progress(100); return;
     }
 
-    final index = LibraryIndex();
-    await index.build(config.libraryPath, onLog, basePath: config.basePath);
+    // Download missing songs via Python bridge
+    final bridge = _findBridge();
+    if (bridge.isEmpty) {
+      onLog('找不到 flutter_download_bridge.py');
+      progress(100); return;
+    }
 
-    final tasks = <_ConvertTask>[];
-    int skipped = 0;
-
-    final totalM4a = m4aFiles.length;
-    int scanned = 0;
-    for (final m4a in m4aFiles) {
+    int done = 0;
+    int ok = 0;
+    int fail = 0;
+    final total = allSongs.length;
+    for (final song in allSongs) {
+      if (state.isCancelled) return;
       await state.waitIfPaused();
       if (state.isCancelled) return;
 
-      // 1. Filename-based matching (fast, no ffprobe)
-      final existing = await index.findMp3ForM4a(m4a, useMtime: true);
-      if (existing != null) {
-        skipped++;
-        scanned++;
-        if (scanned % 200 == 0 || scanned == totalM4a) {
-          onLog('  比對: $scanned/$totalM4a (待轉檔 ${tasks.length}，跳過 $skipped)');
-        }
-        continue;
-      }
-
-      // 2. Only read metadata for files that actually need conversion
-      final meta = await MetadataReader.read(m4a);
-
-      // 3. Metadata-based matching (tries to find MP3 by title/artist)
-      final metaMatch = await index.findMp3ForM4a(m4a, useMtime: true, cachedMeta: meta);
-      if (metaMatch != null) {
-        skipped++;
-        scanned++;
-        if (scanned % 200 == 0 || scanned == totalM4a) {
-          onLog('  比對: $scanned/$totalM4a (待轉檔 ${tasks.length}，跳過 $skipped)');
-        }
-        continue;
-      }
-
-      final stem = File(m4a).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-      final mp3Name = '$stem.mp3';
-      final dest = '${config.mp3Path}\\$mp3Name';
-
-      // 4. Direct disk check: the in-memory index may be stale (built before
-      // this run converted files), so trust the filesystem over the index.
-      // Zero-byte files are failed leftovers — never skip those.
-      final destFile = File(dest);
-      if (await destFile.exists() &&
-          (await destFile.length()) > 0 &&
-          destFile.lastModifiedSync().compareTo(File(m4a).lastModifiedSync()) >= 0) {
-        skipped++;
-        scanned++;
-        if (scanned % 200 == 0 || scanned == totalM4a) {
-          onLog('  比對: $scanned/$totalM4a (待轉檔 ${tasks.length}，跳過 $skipped)');
-        }
-        continue;
-      }
-
-      tasks.add(_ConvertTask(m4a, dest, stem, meta));
-
-      scanned++;
-      if (scanned % 200 == 0 || scanned == totalM4a) {
-        onLog('  比對: $scanned/$totalM4a (待轉檔 ${tasks.length}，跳過 $skipped)');
-      }
-    }
-
-    onLog('待轉檔: ${tasks.length}, 跳過: $skipped');
-    if (tasks.isEmpty) { progress(100); return; }
-
-    // Worker pool: keep N conversions running at all times.
-    // Each ffmpeg uses -threads 0 (auto, multi-threaded), so cap concurrency
-    // at physical cores to avoid oversubscription.
-    final physicalCores = (Platform.numberOfProcessors ~/ 2).clamp(2, 16);
-    final concurrency = physicalCores;
-    int converted = 0;
-    int done = 0;
-    var next = 0;
-
-    Future<void> worker() async {
-      while (true) {
-        if (state.isCancelled) return;
-        await state.waitIfPaused();
-        if (state.isCancelled) return;
-
-        final idx = next++;
-        if (idx >= tasks.length) return;
-
-        final t = tasks[idx];
-        final fname = File(t.src).uri.pathSegments.last;
-        final (ok, lufs) = await AudioConverter.convert(
-          inputPath: t.src,
-          outputPath: t.dest,
-          ffmpegPath: config.ffmpegPath.isNotEmpty ? config.ffmpegPath : 'ffmpeg',
-          meta: t.meta,
-          isCancelled: () => state.isCancelled,
-        );
-        if (state.isCancelled) return;
+      final stem = song.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      if (existing.contains(stem)) {
         done++;
-        if (ok) {
-          converted++;
-          // loudnorm measured the whole file during conversion — cache it directly,
-          // no second full-file scan. Fast path only; never blocks the worker.
-          LufsService.instance.cacheConversionLufsFast(t.src, t.dest, lufs);
-        }
-        onLog('  [$done/${tasks.length}] ${ok ? '✅' : '❌'} $fname');
-        progress(done / tasks.length * 100);
+        continue;
+      }
+
+      try {
+        final env = Map<String, String>.from(Platform.environment);
+        env['PYTHONIOENCODING'] = 'utf-8';
+        final proc = await Process.start(
+          'python',
+          [bridge, 'download-song', song, config.musicPath, 'mp3'],
+          runInShell: true,
+          workingDirectory: config.basePath,
+          environment: env,
+        );
+        // Consume output to prevent blocking
+        proc.stdout.transform(utf8.decoder).drain();
+        proc.stderr.transform(utf8.decoder).drain();
+        final exitCode = await proc.exitCode;
+        if (exitCode == 0) { ok++; } else { fail++; }
+      } catch (e) {
+        fail++;
+      }
+      done++;
+      if (done % 10 == 0 || done == total) {
+        onLog('  [$done/$total] 成功 $ok，失敗 $fail');
+        progress(done / total * 100);
       }
     }
+    onLog('下載完成: 成功 $ok，失敗 $fail');
+  }
 
-    await Future.wait(List.generate(concurrency, (_) => worker()));
-
-    onLog('轉檔完成: $converted 個');
+  String _findBridge() {
+    final exeDir = Directory(File(Platform.resolvedExecutable).parent.path);
+    Directory? d = exeDir;
+    while (d != null) {
+      final candidate = '${d.path}\\tools\\flutter_download_bridge.py';
+      if (File(candidate).existsSync()) return candidate;
+      d = d.parent.path == d.path ? null : d.parent;
+    }
+    return '';
   }
 
   Future<void> _stepScrape(void Function(double) progress) async {

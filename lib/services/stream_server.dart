@@ -1,0 +1,250 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'config_service.dart';
+
+/// Local streaming server: resolves a song query via yt-dlp (through the
+/// Python bridge) and serves the audio bytes over http://127.0.0.1:PORT/stream.
+/// Optional caching to cache/stream/ (Spotube-style cacheMusic).
+class StreamServer {
+  static StreamServer? _instance;
+  static StreamServer get instance => _instance ??= StreamServer._();
+  StreamServer._();
+
+  HttpServer? _server;
+  int _port = 0;
+  bool _started = false;
+
+  /// query -> resolved URL cache (in-memory, per session)
+  final Map<String, String> _resolved = {};
+
+  /// query -> cached file path (persisted across restarts via index)
+  final Map<String, String> _cacheIndex = {};
+
+  bool get isRunning => _started;
+
+  String get baseUrl => 'http://127.0.0.1:$_port';
+
+  static String get _bridgePath =>
+      '${ConfigService.instance.config.toolsPath}\\flutter_download_bridge.py';
+
+  static String get _cacheDir =>
+      ConfigService.instance.config.streamCachePath;
+
+  static String get _indexPath => '$_cacheDir\\stream_index.json';
+
+  Future<void> start() async {
+    if (_started) return;
+    _loadIndex();
+    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    _port = _server!.port;
+    _server!.listen(_handle);
+    _started = true;
+  }
+
+  Future<void> stop() async {
+    _started = false;
+    await _server?.close(force: true);
+    _server = null;
+  }
+
+  void _loadIndex() {
+    try {
+      final f = File(_indexPath);
+      if (!f.existsSync()) return;
+      final data = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+      for (final e in data.entries) {
+        final p = e.value as String;
+        if (File(p).existsSync()) _cacheIndex[e.key] = p;
+      }
+    } catch (_) {}
+  }
+
+  void _saveIndex() {
+    try {
+      final f = File(_indexPath);
+      f.createSync(recursive: true);
+      f.writeAsStringSync(jsonEncode(_cacheIndex));
+    } catch (_) {}
+  }
+
+  /// Look up a cached stream for [query]; null if not cached.
+  String? cachedPathFor(String query) => _cacheIndex[query];
+
+  Future<void> _handle(HttpRequest request) async {
+    final path = request.uri.pathSegments;
+    if (path.isNotEmpty && path[0] == 'stream' && path.length >= 2) {
+      final query = path[1];
+      try {
+        // 1. Cached file first.
+        final cached = _cacheIndex[query];
+        if (cached != null && File(cached).existsSync()) {
+          await _serveFile(request, File(cached));
+          return;
+        }
+        // 2. Resolve via yt-dlp.
+        final url = await _resolve(query);
+        if (url.isEmpty) {
+          request.response.statusCode = HttpStatus.notFound;
+          await request.response.close();
+          return;
+        }
+        // 3. Stream the resolved URL through a proxy so audioplayers sees a
+        //    stable local URL (avoids CORS/redirect issues).
+        final client = HttpClient();
+        final req = await client.getUrl(Uri.parse(url));
+        req.headers.set('User-Agent',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+        final resp = await req.close();
+        if (resp.statusCode != HttpStatus.ok) {
+          request.response.statusCode = HttpStatus.badGateway;
+          await request.response.close();
+          client.close();
+          return;
+        }
+        // Transcode? yt-dlp bestaudio is opus/webm; audioplayers on Windows
+        // cannot decode webm/opus reliably. Transcode via ffmpeg to mp3.
+        await _serveTranscoded(request, url, query);
+        client.close();
+      } catch (e) {
+        try {
+          request.response.statusCode = HttpStatus.internalServerError;
+          await request.response.close();
+        } catch (_) {}
+      }
+      return;
+    }
+    request.response.statusCode = HttpStatus.notFound;
+    await request.response.close();
+  }
+
+  Future<String> _resolve(String query) async {
+    final cached = _resolved[query];
+    if (cached != null) return cached;
+    final proc = await Process.start(
+      'python',
+      [_bridgePath, 'stream-resolve', query],
+      runInShell: true,
+      workingDirectory: ConfigService.instance.config.basePath,
+      environment: {'PYTHONIOENCODING': 'utf-8'},
+    );
+    final out = await proc.stdout.transform(utf8.decoder).join();
+    await proc.exitCode;
+    for (final line in out.split('\n')) {
+      if (!line.trim().isEmpty) {
+        try {
+          final data = jsonDecode(line.trim()) as Map<String, dynamic>;
+          if (data['type'] == 'complete' && data['url'] != null) {
+            _resolved[query] = data['url'] as String;
+            return data['url'] as String;
+          }
+        } catch (_) {}
+      }
+    }
+    return '';
+  }
+
+  /// Public resolve used by SearchPage to prepare a stream URL.
+  Future<String> resolveForTest(String query) => _resolve(query);
+
+  /// Streams the remote URL through ffmpeg (opus/webm → mp3 VBR 0), piping
+  /// output to the HTTP response. Writes cache file when enabled.
+  Future<void> _serveTranscoded(
+      HttpRequest request, String url, String query) async {
+    final ffmpeg = ConfigService.instance.config.ffmpegPath.isNotEmpty
+        ? ConfigService.instance.config.ffmpegPath
+        : 'ffmpeg';
+    // Read remote bytes and pipe into ffmpeg stdin.
+    final client = HttpClient();
+    final req = await client.getUrl(Uri.parse(url));
+    req.headers.set('User-Agent',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    final remote = await req.close();
+
+    final args = [
+      '-i', 'pipe:0',
+      '-vn',
+      '-c:a', 'libmp3lame',
+      '-q:a', '0',
+      '-f', 'mp3',
+      'pipe:1',
+    ];
+    final ff = await Process.start(ffmpeg, args,
+        runInShell: true, mode: ProcessStartMode.normal);
+    remote.pipe(ff.stdin);
+    ff.stdin.close();
+
+    // Optional cache: tee into file while streaming.
+    final cacheEnabled = ConfigService.instance.config.streamCacheEnabled;
+    IOSink? cacheSink;
+    File? cacheFile;
+    if (cacheEnabled) {
+      try {
+        final dir = Directory(_cacheDir);
+        await dir.create(recursive: true);
+        cacheFile = File(
+            '$_cacheDir\\${DateTime.now().millisecondsSinceEpoch}.mp3');
+        cacheSink = cacheFile.openWrite();
+      } catch (_) {}
+    }
+
+    request.response.headers.contentType =
+        ContentType('audio', 'mpeg');
+    request.response.headers.set('Cache-Control', 'no-store');
+    await request.response.addStream(ff.stdout.transform(
+        StreamTransformer.fromHandlers(
+            handleData: (data, sink) {
+              cacheSink?.add(data);
+              sink.add(data);
+            },
+            handleError: (e, st, sink) {},
+            handleDone: (sink) => sink.close())));
+    await request.response.close();
+    await cacheSink?.close();
+    if (cacheEnabled && cacheFile != null) {
+      final size = await cacheFile.length();
+      if (size > 65536) {
+        _cacheIndex[query] = cacheFile.path;
+        _saveIndex();
+        _enforceCacheLimit();
+      } else {
+        try {
+          await cacheFile.delete();
+        } catch (_) {}
+      }
+    }
+    ff.kill();
+    client.close();
+  }
+
+  Future<void> _serveFile(HttpRequest request, File file) async {
+    request.response.headers.contentType = ContentType('audio', 'mpeg');
+    await request.response.addStream(file.openRead());
+    await request.response.close();
+  }
+
+  /// Cache size cap: 2GB default; evicts oldest entries.
+  Future<void> _enforceCacheLimit() async {
+    final maxBytes = ConfigService.instance.config.streamCacheMaxMb * 1024 * 1024;
+    final files = <File>[];
+    var total = 0;
+    for (final e in _cacheIndex.entries) {
+      final f = File(e.value);
+      if (!f.existsSync()) continue;
+      total += await f.length();
+      files.add(f);
+    }
+    if (total <= maxBytes) return;
+    files.sort((a, b) => a.lastModifiedSync().compareTo(b.lastModifiedSync()));
+    for (final f in files) {
+      if (total <= maxBytes) break;
+      final len = await f.length();
+      try {
+        await f.delete();
+      } catch (_) {}
+      total -= len;
+      _cacheIndex.removeWhere((k, v) => v == f.path);
+    }
+    _saveIndex();
+  }
+}
