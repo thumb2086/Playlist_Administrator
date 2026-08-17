@@ -334,22 +334,19 @@ class _HomePageState extends State<HomePage> {
         final data = await _gql.fetchPlaylist(id, limit: 50);
         final tracks = _extractPlaylistTracks(data);
         if (tracks.isNotEmpty) {
-          // Play first track, add rest to queue.
-          final queries = tracks.map((t) => t.displayName).toList();
-          PlayerController.instance.play(queries.first, title: tracks.first.name,
-              artist: tracks.first.artists.join(', '));
-          // Queue the rest.
-          for (int i = 1; i < queries.length; i++) {
-            // Future enhancement: add to queue.
-          }
+          // Queue all tracks, play first.
+          final paths = tracks.map((t) => t.displayName).toList();
+          final titles = tracks.map((t) => t.name).toList();
+          PlayerController.instance.setQueue(paths, titles: titles, startIndex: 0);
+          PlayerController.instance.play(paths.first,
+              title: tracks.first.name, artist: tracks.first.artists.join(', '));
           return;
         }
       } catch (_) {}
-      // fetchPlaylist failed (episode playlist etc.) — stream the card name.
-      PlayerController.instance.play(c.name, title: c.name);
-    } else if (uri.contains(':episode:') || uri.contains(':show:') || uri.contains(':album:')) {
+      // fetchPlaylist failed — try streaming the card name directly.
       PlayerController.instance.play(c.name, title: c.name);
     } else {
+      // Episode / Show / Album — stream by name.
       PlayerController.instance.play(c.name, title: c.name);
     }
   }

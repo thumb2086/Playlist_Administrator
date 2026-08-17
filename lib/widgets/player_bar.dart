@@ -38,6 +38,7 @@ class _PlayerBarState extends State<PlayerBar> {
   @override
   Widget build(BuildContext context) {
     final hasTrack = _ctrl.hasTrack;
+    final statusText = _ctrl.statusText;
     final dur = _ctrl.duration;
     final pos = _seeking ? Duration(seconds: _seekValue.toInt()) : _ctrl.position;
     final maxDur = dur.inMilliseconds > 0 ? dur.inMilliseconds.toDouble() : 1.0;
@@ -83,7 +84,14 @@ class _PlayerBarState extends State<PlayerBar> {
           const SizedBox(width: 10),
           SizedBox(
             width: 140,
-            child: Text('未播放', style: TextStyle(fontSize: 12, color: AppColors.textMuted.withValues(alpha: 0.5))),
+            child: Text(
+              statusText.isNotEmpty ? statusText : (hasTrack ? _ctrl.title : '未播放'),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: statusText.isNotEmpty ? Colors.orange : (hasTrack ? AppColors.text : AppColors.textMuted.withValues(alpha: 0.5)),
+              ),
+            ),
           ),
           const SizedBox(width: 16),
         ],

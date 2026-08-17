@@ -26,6 +26,7 @@ class PlayerController {
   String _title = '';
   String _artist = '';
   String? _coverPath;
+  String _statusText = '';
   Timer? _smtcTimer;
 
   // Getters
@@ -43,6 +44,7 @@ class PlayerController {
   List<String> get queue => List.unmodifiable(_queue);
   List<String> get queueTitles => List.unmodifiable(_queueTitles);
   bool get hasTrack => _index >= 0 && _index < _queue.length;
+  String get statusText => _statusText;
 
   final _listeners = <VoidCallback>[];
   void addListener(VoidCallback fn) => _listeners.add(fn);
@@ -96,17 +98,28 @@ class PlayerController {
   Future<void> playStream(String query, {String? title, String? artist}) async {
     _title = title ?? query;
     _artist = artist ?? '';
-    _isPlaying = true;
+    _statusText = '串流中: ${_title}';
+    _isPlaying = false;
     _notify();
-    await StreamServer.instance.start();
-    final localPath = await StreamServer.instance.resolveToFile(query);
-    if (localPath.isEmpty || !File(localPath).existsSync()) {
-      _isPlaying = false;
+    try {
+      await StreamServer.instance.start();
+      _statusText = '解析: $query';
       _notify();
-      return;
+      final localPath = await StreamServer.instance.resolveToFile(query);
+      if (localPath.isEmpty || !File(localPath).existsSync()) {
+        _statusText = '找不到: $query';
+        _notify();
+        return;
+      }
+      _statusText = '';
+      _isPlaying = true;
+      await _player.play(DeviceFileSource(localPath));
+      _pushSmtc();
+    } catch (e) {
+      _statusText = '錯誤: $e';
+      _notify();
     }
-    await _player.play(DeviceFileSource(localPath));
-    _pushSmtc();
+    _notify();
   }
 
   /// Smart play: local file if path exists, otherwise stream.
