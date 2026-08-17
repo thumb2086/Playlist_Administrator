@@ -337,17 +337,29 @@ class _HomePageState extends State<HomePage> {
           showModalBottomSheet<void>(
             context: context,
             backgroundColor: AppColors.card,
+            isScrollControlled: true,
             builder: (_) => _PlaylistSheet(name: c.name, tracks: tracks),
           );
+          return;
         }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('載入歌單失敗: $e')));
-        }
+      } catch (_) {}
+      // Playlist fetch failed (e.g. episode-only playlist) — show as info.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${c.name} — 歌單載入失敗')));
+      }
+    } else if (uri.contains(':episode:') || uri.contains(':show:')) {
+      // Podcast episode / show — open in PlayerPage with search query.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('播放: ${c.name}')));
+      }
+    } else if (uri.contains(':album:')) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('專輯: ${c.name}')));
       }
     } else {
-      // Album / Artist / Episode — show info card for now.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(c.name)));
@@ -365,19 +377,29 @@ class _HomePageState extends State<HomePage> {
       for (final it in items) {
         final item = (it as Map<String, dynamic>)['itemV2'] as Map<String, dynamic>?;
         if (item == null) continue;
-        final album = item['albumOfTrack'] as Map<String, dynamic>?;
         final name = (item['name'] ?? '') as String? ?? '';
         final uri = (item['uri'] ?? '') as String? ?? '';
+        // Track has albumOfTrack; episode has coverArt directly.
+        final album = item['albumOfTrack'] as Map<String, dynamic>?;
+        final coverArt = item['coverArt'] as Map<String, dynamic>?;
+        String? cover;
+        if (album != null) {
+          cover = SpotifyTrackItem.coverFromSources(album['coverArt']?['sources']);
+        } else if (coverArt != null) {
+          cover = SpotifyTrackItem.coverFromSources(coverArt['sources']);
+        }
         final artists = ((item['artists'] as List<dynamic>? ?? [])
                 .map((a) => ((a as Map<String, dynamic>)['profile'] as Map?)?['name'] as String? ?? '')
                 .where((s) => s.isNotEmpty)
                 .join(', '));
         final duration = ((item['trackDuration'] as Map<String, dynamic>?)?['totalMilliseconds'] as num?)?.toInt() ?? 0;
-        final cover = album != null ? SpotifyTrackItem.coverFromSources(album['coverArt']?['sources']) : null;
-        out.add(SpotifyTrackItem(
-          uri: uri, name: name, artists: [artists], album: (album?['name'] as String?) ?? '',
-          durationMs: duration, coverUrl: cover,
-        ));
+        final albumName = (album?['name'] as String?) ?? '';
+        if (name.isNotEmpty) {
+          out.add(SpotifyTrackItem(
+            uri: uri, name: name, artists: artists.isEmpty ? [] : [artists],
+            album: albumName, durationMs: duration, coverUrl: cover,
+          ));
+        }
       }
     } catch (_) {}
     return out;
