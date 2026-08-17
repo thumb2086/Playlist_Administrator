@@ -49,22 +49,22 @@ class _HomePageState extends State<HomePage> {
         setState(() { _loading = false; _sections = []; _newReleases = []; _browse = []; });
         return;
       }
-      final results = await Future.wait([
-        _gql.home(sectionItemsLimit: 20),
-        _gql.whatsNew(limit: 20),
-        _gql.browseAll(),
-      ], eagerError: false).catchError((e) => <dynamic>[]);
+      final results = await Future.wait<Map<String, dynamic>?>([
+        _safeLoad(() => _gql.home(sectionItemsLimit: 20)),
+        _safeLoad(() => _gql.whatsNew(limit: 20)),
+        _safeLoad(() => _gql.browseAll()),
+      ]);
       final sections = <_HomeSection>[];
-      if (results.isNotEmpty && results[0] is Map<String, dynamic>) {
-        sections.addAll(_parseHome(results[0] as Map<String, dynamic>));
+      if (results[0] != null) {
+        sections.addAll(_parseHome(results[0]!));
       }
       final releases = <_NewRelease>[];
-      if (results.length > 1 && results[1] is Map<String, dynamic>) {
-        releases.addAll(_parseNewReleases(results[1] as Map<String, dynamic>));
+      if (results[1] != null) {
+        releases.addAll(_parseNewReleases(results[1]!));
       }
       final browse = <_BrowseCard>[];
-      if (results.length > 2 && results[2] is Map<String, dynamic>) {
-        browse.addAll(_parseBrowse(results[2] as Map<String, dynamic>));
+      if (results[2] != null) {
+        browse.addAll(_parseBrowse(results[2]!));
       }
       if (mounted) setState(() {
         _sections = sections;
@@ -74,6 +74,15 @@ class _HomePageState extends State<HomePage> {
       });
     } catch (e) {
       if (mounted) setState(() { _loading = false; _error = '$e'; });
+    }
+  }
+
+  Future<Map<String, dynamic>?> _safeLoad(
+      Future<Map<String, dynamic>> Function() fn) async {
+    try {
+      return await fn();
+    } catch (_) {
+      return null;
     }
   }
 

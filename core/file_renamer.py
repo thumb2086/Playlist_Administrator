@@ -84,19 +84,17 @@ class FileRenamer:
             return None
     
     def generate_new_filename(self, metadata: dict, file_ext: str) -> str:
-        """Generate new filename based on metadata with Artist-Title format"""
+        """Generate new filename based on metadata with Title-Artist format (no year)"""
         artist = metadata.get('artist', '').strip()
         title = metadata.get('title', '').strip()
         album = metadata.get('album', '').strip()
-        date = metadata.get('date', '').strip()
-        
+
         # Build filename components
         name_parts = []
-        
-        # Priority order: Artist - Title (歌手-歌名格式)
+
+        # Priority order: Title - Artist (歌名-歌手格式, 與播放清單一致)
         if artist and title:
-            # 完整的歌手和歌名，使用「歌手-歌名」格式
-            base_name = f"{artist} - {title}"
+            base_name = f"{title} - {artist}"
         elif title:
             # 只有歌名，直接使用歌名
             base_name = title
@@ -109,14 +107,7 @@ class FileRenamer:
         else:
             # 都沒有，使用預設名稱
             base_name = "Unknown_Song"
-        
-        # Add year if available and meaningful
-        if date and len(date) >= 4 and date[:4].isdigit():
-            year = date[:4]
-            # Only add year if it's recent and meaningful
-            if 1900 <= int(year) <= 2030:
-                base_name = f"{base_name} ({year})"
-        
+
         # Sanitize the filename
         safe_name = sanitize_filename(base_name)
         
