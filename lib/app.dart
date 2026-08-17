@@ -7,7 +7,6 @@ import 'pages/library_page.dart';
 import 'pages/pipeline_page.dart';
 import 'pages/stats_page.dart';
 import 'pages/settings_page.dart';
-import 'pages/player_page.dart';
 import 'pages/download_page.dart';
 import 'pages/audio_extractor_page.dart';
 import 'services/i18n.dart';
@@ -15,7 +14,9 @@ import 'services/config_service.dart';
 import 'services/update_service.dart';
 import 'services/version_checker.dart';
 import 'services/spotify_session.dart';
+import 'services/player_controller.dart';
 import 'widgets/update_dialog.dart';
+import 'widgets/player_bar.dart';
 
 class PlaylistAdminApp extends StatefulWidget {
   const PlaylistAdminApp({super.key});
@@ -71,7 +72,6 @@ class _MainShellState extends State<MainShell> {
     HomePage(),
     SearchPage(),
     LibraryPage(),
-    PlayerPage(),
     PipelinePage(),
     StatsPage(),
     DownloadPage(),
@@ -86,12 +86,6 @@ class _MainShellState extends State<MainShell> {
     I18N.instance.addListener(_rebuildNav);
     _updateSvc.addListener(_onUpdate);
     _checkForUpdates();
-    // Auto-navigate to Player tab when playback starts from another page.
-    PlayerPage.playRequest.listen((_) {
-      if (mounted && _selectedIndex != 3) {
-        setState(() => _selectedIndex = 3);
-      }
-    });
     // Periodic check every 10 minutes while app is running
     Timer.periodic(const Duration(minutes: 10), (_) => _checkForUpdates());
   }
@@ -137,7 +131,6 @@ class _MainShellState extends State<MainShell> {
         _NavItemData(Icons.home_outlined, Icons.home, '首頁'),
         _NavItemData(Icons.search_outlined, Icons.search, '搜尋'),
         _NavItemData(Icons.library_music_outlined, Icons.library_music, t('app.sidebar.library')),
-        _NavItemData(Icons.music_note_outlined, Icons.music_note, t('app.sidebar.player')),
         _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, t('app.sidebar.pipeline')),
         _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, t('app.sidebar.stats')),
         _NavItemData(Icons.cloud_download_outlined, Icons.cloud_download, t('app.sidebar.download')),
@@ -151,30 +144,31 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     _context = context;
     return Scaffold(
-      body: Row(
-        children: [
-          _Sidebar(
-            items: _navItems,
-            selectedIndex: _selectedIndex,
-            onSelected: (i) {
-              setState(() => _selectedIndex = i);
-            },
-          ),
-          Expanded(
-            child: Column(
-            children: [
-              _Header(title: _navItems[_selectedIndex].label),
-              Expanded(
-                child: IndexedStack(
-                  index: _selectedIndex,
-                  children: _pages,
+      body: Column(children: [
+        Expanded(
+          child: Row(children: [
+            _Sidebar(
+              items: _navItems,
+              selectedIndex: _selectedIndex,
+              onSelected: (i) {
+                setState(() => _selectedIndex = i);
+              },
+            ),
+            Expanded(
+              child: Column(children: [
+                _Header(title: _navItems[_selectedIndex].label),
+                Expanded(
+                  child: IndexedStack(
+                    index: _selectedIndex,
+                    children: _pages,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          ),
-        ],
-      ),
+              ]),
+            ),
+          ]),
+        ),
+        const PlayerBar(),
+      ]),
     );
   }
 }

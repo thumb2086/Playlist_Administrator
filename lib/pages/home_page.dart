@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../services/config_service.dart';
 import '../services/spotify_session.dart';
 import '../services/spotify_gql_client.dart';
+import '../services/player_controller.dart';
 import '../widgets/dark_theme.dart';
 import '../widgets/spotify_login_dialog.dart';
-import 'player_page.dart';
 
 /// Spotify-style home: greeting + sections (Made For You, Daily Mixes…),
 /// new releases and browse categories — all via the native Spotify GQL API.
@@ -336,7 +336,7 @@ class _HomePageState extends State<HomePage> {
         if (tracks.isNotEmpty) {
           // Play first track, add rest to queue.
           final queries = tracks.map((t) => t.displayName).toList();
-          PlayerPage.playTrack(queries.first, title: tracks.first.name,
+          PlayerController.instance.play(queries.first, title: tracks.first.name,
               artist: tracks.first.artists.join(', '));
           // Queue the rest.
           for (int i = 1; i < queries.length; i++) {
@@ -346,11 +346,11 @@ class _HomePageState extends State<HomePage> {
         }
       } catch (_) {}
       // fetchPlaylist failed (episode playlist etc.) — stream the card name.
-      PlayerPage.playTrack(c.name, title: c.name);
+      PlayerController.instance.play(c.name, title: c.name);
     } else if (uri.contains(':episode:') || uri.contains(':show:') || uri.contains(':album:')) {
-      PlayerPage.playTrack(c.name, title: c.name);
+      PlayerController.instance.play(c.name, title: c.name);
     } else {
-      PlayerPage.playTrack(c.name, title: c.name);
+      PlayerController.instance.play(c.name, title: c.name);
     }
   }
 
@@ -471,6 +471,6 @@ class _PlaylistSheet extends StatelessWidget {
 
   void _streamTrack(BuildContext context, SpotifyTrackItem t) {
     Navigator.of(context).pop();
-    PlayerPage.playTrack(t.displayName, title: t.name, artist: t.artists.join(', '));
+    PlayerController.instance.play(t.displayName, title: t.name, artist: t.artists.join(', '));
   }
 }

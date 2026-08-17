@@ -11,6 +11,7 @@ import 'services/groq_service.dart';
 import 'services/i18n.dart';
 import 'services/log_manager.dart';
 import 'services/spotify_session.dart';
+import 'services/player_controller.dart';
 import 'dart:ui' show PlatformDispatcher;
 
 int _foundHwnd = 0;
@@ -84,6 +85,7 @@ void main() async {
   await ConfigService.instance.load();
   LogManager.instance.enable(ConfigService.instance.config.basePath);
   await SpotifySession.instance.load();
+  PlayerController.instance.init();
   FlutterError.onError = (details) {
     LogManager.instance.error('FlutterError: ${details.exception}\n${details.stack}');
     FlutterError.presentError(details);

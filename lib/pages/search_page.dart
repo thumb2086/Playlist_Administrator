@@ -4,10 +4,9 @@ import 'package:flutter/material.dart';
 import '../services/config_service.dart';
 import '../services/spotify_session.dart';
 import '../services/spotify_gql_client.dart';
+import '../services/player_controller.dart';
 import '../widgets/dark_theme.dart';
 import '../widgets/spotify_login_dialog.dart';
-import 'player_page.dart';
-import 'player_page.dart';
 
 /// Spotify search: native GQL search → check local library → stream or queue.
 class SearchPage extends StatefulWidget {
@@ -124,10 +123,10 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _play(SpotifyTrackItem t) async {
     final local = _findLocal(t);
     if (local != null) {
-      PlayerPage.playTrack(local, title: t.name, artist: t.artists.join(', '));
+      PlayerController.instance.play(local, title: t.name, artist: t.artists.join(', '));
       return;
     }
-    PlayerPage.playTrack(t.displayName, title: t.name, artist: t.artists.join(', '));
+    PlayerController.instance.play(t.displayName, title: t.name, artist: t.artists.join(', '));
   }
 
   @override
