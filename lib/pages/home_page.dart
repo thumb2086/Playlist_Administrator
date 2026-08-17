@@ -404,6 +404,9 @@ class _HomePageState extends State<HomePage> {
         MainShell.showDetail(PlaylistDetailPage(
           title: c.name, coverUrl: c.coverUrl, items: episodes, isPodcast: true,
         ));
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('\ - 未訂閱此 Podcast，請在 Download 頁加入')));
       }
 
     } else if (uri.contains(':episode:')) {
@@ -473,7 +476,7 @@ class _HomePageState extends State<HomePage> {
               title: tracks.first.name, artist: tracks.first.artists.join(', '));
           return;
         }
-      } catch (_) {}
+      } catch (e) { print('[HOME] quickPlay err: $e'); }
       // Playlist fetch failed — don't stream the playlist name.
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('歌單載入失敗')));
