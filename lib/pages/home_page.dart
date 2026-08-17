@@ -514,10 +514,13 @@ class _HomePageState extends State<HomePage> {
       final content = playlist?['content'] as Map<String, dynamic>?;
       final items = content?['items'] as List<dynamic>? ?? [];
       for (final it in items) {
-        final item = (it as Map<String, dynamic>)['itemV2'] as Map<String, dynamic>?;
-        if (item == null) continue;
+        final wrapper = (it as Map<String, dynamic>)['itemV2'] as Map<String, dynamic>?;
+        if (wrapper == null) continue;
+        // Track data is nested inside itemV2.data (not itemV2 directly).
+        final item = wrapper['data'] as Map<String, dynamic>? ?? wrapper;
         final name = (item['name'] ?? '') as String? ?? '';
         final uri = (item['uri'] ?? '') as String? ?? '';
+        if (name.isEmpty && uri.isEmpty) continue;
         // Track has albumOfTrack; episode has coverArt directly.
         final album = item['albumOfTrack'] as Map<String, dynamic>?;
         final coverArt = item['coverArt'] as Map<String, dynamic>?;
@@ -527,10 +530,17 @@ class _HomePageState extends State<HomePage> {
         } else if (coverArt != null) {
           cover = SpotifyTrackItem.coverFromSources(coverArt['sources']);
         }
-        final artists = ((item['artists'] as List<dynamic>? ?? [])
-                .map((a) => ((a as Map<String, dynamic>)['profile'] as Map?)?['name'] as String? ?? '')
-                .where((s) => s.isNotEmpty)
-                .join(', '));
+        // Artists may be a list or a map (depending on response).
+        final artistsRaw = item['artists'];
+        String artists = '';
+        if (artistsRaw is List) {
+          artists = artistsRaw
+              .map((a) => (a is Map ? ((a['profile'] as Map?)?['name'] ?? '') : '').toString())
+              .where((s) => s.isNotEmpty)
+              .join(', ');
+        } else if (artistsRaw is Map) {
+          artists = (artistsRaw['profile'] as Map?)?['name'] ?? '';
+        }
         final duration = ((item['trackDuration'] as Map<String, dynamic>?)?['totalMilliseconds'] as num?)?.toInt() ?? 0;
         final albumName = (album?['name'] as String?) ?? '';
         if (name.isNotEmpty) {
