@@ -153,7 +153,6 @@ class StreamServer {
     await cacheDir.create(recursive: true);
 
     final safeName = query.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').replaceAll(RegExp(r'\s+'), ' ').trim();
-    // Check cache first.
     for (final f in cacheDir.listSync().whereType<File>()) {
       if (f.path.contains(safeName.substring(0, safeName.length.clamp(0, 20))) &&
           f.path.endsWith('.mp3') && f.lengthSync() > 65536) {
@@ -170,8 +169,15 @@ class StreamServer {
         workingDirectory: ConfigService.instance.config.basePath,
         environment: {'PYTHONIOENCODING': 'utf-8'},
       );
-      final out = await proc.stdout.transform(utf8.decoder).join();
-      await proc.exitCode;
+      // Timeout: kill if stuck for 30 seconds.
+      final outFuture = proc.stdout.transform(utf8.decoder).join();
+      final exited = proc.exitCode.timeout(
+        const Duration(seconds: 30),
+        onTimeout: () { proc.kill(); return -1; },
+      );
+      final out = await outFuture;
+      final code = await exited;
+      if (code != 0 && code != -1) return '';
       for (final line in out.split('\n')) {
         if (!line.trim().isEmpty) {
           try {

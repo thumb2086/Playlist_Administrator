@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
 import '../services/spotify_session.dart';
@@ -328,13 +329,13 @@ class _HomePageState extends State<HomePage> {
   Future<void> _onCardTap(_HomeCard c) async {
     final uri = c.uri;
     if (uri.isEmpty) return;
+
     if (uri.contains(':playlist:')) {
       final id = uri.split(':').last;
       try {
         final data = await _gql.fetchPlaylist(id, limit: 50);
         final tracks = _extractPlaylistTracks(data);
         if (tracks.isNotEmpty) {
-          // Queue all tracks, play first.
           final paths = tracks.map((t) => t.displayName).toList();
           final titles = tracks.map((t) => t.name).toList();
           PlayerController.instance.setQueue(paths, titles: titles, startIndex: 0);
@@ -343,12 +344,41 @@ class _HomePageState extends State<HomePage> {
           return;
         }
       } catch (_) {}
-      // fetchPlaylist failed — try streaming the card name directly.
       PlayerController.instance.play(c.name, title: c.name);
+
+    } else if (uri.contains(':show:') || uri.contains(':episode:')) {
+      // Podcast — play from local podcasts/ directory.
+      final files = _findLocalEpisodes(c.name);
+      if (files.isNotEmpty) {
+        final paths = files.map((f) => f.path).toList();
+        final names = files.map((f) => f.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '')).toList();
+        PlayerController.instance.setQueue(paths, titles: names, startIndex: 0);
+        PlayerController.instance.playFile(paths.first, title: names.first, artist: c.name);
+      } else {
+        PlayerController.instance.play(c.name, title: c.name);
+      }
+
     } else {
-      // Episode / Show / Album — stream by name.
       PlayerController.instance.play(c.name, title: c.name);
     }
+  }
+
+  /// Find audio files in podcasts/ matching the show name, newest first.
+  static List<File> _findLocalEpisodes(String showName) {
+    final cfg = ConfigService.instance.config;
+    final podcastDir = Directory(cfg.podcastsPath);
+    if (!podcastDir.existsSync()) return [];
+    final lower = showName.toLowerCase();
+    final results = <File>[];
+    for (final d in podcastDir.listSync().whereType<Directory>()) {
+      if (d.uri.pathSegments.last.toLowerCase().contains(lower.substring(0, lower.length.clamp(0, 15)))) {
+        final audioFiles = d.listSync().whereType<File>().where((f) =>
+            f.path.endsWith('.mp3') || f.path.endsWith('.m4a') || f.path.endsWith('.wav')).toList()
+          ..sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+        results.addAll(audioFiles);
+      }
+    }
+    return results;
   }
 
   List<SpotifyTrackItem> _extractPlaylistTracks(Map<String, dynamic> data) {
