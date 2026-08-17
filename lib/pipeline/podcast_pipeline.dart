@@ -6,6 +6,7 @@ import '../models/pipeline_step.dart';
 import '../services/config_service.dart';
 import '../services/podcast_service.dart';
 import '../services/groq_service.dart';
+import '../services/chinese_converter.dart';
 import '../services/rag_service.dart';
 import '../version.dart';
 
@@ -251,7 +252,10 @@ class PodcastPipeline {
         last = clean;
       }
       final text = textLines.join('\n');
-      await File(txtPath).writeAsString(text, flush: true);
+      // Convert simplified Chinese to traditional.
+      final converted = ChineseConverter.instance.isLoaded
+          ? ChineseConverter.instance.toTraditional(text) : text;
+      await File(txtPath).writeAsString(converted, flush: true);
       // Guard: a transcript with almost no content means the SRT was garbage
       // (failed subtitle grab, e.g. only "[Music]"/"you"). Keeping it lets
       // the RAG index treat it as "done" forever with zero-value data —
@@ -367,7 +371,10 @@ class PodcastPipeline {
         onLog('      ⚠️ 逐字稿內容過短 ($strippedLen 字)，已跳過待下次重試');
         return;
       }
-      await File(txtPath).writeAsString(text, flush: true);
+      // Convert simplified Chinese to traditional.
+      final converted = ChineseConverter.instance.isLoaded
+          ? ChineseConverter.instance.toTraditional(text) : text;
+      await File(txtPath).writeAsString(converted, flush: true);
       cache[t.key] = {'srt': false, 'txt': true, 'yt_status': 'not_found', 'status': 'ok'};
       onLog('      ✅ ($strippedLen 字)');
     } catch (e) {

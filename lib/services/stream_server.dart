@@ -101,36 +101,14 @@ class StreamServer {
     if (path.isNotEmpty && path[0] == 'stream' && path.length >= 2) {
       final query = path[1];
       try {
-        // 1. Cached file first.
+        // 1. Cached file first — serve instantly.
         final cached = _cacheIndex[query];
         if (cached != null && File(cached).existsSync()) {
           await _serveFile(request, File(cached));
           return;
         }
-        // 2. Resolve via yt-dlp.
-        final url = await _resolve(query);
-        if (url.isEmpty) {
-          request.response.statusCode = HttpStatus.notFound;
-          await request.response.close();
-          return;
-        }
-        // 3. Stream the resolved URL through a proxy so audioplayers sees a
-        //    stable local URL (avoids CORS/redirect issues).
-        final client = HttpClient();
-        final req = await client.getUrl(Uri.parse(url));
-        req.headers.set('User-Agent',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-        final resp = await req.close();
-        if (resp.statusCode != HttpStatus.ok) {
-          request.response.statusCode = HttpStatus.badGateway;
-          await request.response.close();
-          client.close();
-          return;
-        }
-        // Transcode? yt-dlp bestaudio is opus/webm; audioplayers on Windows
-        // cannot decode webm/opus reliably. Transcode via ffmpeg to mp3.
-        await _serveTranscoded(request, url, query);
-        client.close();
+        // 2. No cache — resolve + transcode on-the-fly (true streaming).
+        await _serveTranscoded(request, '', query);
       } catch (e) {
         try {
           request.response.statusCode = HttpStatus.internalServerError;
@@ -233,34 +211,33 @@ class StreamServer {
     }
   }
 
-  /// Streams the remote URL through ffmpeg (opus/webm → mp3 VBR 0), piping
-  /// output to the HTTP response. Writes cache file when enabled.
+  /// True streaming: resolve URL → ffmpeg reads URL directly → pipe mp3 to
+  /// HTTP response + write to cache simultaneously. Starts playing ASAP.
   Future<void> _serveTranscoded(
       HttpRequest request, String url, String query) async {
+    // Resolve URL if not provided.
+    if (url.isEmpty) {
+      url = await _resolve(query);
+      if (url.isEmpty) {
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+        return;
+      }
+    }
+
     final ffmpeg = ConfigService.instance.config.ffmpegPath.isNotEmpty
         ? ConfigService.instance.config.ffmpegPath
         : 'ffmpeg';
-    // Read remote bytes and pipe into ffmpeg stdin.
-    final client = HttpClient();
-    final req = await client.getUrl(Uri.parse(url));
-    req.headers.set('User-Agent',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-    final remote = await req.close();
 
+    // ffmpeg reads remote URL directly — starts transcoding immediately.
     final args = [
-      '-i', 'pipe:0',
-      '-vn',
-      '-c:a', 'libmp3lame',
-      '-q:a', '0',
-      '-f', 'mp3',
-      'pipe:1',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      '-i', url,
+      '-vn', '-c:a', 'libmp3lame', '-q:a', '0', '-f', 'mp3', 'pipe:1',
     ];
-    final ff = await Process.start(ffmpeg, args,
-        runInShell: true, mode: ProcessStartMode.normal);
-    remote.pipe(ff.stdin);
-    ff.stdin.close();
+    final ff = await Process.start(ffmpeg, args, runInShell: true);
 
-    // Optional cache: tee into file while streaming.
+    // Cache: tee into file while streaming.
     final cacheEnabled = ConfigService.instance.config.streamCacheEnabled;
     IOSink? cacheSink;
     File? cacheFile;
@@ -268,15 +245,16 @@ class StreamServer {
       try {
         final dir = Directory(_cacheDir);
         await dir.create(recursive: true);
-        cacheFile = File(
-            '$_cacheDir\\${DateTime.now().millisecondsSinceEpoch}.mp3');
+        final safeName = query.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').replaceAll(RegExp(r'\s+'), ' ').trim();
+        cacheFile = File('$_cacheDir\\$safeName.mp3');
         cacheSink = cacheFile.openWrite();
       } catch (_) {}
     }
 
-    request.response.headers.contentType =
-        ContentType('audio', 'mpeg');
+    request.response.headers.contentType = ContentType('audio', 'mpeg');
     request.response.headers.set('Cache-Control', 'no-store');
+
+    // Pipe ffmpeg stdout → HTTP response + optional cache.
     await request.response.addStream(ff.stdout.transform(
         StreamTransformer.fromHandlers(
             handleData: (data, sink) {
@@ -287,20 +265,13 @@ class StreamServer {
             handleDone: (sink) => sink.close())));
     await request.response.close();
     await cacheSink?.close();
-    if (cacheEnabled && cacheFile != null) {
-      final size = await cacheFile.length();
-      if (size > 65536) {
-        _cacheIndex[query] = cacheFile.path;
-        _saveIndex();
-        _enforceCacheLimit();
-      } else {
-        try {
-          await cacheFile.delete();
-        } catch (_) {}
-      }
+
+    // Update cache index.
+    if (cacheEnabled && cacheFile != null && cacheFile.existsSync() && cacheFile.lengthSync() > 65536) {
+      _cacheIndex[query] = cacheFile.path;
+      _saveIndex();
+      _enforceCacheLimit();
     }
-    ff.kill();
-    client.close();
   }
 
   Future<void> _serveFile(HttpRequest request, File file) async {
