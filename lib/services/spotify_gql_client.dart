@@ -168,7 +168,8 @@ class SpotifyGqlClient {
       }
     }
     if (resp.statusCode >= 400) {
-      throw Exception('Spotify GQL ${resp.statusCode}: ${resp.body.substring(0, 200)}');
+      final body = resp.body.length > 200 ? resp.body.substring(0, 200) : resp.body;
+      throw Exception('Spotify GQL ${resp.statusCode}: $body');
     }
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }

@@ -42,6 +42,36 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() {});
   }
 
+  /// Extract cover image URL from a GQL content data map.
+  /// Handles: Artist (visuals.avatarImage), Episode (coverArt),
+  /// Playlist (images.items[0]), Show, Album.
+  static String? _extractCover(Map<String, dynamic> d) {
+    // Artist: visuals.avatarImage.sources
+    final v = d['visuals'] as Map<String, dynamic>?;
+    final av = v?['avatarImage'] as Map<String, dynamic>?;
+    final avSrc = av?['sources'] as List<dynamic>?;
+    if (avSrc != null && avSrc.isNotEmpty) {
+      return (avSrc.last as Map<String, dynamic>)['url'] as String?;
+    }
+    // Episode / Podcast: coverArt.sources
+    final ca = d['coverArt'] as Map<String, dynamic>?;
+    final caSrc = ca?['sources'] as List<dynamic>?;
+    if (caSrc != null && caSrc.isNotEmpty) {
+      return (caSrc.last as Map<String, dynamic>)['url'] as String?;
+    }
+    // Playlist: images.items[0].sources
+    final imgs = d['images'] as Map<String, dynamic>?;
+    final items = imgs?['items'] as List<dynamic>?;
+    if (items != null && items.isNotEmpty) {
+      final src = (items[0] as Map<String, dynamic>)['sources'] as List<dynamic>?;
+      if (src != null && src.isNotEmpty) {
+        return (src.last as Map<String, dynamic>)['url'] as String?;
+      }
+    }
+    // Album: coverArt.sources (same as episode but different typename)
+    return null;
+  }
+
   Future<void> _load() async {
     setState(() { _loading = true; _error = ''; });
     try {
@@ -97,37 +127,24 @@ class _HomePageState extends State<HomePage> {
         final sMap = s as Map<String, dynamic>;
         final sData = (sMap['data'] as Map<String, dynamic>?) ?? {};
         final title = ((sData['title'] as Map<String, dynamic>?)?['transformedLabel'] ?? '') as String? ?? '';
-        if (title.isEmpty) continue;
         final sectionItems = (sMap['sectionItems'] as Map<String, dynamic>?) ?? {};
         final cards = <_HomeCard>[];
         for (final it in (sectionItems['items'] as List<dynamic>? ?? [])) {
           final itMap = it as Map<String, dynamic>;
           final content = itMap['content'] as Map<String, dynamic>?;
           final uri = (itMap['uri'] ?? '') as String;
-          final name = ((content?['name'] ?? (content?['profile'] as Map?)?['name'] ?? '') as String?) ?? '';
           final cData = content?['data'] as Map<String, dynamic>?;
           if (cData != null) {
-            final n = cData['name'] as String? ?? name;
+            final n = cData['name'] as String? ?? '';
             final profile = (cData['profile'] as Map<String, dynamic>?)?['name'] as String?;
-            final visuals = cData['visuals'] as Map<String, dynamic>?;
-            final avatar = visuals?['avatarImage'] as Map<String, dynamic>? ??
-                (visuals?['image'] as Map<String, dynamic>?);
-            final sources = avatar?['sources'] as List<dynamic>? ?? [];
-            final cover = sources.isNotEmpty
-                ? (sources.last as Map<String, dynamic>)['url'] as String?
-                : null;
+            final cover = _extractCover(cData);
             if (n.isNotEmpty) {
-              cards.add(_HomeCard(
-                uri: uri,
-                name: n,
-                subtitle: profile ?? '',
-                coverUrl: cover,
-              ));
+              cards.add(_HomeCard(uri: uri, name: n, subtitle: profile ?? '', coverUrl: cover));
             }
           }
         }
         if (cards.isNotEmpty) {
-          sections.add(_HomeSection(title: title, cards: cards));
+          sections.add(_HomeSection(title: title.isNotEmpty ? title : '為你推薦', cards: cards));
         }
       }
     } catch (_) {}
@@ -164,22 +181,22 @@ class _HomePageState extends State<HomePage> {
         final sMap = s as Map<String, dynamic>;
         final sData = sMap['data'] as Map<String, dynamic>? ?? {};
         final title = ((sData['title'] as Map<String, dynamic>?)?['transformedLabel'] ?? '') as String? ?? '';
-        if (title.isEmpty) continue;
         final sectionItems = (sMap['sectionItems'] as Map<String, dynamic>?) ?? {};
         final cards = <_HomeCard>[];
         for (final it in (sectionItems['items'] as List<dynamic>? ?? [])) {
-          final content = (it as Map<String, dynamic>)['content'] as Map<String, dynamic>?;
+          final itMap = it as Map<String, dynamic>;
+          final content = itMap['content'] as Map<String, dynamic>?;
           final uri = ((it['uri'] ?? '') as String?) ?? '';
-          final name = ((content?['name'] ?? content?['title']) as String?) ?? '';
-          final img = content?['images'] ?? content?['visuals']?['image'] ?? content?['icon'];
-          final cover = content != null
-              ? SpotifyTrackItem.coverFromSources(img is Map ? img['sources'] : img)
-              : null;
+          final cData = content?['data'] as Map<String, dynamic>?;
+          final name = cData?['name'] as String? ?? (content?['name'] ?? '') as String? ?? '';
+          final cover = cData != null ? _extractCover(cData) : null;
           if (name.isNotEmpty) {
             cards.add(_HomeCard(uri: uri, name: name, subtitle: '', coverUrl: cover));
           }
         }
-        if (cards.isNotEmpty) out.add(_BrowseCard(title: title, cards: cards));
+        if (cards.isNotEmpty) {
+          out.add(_BrowseCard(title: title.isNotEmpty ? title : '瀏覽', cards: cards));
+        }
       }
     } catch (_) {}
     return out;
@@ -328,6 +345,12 @@ class _HomePageState extends State<HomePage> {
           ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('載入歌單失敗: $e')));
         }
+      }
+    } else {
+      // Album / Artist / Episode — show info card for now.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(c.name)));
       }
     }
   }
