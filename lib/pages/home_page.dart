@@ -1,12 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import '../models/playlist_item.dart';
 import '../services/config_service.dart';
 import '../services/spotify_session.dart';
 import '../services/spotify_gql_client.dart';
 import '../services/player_controller.dart';
+import '../services/stream_server.dart';
 import '../widgets/dark_theme.dart';
 import '../widgets/spotify_login_dialog.dart';
+import 'playlist_detail_page.dart';
 
 /// Spotify-style home: greeting + sections (Made For You, Daily Mixes…),
 /// new releases and browse categories — all via the native Spotify GQL API.
@@ -292,44 +296,146 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _card(_HomeCard c) {
-    return GestureDetector(
-      onTap: () => _onCardTap(c),
-      child: Container(
-        width: 130,
-        margin: const EdgeInsets.only(right: 10),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceLight,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        padding: const EdgeInsets.all(10),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: c.coverUrl != null
-                ? Image.network(c.coverUrl!, width: 110, height: 110,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                        width: 110, height: 110, color: AppColors.surfaceLight,
-                        child: const Icon(Icons.music_note_rounded, color: AppColors.textMuted)))
-                : Container(
-                    width: 110, height: 110, color: AppColors.surfaceLight,
-                    child: const Icon(Icons.music_note_rounded, color: AppColors.textMuted)),
+    final isPodcast = c.uri.contains(':show:') || c.uri.contains(':episode:');
+    return Stack(
+      children: [
+        // Main card body — tap navigates to detail page.
+        GestureDetector(
+          onTap: () => _openDetail(c),
+          child: Container(
+            width: 130,
+            margin: const EdgeInsets.only(right: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            padding: const EdgeInsets.all(10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Stack(children: [
+                  SizedBox(
+                    width: 110, height: 110,
+                    child: c.coverUrl != null
+                        ? Image.network(c.coverUrl!, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                                color: AppColors.surfaceLight,
+                                child: Icon(isPodcast ? Icons.podcasts_rounded : Icons.music_note_rounded,
+                                    color: AppColors.textMuted)))
+                        : Container(
+                            color: AppColors.surfaceLight,
+                            child: Icon(isPodcast ? Icons.podcasts_rounded : Icons.music_note_rounded,
+                                color: AppColors.textMuted)),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 6),
+              Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+              if (c.subtitle.isNotEmpty)
+                Text(c.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 9, color: AppColors.textMuted.withValues(alpha: 0.8))),
+            ]),
           ),
-          const SizedBox(height: 6),
-          Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-          if (c.subtitle.isNotEmpty)
-            Text(c.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 9, color: AppColors.textMuted.withValues(alpha: 0.8))),
-        ]),
-      ),
+        ),
+        // Play button overlay — tap plays directly (queues entire playlist).
+        Positioned(
+          right: 16, bottom: 50,
+          child: GestureDetector(
+            onTap: () => _onQuickPlay(c),
+            child: Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.accent,
+                shape: BoxShape.circle,
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 6)],
+              ),
+              child: const Icon(Icons.play_arrow_rounded, color: Colors.black, size: 22),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
-  Future<void> _onCardTap(_HomeCard c) async {
+/// Card body tap → navigate to PlaylistDetailPage.
+  Future<void> _openDetail(_HomeCard c) async {
     final uri = c.uri;
     if (uri.isEmpty) return;
 
+    if (uri.contains(':playlist:')) {
+      final id = uri.split(':').last;
+      try {
+        final data = await _gql.fetchPlaylist(id, limit: 50);
+        final tracks = _extractPlaylistTracks(data);
+        if (tracks.isNotEmpty && mounted) {
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => PlaylistDetailPage(
+              title: c.name, subtitle: c.subtitle, coverUrl: c.coverUrl,
+              items: tracks.map((t) => PlaylistItem(
+                name: t.name, artist: t.artists.join(', '),
+                durationMs: t.durationMs, coverUrl: t.coverUrl,
+                audioQuery: t.displayName,
+              )).toList(),
+            ),
+          ));
+          return;
+        }
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('歌單載入失敗: $e')));
+      }
+
+    } else if (uri.contains(':show:')) {
+      final episodes = await _fetchPodcastEpisodes(c.name);
+      if (episodes.isNotEmpty && mounted) {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => PlaylistDetailPage(
+            title: c.name, coverUrl: c.coverUrl,
+            items: episodes, isPodcast: true,
+          ),
+        ));
+      }
+    }
+  }
+
+  Future<List<PlaylistItem>> _fetchPodcastEpisodes(String showName) async {
+    final cfg = ConfigService.instance.config;
+    final rssUrl = cfg.podcastSubscriptions[showName];
+    if (rssUrl == null || rssUrl.isEmpty) return [];
+    try {
+      final resp = await http.get(Uri.parse(rssUrl),
+          headers: {'User-Agent': 'Mozilla/5.0'}).timeout(const Duration(seconds: 15));
+      if (resp.statusCode != 200) return [];
+      return _parseRssToItems(resp.body, showName);
+    } catch (_) { return []; }
+  }
+
+  List<PlaylistItem> _parseRssToItems(String xml, String showName) {
+    final items = <PlaylistItem>[];
+    final itemRe = RegExp(r'<item>(.*?)</item>', dotAll: true);
+    final titleRe = RegExp(r'<title><!\[CDATA\[(.*?)\]\]></title>|<title>(.*?)</title>');
+    final urlRe = RegExp(r'<enclosure[^>]+url="([^"]+)"');
+    for (final m in itemRe.allMatches(xml)) {
+      final item = m.group(1)!;
+      final titleM = titleRe.firstMatch(item);
+      final title = (titleM?.group(1) ?? titleM?.group(2) ?? '').trim();
+      final urlM = urlRe.firstMatch(item);
+      final url = urlM?.group(1) ?? '';
+      if (url.isNotEmpty) {
+        items.add(PlaylistItem(
+          name: title.isNotEmpty ? title : showName,
+          artist: showName, audioQuery: title, audioUrl: url,
+        ));
+      }
+    }
+    return items;
+  }
+
+  /// Play button tap → quick play (queue entire list + play first).
+  Future<void> _onQuickPlay(_HomeCard c) async {
+    final uri = c.uri;
+    if (uri.isEmpty) return;
     if (uri.contains(':playlist:')) {
       final id = uri.split(':').last;
       try {
@@ -339,36 +445,14 @@ class _HomePageState extends State<HomePage> {
           final paths = tracks.map((t) => t.displayName).toList();
           final titles = tracks.map((t) => t.name).toList();
           PlayerController.instance.setQueue(paths, titles: titles, startIndex: 0);
-          PlayerController.instance.play(paths.first,
+          PlayerController.instance.play(tracks.first.displayName,
               title: tracks.first.name, artist: tracks.first.artists.join(', '));
           return;
         }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('歌單載入失敗: $e')));
-        }
-      }
-      return; // Don't fall back to streaming the playlist name.
-
+      } catch (_) {}
     } else if (uri.contains(':show:')) {
-      // Podcast show — stream from RSS feed (same source as pipeline).
       PlayerController.instance.playPodcastShow(c.name);
-
-    } else if (uri.contains(':episode:')) {
-      // Podcast episode — play from local or RSS.
-      final files = _findLocalEpisodes(c.name);
-      if (files.isNotEmpty) {
-        final paths = files.map((f) => f.path).toList();
-        final names = files.map((f) => f.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '')).toList();
-        PlayerController.instance.setQueue(paths, titles: names, startIndex: 0);
-        PlayerController.instance.playFile(paths.first, title: names.first, artist: c.name);
-      } else {
-        PlayerController.instance.playPodcastShow(c.name);
-      }
-
     } else {
-      // Music — stream via YouTube.
       PlayerController.instance.play(c.name, title: c.name);
     }
   }

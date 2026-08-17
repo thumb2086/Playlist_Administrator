@@ -71,6 +71,22 @@ class StreamServer {
   /// Look up a cached stream for [query]; null if not cached.
   String? cachedPathFor(String query) => _cacheIndex[query];
 
+  /// Search cache\stream\ for a file matching the query name.
+  String? findCached(String query) {
+    final dir = Directory(_cacheDir);
+    if (!dir.existsSync()) return null;
+    final lower = query.toLowerCase();
+    for (final f in dir.listSync().whereType<File>()) {
+      if (f.path.endsWith('.mp3') && f.lengthSync() > 65536) {
+        final name = f.uri.pathSegments.last.toLowerCase();
+        if (name.contains(lower.substring(0, lower.length.clamp(0, 20)))) {
+          return f.path;
+        }
+      }
+    }
+    return null;
+  }
+
   Future<void> _handle(HttpRequest request) async {
     final path = request.uri.pathSegments;
     if (path.isNotEmpty && path[0] == 'stream' && path.length >= 2) {

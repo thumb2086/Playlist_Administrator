@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../models/playlist_item.dart';
 import '../services/config_service.dart';
 import '../services/stream_server.dart';
 import '../services/smtc_service.dart';
@@ -220,6 +221,73 @@ class PlayerController {
       }
     }
     return episodes;
+  }
+
+  /// Play a PlaylistItem: direct RSS URL if available, else cache-first, else stream.
+  Future<void> playItem(PlaylistItem item) async {
+    _title = item.name;
+    _artist = item.artist;
+    _notify();
+
+    // 1. Direct RSS URL (podcast).
+    if (item.audioUrl != null && item.audioUrl!.isNotEmpty) {
+      _statusText = '播放: ${item.name}';
+      _isPlaying = true;
+      _notify();
+      // Cache RSS audio: play URL, cache in background.
+      _cacheRssAudio(item);
+      await _player.play(UrlSource(item.audioUrl!));
+      _pushSmtc();
+      _notify();
+      return;
+    }
+
+    // 2. Check cache\stream\ first.
+    final cached = StreamServer.instance.findCached(item.audioQuery);
+    if (cached != null && File(cached).existsSync()) {
+      await playFile(cached, title: item.name, artist: item.artist);
+      return;
+    }
+
+    // 3. Check local music library.
+    final local = _findLocalTrack(item.audioQuery);
+    if (local != null) {
+      await playFile(local, title: item.name, artist: item.artist);
+      return;
+    }
+
+    // 4. Stream via YouTube.
+    await playStream(item.audioQuery, title: item.name, artist: item.artist);
+  }
+
+  String? _findLocalTrack(String query) {
+    final cfg = ConfigService.instance.config;
+    final musicDir = Directory(cfg.musicPath);
+    if (!musicDir.existsSync()) return null;
+    final lower = query.toLowerCase();
+    for (final f in musicDir.listSync().whereType<File>()) {
+      if (f.path.endsWith('.mp3')) {
+        final stem = f.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '').toLowerCase();
+        if (stem == lower || stem.contains(lower) || lower.contains(stem)) {
+          return f.path;
+        }
+      }
+    }
+    return null;
+  }
+
+  void _cacheRssAudio(PlaylistItem item) async {
+    try {
+      final cacheDir = Directory('${ConfigService.instance.config.streamCachePath}');
+      await cacheDir.create(recursive: true);
+      final safeName = item.name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+      final outPath = '${cacheDir.path}\\$safeName.mp3';
+      if (File(outPath).existsSync()) return;
+      final resp = await http.get(Uri.parse(item.audioUrl!)).timeout(const Duration(seconds: 60));
+      if (resp.statusCode == 200) {
+        await File(outPath).writeAsBytes(resp.bodyBytes);
+      }
+    } catch (_) {}
   }
 
   void setQueue(List<String> paths, {List<String>? titles, int startIndex = 0}) {
