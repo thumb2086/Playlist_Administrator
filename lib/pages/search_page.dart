@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import '../services/config_service.dart';
 import '../services/spotify_session.dart';
 import '../services/spotify_gql_client.dart';
-import '../services/stream_server.dart';
 import '../widgets/dark_theme.dart';
 import '../widgets/spotify_login_dialog.dart';
+import 'player_page.dart';
 import 'player_page.dart';
 
 /// Spotify search: native GQL search → check local library → stream or queue.
@@ -23,9 +23,6 @@ class _SearchPageState extends State<SearchPage> {
   List<SpotifyTrackItem> _tracks = [];
   bool _searching = false;
   String _error = '';
-
-  // Queue bridge into the player page.
-  static PlayerPage? playerPageRef;
 
   @override
   void initState() {
@@ -127,31 +124,10 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _play(SpotifyTrackItem t) async {
     final local = _findLocal(t);
     if (local != null) {
-      // TODO: route to the app player queue.
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('本地播放: ${t.displayName}')));
+      PlayerPage.playTrack(local, title: t.name, artist: t.artists.join(', '));
       return;
     }
-    final cfg = ConfigService.instance.config;
-    await StreamServer.instance.start();
-    final query = t.displayName;
-    final cached = StreamServer.instance.cachedPathFor(query);
-    if (cached != null && File(cached).existsSync()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('從快取播放: ${t.displayName}')));
-      return;
-    }
-    // Resolve stream URL and cache metadata for the player.
-    final url = await StreamServer.instance.resolveForTest(query);
-    if (!mounted) return;
-    if (url.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('找不到串流來源')));
-      return;
-    }
-    // TODO: hand off to the app player (UrlSource) via player page bridge.
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已準備串流: ${t.displayName}')));
+    PlayerPage.playTrack(t.displayName, title: t.name, artist: t.artists.join(', '));
   }
 
   @override

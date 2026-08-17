@@ -1,11 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../services/config_service.dart';
 import '../services/spotify_session.dart';
 import '../services/spotify_gql_client.dart';
-import '../services/config_service.dart';
-import '../services/stream_server.dart';
 import '../widgets/dark_theme.dart';
 import '../widgets/spotify_login_dialog.dart';
+import 'player_page.dart';
 
 /// Spotify-style home: greeting + sections (Made For You, Daily Mixes…),
 /// new releases and browse categories — all via the native Spotify GQL API.
@@ -343,10 +343,10 @@ class _HomePageState extends State<HomePage> {
           return;
         }
       } catch (_) {}
-      // Playlist fetch failed (e.g. episode-only playlist) — show as info.
+      // Playlist fetch failed — likely episode-only (podcast) playlist.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('${c.name} — 歌單載入失敗')));
+            SnackBar(content: Text('${c.name} — 此為 Podcast 歌單，請透過搜尋播放')));
       }
     } else if (uri.contains(':episode:') || uri.contains(':show:')) {
       // Podcast episode / show — open in PlayerPage with search query.
@@ -483,18 +483,7 @@ class _PlaylistSheet extends StatelessWidget {
   }
 
   void _streamTrack(BuildContext context, SpotifyTrackItem t) {
-    final cfg = ConfigService.instance.config;
     Navigator.of(context).pop();
-    // Simple playback: open the stream URL in the system player for now —
-    // full integration into the app player queue comes with SearchPage.
-    final query = t.displayName;
-    StreamServer.instance.start().then((_) async {
-      final cached = StreamServer.instance.cachedPathFor(query);
-      if (cached != null) {
-        // TODO: play via app player when integrated
-      }
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('串流: ${t.displayName}')));
+    PlayerPage.playTrack(t.displayName, title: t.name, artist: t.artists.join(', '));
   }
 }

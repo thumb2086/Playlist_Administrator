@@ -15,10 +15,29 @@ import '../services/discord_rpc_service.dart';
 import '../services/lrc_parser.dart';
 import '../services/metadata_reader.dart';
 import '../services/playback_history.dart';
+import '../services/stream_server.dart';
 import '../widgets/dark_theme.dart';
+
+class _PlayRequest {
+  final String query;
+  final String? title;
+  final String? artist;
+  _PlayRequest({required this.query, this.title, this.artist});
+}
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
+
+  /// Static stream for other pages to request playback.
+  static final StreamController<_PlayRequest> _playReq =
+      StreamController<_PlayRequest>.broadcast();
+  static Stream<_PlayRequest> get playRequest => _playReq.stream;
+
+  /// Call from any page to play a track via the shared player.
+  static void playTrack(String query, {String? title, String? artist}) {
+    _playReq.add(_PlayRequest(query: query, title: title, artist: artist));
+  }
+
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
@@ -49,6 +68,7 @@ class _PlayerPageState extends State<PlayerPage> {
   String _recordedSongArtist = '';
   Timer? _sleepTimer;
   DateTime? _sleepEndsAt;
+  StreamSubscription<_PlayRequest>? _playReqSub;
   List<LrcLine> _lyrics = [];
   double _lyricsOffset = 0.0;
   String _currentLyric = '';
@@ -71,6 +91,7 @@ class _PlayerPageState extends State<PlayerPage> {
     _loadQueue();
     _statusText = t('common.done');
     I18N.instance.addListener(() { if (mounted) setState(() {}); });
+    _listenPlayRequests();
     _player.onPlayerComplete.listen((_) {
       if (!mounted) return;
       if (_loop || _shuffle) {
@@ -204,10 +225,51 @@ class _PlayerPageState extends State<PlayerPage> {
     _positionSub?.cancel();
     _positionTimer?.cancel();
     _smtcTimer?.cancel();
+    _playReqSub?.cancel();
     _player.dispose();
     _playlistCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _listenPlayRequests() {
+    _playReqSub = PlayerPage.playRequest.listen((req) async {
+      if (!mounted) return;
+      // Add to queue and play via stream.
+      final query = req.query;
+      setState(() {
+        _displayPlaylistName = req.title ?? query;
+      });
+      await _playStream(query, title: req.title, artist: req.artist);
+    });
+  }
+
+  /// Play a track via streaming: resolve YouTube → ffmpeg transcode → play local mp3.
+  Future<void> _playStream(String query, {String? title, String? artist}) async {
+    if (_playInFlight) return;
+    _playInFlight = true;
+    setState(() { _statusText = '串流中: ${title ?? query}'; });
+    try {
+      await StreamServer.instance.start();
+      final localPath = await StreamServer.instance.resolveToFile(query);
+      if (localPath.isEmpty || !File(localPath).existsSync()) {
+        setState(() => _statusText = '串流失敗: 找不到音源');
+        return;
+      }
+      // Add to queue and play.
+      setState(() {
+        _playQueue = [localPath];
+        _songs = [localPath];
+        _displaySongs = [localPath];
+        _filteredSongs = [localPath];
+        _queueIndex = 0;
+      });
+      await _play(localPath);
+    } catch (e) {
+      setState(() => _statusText = '串流錯誤: $e');
+    } finally {
+      _playInFlight = false;
+    }
   }
 
   void _onSearchChanged() {

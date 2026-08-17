@@ -147,6 +147,51 @@ class StreamServer {
   /// Public resolve used by SearchPage to prepare a stream URL.
   Future<String> resolveForTest(String query) => _resolve(query);
 
+  /// Resolve a query → transcode to mp3 VBR 0 → cache locally → return path.
+  /// This is the primary entry point for streaming playback.
+  Future<String> resolveToFile(String query) async {
+    final cacheDir = Directory(_cacheDir);
+    await cacheDir.create(recursive: true);
+
+    // Check existing cache by query hash.
+    final safeName = query.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').replaceAll(RegExp(r'\s+'), ' ').trim();
+    for (final f in cacheDir.listSync().whereType<File>()) {
+      if (f.path.contains(safeName.substring(0, safeName.length.clamp(0, 20))) &&
+          f.path.endsWith('.mp3') && f.lengthSync() > 65536) {
+        return f.path;
+      }
+    }
+
+    final url = await _resolve(query);
+    if (url.isEmpty) return '';
+
+    final tmpOut = '${cacheDir.path}\\_${DateTime.now().millisecondsSinceEpoch}.mp3';
+    try {
+      final ffmpeg = ConfigService.instance.config.ffmpegPath.isNotEmpty
+          ? ConfigService.instance.config.ffmpegPath
+          : 'ffmpeg';
+      final proc = await Process.start(ffmpeg, [
+        '-i', url,
+        '-vn',
+        '-c:a', 'libmp3lame',
+        '-q:a', '0',
+        '-f', 'mp3',
+        tmpOut,
+      ], runInShell: true);
+      await proc.exitCode;
+      if (proc.exitCode != 0 || !File(tmpOut).existsSync()) return '';
+
+      final finalPath = '${cacheDir.path}\\$safeName.mp3';
+      await File(tmpOut).rename(finalPath);
+      _cacheIndex[query] = finalPath;
+      _saveIndex();
+      return finalPath;
+    } catch (_) {
+      try { File(tmpOut).deleteSync(); } catch (_) {}
+      return '';
+    }
+  }
+
   /// Streams the remote URL through ffmpeg (opus/webm → mp3 VBR 0), piping
   /// output to the HTTP response. Writes cache file when enabled.
   Future<void> _serveTranscoded(
