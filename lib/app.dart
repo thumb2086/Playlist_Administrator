@@ -86,6 +86,12 @@ class _MainShellState extends State<MainShell> {
     I18N.instance.addListener(_rebuildNav);
     _updateSvc.addListener(_onUpdate);
     _checkForUpdates();
+    // Auto-navigate to Player tab when playback starts from another page.
+    PlayerPage.playRequest.listen((_) {
+      if (mounted && _selectedIndex != 3) {
+        setState(() => _selectedIndex = 3);
+      }
+    });
     // Periodic check every 10 minutes while app is running
     Timer.periodic(const Duration(minutes: 10), (_) => _checkForUpdates());
   }

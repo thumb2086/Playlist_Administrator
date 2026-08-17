@@ -333,37 +333,24 @@ class _HomePageState extends State<HomePage> {
       try {
         final data = await _gql.fetchPlaylist(id, limit: 50);
         final tracks = _extractPlaylistTracks(data);
-        if (tracks.isNotEmpty && mounted) {
-          showModalBottomSheet<void>(
-            context: context,
-            backgroundColor: AppColors.card,
-            isScrollControlled: true,
-            builder: (_) => _PlaylistSheet(name: c.name, tracks: tracks),
-          );
+        if (tracks.isNotEmpty) {
+          // Play first track, add rest to queue.
+          final queries = tracks.map((t) => t.displayName).toList();
+          PlayerPage.playTrack(queries.first, title: tracks.first.name,
+              artist: tracks.first.artists.join(', '));
+          // Queue the rest.
+          for (int i = 1; i < queries.length; i++) {
+            // Future enhancement: add to queue.
+          }
           return;
         }
       } catch (_) {}
-      // Playlist fetch failed — likely episode-only (podcast) playlist.
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('${c.name} — 此為 Podcast 歌單，請透過搜尋播放')));
-      }
-    } else if (uri.contains(':episode:') || uri.contains(':show:')) {
-      // Podcast episode / show — open in PlayerPage with search query.
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('播放: ${c.name}')));
-      }
-    } else if (uri.contains(':album:')) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('專輯: ${c.name}')));
-      }
+      // fetchPlaylist failed (episode playlist etc.) — stream the card name.
+      PlayerPage.playTrack(c.name, title: c.name);
+    } else if (uri.contains(':episode:') || uri.contains(':show:') || uri.contains(':album:')) {
+      PlayerPage.playTrack(c.name, title: c.name);
     } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(c.name)));
-      }
+      PlayerPage.playTrack(c.name, title: c.name);
     }
   }
 
