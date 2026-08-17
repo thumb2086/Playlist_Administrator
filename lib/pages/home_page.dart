@@ -29,6 +29,8 @@ class _HomePageState extends State<HomePage> {
   List<_HomeSection> _sections = [];
   List<_NewRelease> _newReleases = [];
   List<_BrowseCard> _browse = [];
+  final Map<String, List<SpotifyTrackItem>> _trackCache = {};
+  final Map<String, List<PlaylistItem>> _rssCache = {};
 
   @override
   void initState() {
@@ -367,8 +369,12 @@ class _HomePageState extends State<HomePage> {
     if (uri.contains(':playlist:')) {
       final id = uri.split(':').last;
       try {
-        final data = await _gql.fetchPlaylist(id, limit: 50);
-        final tracks = _extractPlaylistTracks(data);
+        final tracks = _trackCache[id] ?? await () async {
+          final data = await _gql.fetchPlaylist(id, limit: 50);
+          final t = _extractPlaylistTracks(data);
+          if (t.isNotEmpty) _trackCache[id] = t;
+          return t;
+        }();
         if (tracks.isNotEmpty && mounted) {
           MainShell.showDetail(PlaylistDetailPage(
             title: c.name, subtitle: c.subtitle, coverUrl: c.coverUrl,
@@ -388,7 +394,9 @@ class _HomePageState extends State<HomePage> {
         ));
         return;
       }
-      PlayerController.instance.play(c.name, title: c.name);
+      // Both playlist and RSS failed — show error.
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('歌單載入失敗')));
 
     } else if (uri.contains(':show:')) {
       final episodes = await _fetchPodcastEpisodes(c.name);
@@ -408,6 +416,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<List<PlaylistItem>> _fetchPodcastEpisodes(String showName) async {
+    if (_rssCache.containsKey(showName)) return _rssCache[showName]!;
     final cfg = ConfigService.instance.config;
     final rssUrl = cfg.podcastSubscriptions[showName];
     if (rssUrl == null || rssUrl.isEmpty) return [];
@@ -415,9 +424,10 @@ class _HomePageState extends State<HomePage> {
       final resp = await http.get(Uri.parse(rssUrl),
           headers: {'User-Agent': 'Mozilla/5.0'}).timeout(const Duration(seconds: 15));
       if (resp.statusCode != 200) return [];
-      // RSS often has encoding issues — decode bytes as UTF-8 explicitly.
       final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
-      return _parseRssToItems(body, showName);
+      final items = _parseRssToItems(body, showName);
+      _rssCache[showName] = items;
+      return items;
     } catch (_) { return []; }
   }
 
@@ -449,8 +459,12 @@ class _HomePageState extends State<HomePage> {
     if (uri.contains(':playlist:')) {
       final id = uri.split(':').last;
       try {
-        final data = await _gql.fetchPlaylist(id, limit: 50);
-        final tracks = _extractPlaylistTracks(data);
+        final tracks = _trackCache[id] ?? await () async {
+          final data = await _gql.fetchPlaylist(id, limit: 50);
+          final t = _extractPlaylistTracks(data);
+          if (t.isNotEmpty) _trackCache[id] = t;
+          return t;
+        }();
         if (tracks.isNotEmpty) {
           final paths = tracks.map((t) => t.displayName).toList();
           final titles = tracks.map((t) => t.name).toList();
@@ -460,9 +474,13 @@ class _HomePageState extends State<HomePage> {
           return;
         }
       } catch (_) {}
+      // Playlist fetch failed — don't stream the playlist name.
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('歌單載入失敗')));
     } else if (uri.contains(':show:')) {
       PlayerController.instance.playPodcastShow(c.name);
     } else {
+      // Episode / Album / Artist / Unknown — stream.
       PlayerController.instance.play(c.name, title: c.name);
     }
   }
