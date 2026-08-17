@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import '../services/config_service.dart';
 import '../services/stream_server.dart';
 import '../services/smtc_service.dart';
@@ -155,6 +157,69 @@ class PlayerController {
     } else {
       await playStream(pathOrQuery, title: title, artist: artist);
     }
+  }
+
+  /// Play podcast show: look up RSS feed, get episodes, play latest.
+  Future<void> playPodcastShow(String showName) async {
+    _title = showName;
+    _statusText = '載入 Podcast: $showName';
+    _isPlaying = false;
+    _notify();
+    try {
+      final cfg = ConfigService.instance.config;
+      final rssUrl = cfg.podcastSubscriptions[showName];
+      if (rssUrl == null || rssUrl.isEmpty) {
+        _statusText = '找不到 RSS: $showName';
+        _notify();
+        return;
+      }
+      // Fetch RSS feed.
+      final resp = await http.get(Uri.parse(rssUrl),
+          headers: {'User-Agent': 'Mozilla/5.0'}).timeout(const Duration(seconds: 15));
+      if (resp.statusCode != 200) {
+        _statusText = 'RSS 載入失敗: ${resp.statusCode}';
+        _notify();
+        return;
+      }
+      // Parse XML for episodes with audio URLs.
+      final episodes = _parseRssEpisodes(resp.body);
+      if (episodes.isEmpty) {
+        _statusText = '找不到集數: $showName';
+        _notify();
+        return;
+      }
+      // Play first episode (latest).
+      final ep = episodes.first;
+      _title = ep['title'] ?? showName;
+      _artist = showName;
+      _statusText = '播放: ${_title}';
+      _notify();
+      await _player.play(UrlSource(ep['url']!));
+      _isPlaying = true;
+      _pushSmtc();
+    } catch (e) {
+      _statusText = '錯誤: $e';
+    }
+    _notify();
+  }
+
+  /// Parse RSS XML to extract episodes with title + audio URL.
+  List<Map<String, String>> _parseRssEpisodes(String xml) {
+    final episodes = <Map<String, String>>[];
+    final itemPattern = RegExp(r'<item>(.*?)</item>', dotAll: true);
+    final titlePattern = RegExp(r'<title><!\[CDATA\[(.*?)\]\]></title>|<title>(.*?)</title>');
+    final urlPattern = RegExp(r'<enclosure[^>]+url="([^"]+)"');
+    for (final match in itemPattern.allMatches(xml)) {
+      final item = match.group(1)!;
+      final titleMatch = titlePattern.firstMatch(item);
+      final title = (titleMatch?.group(1) ?? titleMatch?.group(2) ?? '').trim();
+      final urlMatch = urlPattern.firstMatch(item);
+      final url = urlMatch?.group(1) ?? '';
+      if (url.isNotEmpty && (url.endsWith('.mp3') || url.endsWith('.m4a') || url.contains('audio'))) {
+        episodes.add({'title': title, 'url': url});
+      }
+    }
+    return episodes;
   }
 
   void setQueue(List<String> paths, {List<String>? titles, int startIndex = 0}) {

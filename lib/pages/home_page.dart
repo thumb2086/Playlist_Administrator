@@ -343,11 +343,20 @@ class _HomePageState extends State<HomePage> {
               title: tracks.first.name, artist: tracks.first.artists.join(', '));
           return;
         }
-      } catch (_) {}
-      PlayerController.instance.play(c.name, title: c.name);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('歌單載入失敗: $e')));
+        }
+      }
+      return; // Don't fall back to streaming the playlist name.
 
-    } else if (uri.contains(':show:') || uri.contains(':episode:')) {
-      // Podcast — play from local podcasts/ directory.
+    } else if (uri.contains(':show:')) {
+      // Podcast show — stream from RSS feed (same source as pipeline).
+      PlayerController.instance.playPodcastShow(c.name);
+
+    } else if (uri.contains(':episode:')) {
+      // Podcast episode — play from local or RSS.
       final files = _findLocalEpisodes(c.name);
       if (files.isNotEmpty) {
         final paths = files.map((f) => f.path).toList();
@@ -355,10 +364,11 @@ class _HomePageState extends State<HomePage> {
         PlayerController.instance.setQueue(paths, titles: names, startIndex: 0);
         PlayerController.instance.playFile(paths.first, title: names.first, artist: c.name);
       } else {
-        PlayerController.instance.play(c.name, title: c.name);
+        PlayerController.instance.playPodcastShow(c.name);
       }
 
     } else {
+      // Music — stream via YouTube.
       PlayerController.instance.play(c.name, title: c.name);
     }
   }
