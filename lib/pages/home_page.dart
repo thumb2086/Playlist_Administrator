@@ -371,28 +371,39 @@ class _HomePageState extends State<HomePage> {
         final tracks = _extractPlaylistTracks(data);
         if (tracks.isNotEmpty && mounted) {
           MainShell.showDetail(PlaylistDetailPage(
-              title: c.name, subtitle: c.subtitle, coverUrl: c.coverUrl,
-              items: tracks.map((t) => PlaylistItem(
-                name: t.name, artist: t.artists.join(', '),
-                durationMs: t.durationMs, coverUrl: t.coverUrl,
-                audioQuery: t.displayName,
-              )).toList(),
-            ));
+            title: c.name, subtitle: c.subtitle, coverUrl: c.coverUrl,
+            items: tracks.map((t) => PlaylistItem(
+              name: t.name, artist: t.artists.join(', '),
+              durationMs: t.durationMs, coverUrl: t.coverUrl,
+              audioQuery: t.displayName,
+            )).toList(),
+          ));
           return;
         }
-      } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('歌單載入失敗: $e')));
+      } catch (_) {}
+      final episodes = await _fetchPodcastEpisodes(c.name);
+      if (episodes.isNotEmpty && mounted) {
+        MainShell.showDetail(PlaylistDetailPage(
+          title: c.name, coverUrl: c.coverUrl, items: episodes, isPodcast: true,
+        ));
+        return;
       }
+      PlayerController.instance.play(c.name, title: c.name);
 
     } else if (uri.contains(':show:')) {
       final episodes = await _fetchPodcastEpisodes(c.name);
       if (episodes.isNotEmpty && mounted) {
         MainShell.showDetail(PlaylistDetailPage(
-          title: c.name, coverUrl: c.coverUrl,
-          items: episodes, isPodcast: true,
+          title: c.name, coverUrl: c.coverUrl, items: episodes, isPodcast: true,
         ));
       }
+
+    } else if (uri.contains(':episode:')) {
+      PlayerController.instance.playPodcastShow(c.name);
+
+    } else {
+      // Album, Artist, or unknown — try streaming.
+      PlayerController.instance.play(c.name, title: c.name);
     }
   }
 
@@ -404,7 +415,9 @@ class _HomePageState extends State<HomePage> {
       final resp = await http.get(Uri.parse(rssUrl),
           headers: {'User-Agent': 'Mozilla/5.0'}).timeout(const Duration(seconds: 15));
       if (resp.statusCode != 200) return [];
-      return _parseRssToItems(resp.body, showName);
+      // RSS often has encoding issues — decode bytes as UTF-8 explicitly.
+      final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
+      return _parseRssToItems(body, showName);
     } catch (_) { return []; }
   }
 

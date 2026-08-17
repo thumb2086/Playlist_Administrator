@@ -316,6 +316,19 @@ class PlayerController {
     _notify();
   }
 
+  void clearQueue() {
+    _queue.clear();
+    _queueTitles.clear();
+    _index = -1;
+    if (_isPlaying) { _player.stop(); _isPlaying = false; }
+    _title = '';
+    _artist = '';
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    _statusText = '';
+    _notify();
+  }
+
   void moveInQueue(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _queue.length) return;
     if (newIndex < 0 || newIndex >= _queue.length) return;

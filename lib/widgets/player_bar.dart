@@ -299,6 +299,14 @@ class _QueueDrawerState extends State<_QueueDrawer> {
             const SizedBox(width: 8),
             Text('播放佇列 (${queue.length})', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
             const Spacer(),
+            if (queue.isNotEmpty) IconButton(
+              icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error, size: 18),
+              tooltip: '清除佇列',
+              onPressed: () {
+                _ctrl.clearQueue();
+                Navigator.of(context).pop();
+              },
+            ),
             IconButton(
               icon: const Icon(Icons.close_rounded, color: AppColors.textMuted, size: 18),
               onPressed: () => Navigator.of(context).pop(),
