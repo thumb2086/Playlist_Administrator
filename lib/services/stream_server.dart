@@ -198,10 +198,10 @@ class StreamServer {
         environment: {'PYTHONIOENCODING': 'utf-8'},
       );
       _activeProc = proc;
-      // Timeout: kill if stuck for 30 seconds.
+      // Timeout: kill if stuck for 90 seconds (yt-dlp can take 45-60s).
       final outFuture = proc.stdout.transform(utf8.decoder).join();
       final exited = proc.exitCode.timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 90),
         onTimeout: () { proc.kill(); return -1; },
       );
       final out = await outFuture;
