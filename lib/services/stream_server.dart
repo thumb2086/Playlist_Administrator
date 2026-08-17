@@ -18,6 +18,9 @@ class StreamServer {
   /// query -> resolved URL cache (in-memory, per session)
   final Map<String, String> _resolved = {};
 
+  /// Currently running stream-download process (kill on new request).
+  Process? _activeProc;
+
   /// query -> cached file path (persisted across restarts via index)
   final Map<String, String> _cacheIndex = {};
 
@@ -70,6 +73,12 @@ class StreamServer {
 
   /// Look up a cached stream for [query]; null if not cached.
   String? cachedPathFor(String query) => _cacheIndex[query];
+
+  /// Kill any active streaming process.
+  void stopActive() {
+    _activeProc?.kill();
+    _activeProc = null;
+  }
 
   /// Search cache\stream\ for a file matching the query name.
   String? findCached(String query) {
@@ -177,6 +186,9 @@ class StreamServer {
     }
 
     final outBase = '${cacheDir.path}\\stream_${DateTime.now().millisecondsSinceEpoch}';
+    // Kill any previous streaming process to avoid resource leaks.
+    _activeProc?.kill();
+    _activeProc = null;
     try {
       final proc = await Process.start(
         'python',
@@ -185,6 +197,7 @@ class StreamServer {
         workingDirectory: ConfigService.instance.config.basePath,
         environment: {'PYTHONIOENCODING': 'utf-8'},
       );
+      _activeProc = proc;
       // Timeout: kill if stuck for 30 seconds.
       final outFuture = proc.stdout.transform(utf8.decoder).join();
       final exited = proc.exitCode.timeout(
@@ -193,6 +206,7 @@ class StreamServer {
       );
       final out = await outFuture;
       final code = await exited;
+      _activeProc = null;
       if (code != 0 && code != -1) return '';
       for (final line in out.split('\n')) {
         if (!line.trim().isEmpty) {
@@ -213,6 +227,8 @@ class StreamServer {
       }
       return '';
     } catch (_) {
+      _activeProc?.kill();
+      _activeProc = null;
       return '';
     }
   }

@@ -115,6 +115,7 @@ class PlayerController {
 
   /// Play a local file.
   Future<void> playFile(String path, {String? title, String? artist}) async {
+    StreamServer.instance.stopActive();
     _title = title ?? _titleFromPath(path);
     _artist = artist ?? _artistFromPath(path);
     _isPlaying = true;
@@ -125,6 +126,7 @@ class PlayerController {
 
   /// Play via streaming: resolve → transcode → local mp3.
   Future<void> playStream(String query, {String? title, String? artist}) async {
+    StreamServer.instance.stopActive();
     _title = title ?? query;
     _artist = artist ?? '';
     _statusText = '串流中: ${_title}';
@@ -225,6 +227,7 @@ class PlayerController {
 
   /// Play a PlaylistItem: direct RSS URL if available, else cache-first, else stream.
   Future<void> playItem(PlaylistItem item) async {
+    StreamServer.instance.stopActive();
     _title = item.name;
     _artist = item.artist;
     _notify();
