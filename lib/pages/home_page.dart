@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import '../app.dart';
 import '../models/playlist_item.dart';
 import '../services/config_service.dart';
 import '../services/spotify_session.dart';
@@ -369,16 +370,14 @@ class _HomePageState extends State<HomePage> {
         final data = await _gql.fetchPlaylist(id, limit: 50);
         final tracks = _extractPlaylistTracks(data);
         if (tracks.isNotEmpty && mounted) {
-          Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => PlaylistDetailPage(
+          MainShell.showDetail(PlaylistDetailPage(
               title: c.name, subtitle: c.subtitle, coverUrl: c.coverUrl,
               items: tracks.map((t) => PlaylistItem(
                 name: t.name, artist: t.artists.join(', '),
                 durationMs: t.durationMs, coverUrl: t.coverUrl,
                 audioQuery: t.displayName,
               )).toList(),
-            ),
-          ));
+            ));
           return;
         }
       } catch (e) {
@@ -389,11 +388,9 @@ class _HomePageState extends State<HomePage> {
     } else if (uri.contains(':show:')) {
       final episodes = await _fetchPodcastEpisodes(c.name);
       if (episodes.isNotEmpty && mounted) {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => PlaylistDetailPage(
-            title: c.name, coverUrl: c.coverUrl,
-            items: episodes, isPodcast: true,
-          ),
+        MainShell.showDetail(PlaylistDetailPage(
+          title: c.name, coverUrl: c.coverUrl,
+          items: episodes, isPodcast: true,
         ));
       }
     }

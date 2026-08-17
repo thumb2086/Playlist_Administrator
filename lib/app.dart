@@ -57,6 +57,20 @@ class _PlaylistAdminAppState extends State<PlaylistAdminApp> {
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
+
+  /// Show a detail page in the content area (replaces IndexedStack).
+  static void showDetail(Widget page) {
+    _showDetail?.call(page);
+  }
+
+  /// Dismiss the detail page (back to normal tabs).
+  static void dismissDetail() {
+    _dismissDetail?.call();
+  }
+
+  static void Function(Widget)? _showDetail;
+  static VoidCallback? _dismissDetail;
+
   @override
   State<MainShell> createState() => _MainShellState();
 }
@@ -65,6 +79,7 @@ class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
   final _updateSvc = UpdateService.instance;
   BuildContext? _context;
+  Widget? _detailWidget;
 
   late List<_NavItemData> _navItems;
 
@@ -82,6 +97,12 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
+    MainShell._showDetail = (page) {
+      if (mounted) setState(() { _detailWidget = page; });
+    };
+    MainShell._dismissDetail = () {
+      if (mounted) setState(() { _detailWidget = null; });
+    };
     _rebuildNav();
     I18N.instance.addListener(_rebuildNav);
     _updateSvc.addListener(_onUpdate);
@@ -156,9 +177,10 @@ class _MainShellState extends State<MainShell> {
             ),
             Expanded(
               child: Column(children: [
-                _Header(title: _navItems[_selectedIndex].label),
+                _Header(title: _detailWidget != null ? '返回' : _navItems[_selectedIndex].label,
+                    onBack: _detailWidget != null ? () => setState(() { _detailWidget = null; }) : null),
                 Expanded(
-                  child: IndexedStack(
+                  child: _detailWidget ?? IndexedStack(
                     index: _selectedIndex,
                     children: _pages,
                   ),
@@ -335,7 +357,8 @@ class _Sidebar extends StatelessWidget {
 
 class _Header extends StatelessWidget {
   final String title;
-  const _Header({required this.title});
+  final VoidCallback? onBack;
+  const _Header({required this.title, this.onBack});
 
   @override
   Widget build(BuildContext context) {
@@ -347,6 +370,13 @@ class _Header extends StatelessWidget {
       ),
       child: Row(
         children: [
+          if (onBack != null)
+            IconButton(
+              icon: const Icon(Icons.arrow_back_rounded, size: 20),
+              onPressed: onBack,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28),
+            ),
           Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
           const Spacer(),
           Container(
