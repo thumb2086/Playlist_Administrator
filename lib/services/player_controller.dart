@@ -116,6 +116,7 @@ class PlayerController {
   /// Play a local file.
   Future<void> playFile(String path, {String? title, String? artist}) async {
     StreamServer.instance.stopActive();
+    await _player.stop();
     _title = title ?? _titleFromPath(path);
     _artist = artist ?? _artistFromPath(path);
     _isPlaying = true;
@@ -127,6 +128,7 @@ class PlayerController {
   /// Play via streaming: resolve → transcode → local mp3.
   Future<void> playStream(String query, {String? title, String? artist}) async {
     StreamServer.instance.stopActive();
+    await _player.stop();
     _title = title ?? query;
     _artist = artist ?? '';
     _statusText = '串流中: ${_title}';
@@ -164,6 +166,8 @@ class PlayerController {
 
   /// Play podcast show: look up RSS feed, get episodes, play latest.
   Future<void> playPodcastShow(String showName) async {
+    StreamServer.instance.stopActive();
+    await _player.stop();
     _title = showName;
     _statusText = '載入 Podcast: $showName';
     _isPlaying = false;
@@ -228,6 +232,7 @@ class PlayerController {
   /// Play a PlaylistItem: direct RSS URL if available, else cache-first, else stream.
   Future<void> playItem(PlaylistItem item) async {
     StreamServer.instance.stopActive();
+    await _player.stop();
     _title = item.name;
     _artist = item.artist;
     _notify();
