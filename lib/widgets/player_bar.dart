@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/config_service.dart';
 import '../services/player_controller.dart';
 import 'dark_theme.dart';
 
@@ -200,6 +201,29 @@ class _PlayerBarState extends State<PlayerBar> {
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 28),
         ),
+        // --- Sleep timer ---
+        IconButton(
+          icon: Icon(Icons.bedtime_outlined, size: 18,
+              color: _ctrl.sleepEndsAt != null ? Colors.orange : AppColors.textMuted),
+          onPressed: hasTrack ? () => _showSleepMenu(context) : null,
+          tooltip: _ctrl.sleepEndsAt != null ? '睡眠定時器 (${_ctrl.sleepRemainingText})' : '睡眠定時器',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 28),
+        ),
+        // --- Crossfade toggle ---
+        IconButton(
+          icon: Icon(Icons.linear_scale_rounded, size: 18,
+              color: ConfigService.instance.config.crossfadeEnabled ? AppColors.accent : AppColors.textMuted),
+          onPressed: () {
+            final c = ConfigService.instance.config;
+            c.crossfadeEnabled = !c.crossfadeEnabled;
+            ConfigService.instance.save();
+            setState(() {});
+          },
+          tooltip: ConfigService.instance.config.crossfadeEnabled ? 'Crossfade 開' : 'Crossfade 關',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 28),
+        ),
       ]),
     );
   }
@@ -211,6 +235,29 @@ class _PlayerBarState extends State<PlayerBar> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       isScrollControlled: true,
       builder: (_) => const _QueueDrawer(),
+    );
+  }
+
+  void _showSleepMenu(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Padding(padding: EdgeInsets.all(14), child: Text('睡眠定時器', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
+        ...const [15, 30, 60, 120].map((m) => ListTile(
+          dense: true,
+          leading: const Icon(Icons.timer_outlined, color: AppColors.textMuted, size: 18),
+          title: Text('$m 分鐘', style: const TextStyle(fontSize: 13)),
+          onTap: () { Navigator.pop(ctx); _ctrl.setSleepTimer(Duration(minutes: m)); },
+        )),
+        ListTile(
+          dense: true,
+          leading: const Icon(Icons.stop_circle_outlined, color: Colors.redAccent, size: 18),
+          title: const Text('取消定時器', style: TextStyle(fontSize: 13)),
+          onTap: () { Navigator.pop(ctx); _ctrl.setSleepTimer(null); },
+        ),
+      ])),
     );
   }
 }

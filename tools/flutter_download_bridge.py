@@ -222,6 +222,59 @@ def cmd_stream_resolve(args):
         emit_json({'type': 'error', 'message': str(e)})
 
 
+def cmd_stream_download(args):
+    """Download a song via yt-dlp and transcode to mp3 VBR 0, saving to output path."""
+    query = args[0]
+    output_path = args[1]  # full path without extension
+
+    import yt_dlp
+
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': output_path + '.%(ext)s',
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'extract_audio': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '0',
+        }],
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['tv', 'web_embedded', 'android'],
+                'player_skip': ['webpage', 'configs'],
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
+        },
+        'socket_timeout': 60,
+        'retries': 2,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f'ytsearch1:{query}', download=False)
+            entry = info['entries'][0] if info.get('entries') else info
+            title = entry.get('title', '')
+            ydl.download([f'ytsearch1:{query}'])
+        # Find the output file
+        mp3_path = output_path + '.mp3'
+        if os.path.exists(mp3_path):
+            emit_json({'type': 'complete', 'path': mp3_path, 'title': title})
+        else:
+            # Search for any file matching the output template stem
+            base = output_path
+            for ext in ['.mp3', '.m4a', '.webm', '.opus']:
+                if os.path.exists(base + ext):
+                    emit_json({'type': 'complete', 'path': base + ext, 'title': title})
+                    return
+            emit_json({'type': 'error', 'message': 'output file not found after download'})
+    except Exception as e:
+        emit_json({'type': 'error', 'message': str(e)})
+
+
 def cmd_download_spotdl(args):
     """Download a song via spotDL to a separate spotdl_downloads folder"""
     song_url = args[0]
@@ -994,6 +1047,8 @@ def main():
             cmd_youtube_subs(args)
         elif command == 'stream-resolve':
             cmd_stream_resolve(args)
+        elif command == 'stream-download':
+            cmd_stream_download(args)
         elif command == 'rag-query':
             cmd_rag_query(args)
         elif command == 'rag-build':

@@ -147,14 +147,13 @@ class StreamServer {
   /// Public resolve used by SearchPage to prepare a stream URL.
   Future<String> resolveForTest(String query) => _resolve(query);
 
-  /// Resolve a query → transcode to mp3 VBR 0 → cache locally → return path.
-  /// This is the primary entry point for streaming playback.
+  /// Resolve a query → yt-dlp download+transcode to mp3 → return local path.
   Future<String> resolveToFile(String query) async {
     final cacheDir = Directory(_cacheDir);
     await cacheDir.create(recursive: true);
 
-    // Check existing cache by query hash.
     final safeName = query.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').replaceAll(RegExp(r'\s+'), ' ').trim();
+    // Check cache first.
     for (final f in cacheDir.listSync().whereType<File>()) {
       if (f.path.contains(safeName.substring(0, safeName.length.clamp(0, 20))) &&
           f.path.endsWith('.mp3') && f.lengthSync() > 65536) {
@@ -162,32 +161,36 @@ class StreamServer {
       }
     }
 
-    final url = await _resolve(query);
-    if (url.isEmpty) return '';
-
-    final tmpOut = '${cacheDir.path}\\_${DateTime.now().millisecondsSinceEpoch}.mp3';
+    final outBase = '${cacheDir.path}\\stream_${DateTime.now().millisecondsSinceEpoch}';
     try {
-      final ffmpeg = ConfigService.instance.config.ffmpegPath.isNotEmpty
-          ? ConfigService.instance.config.ffmpegPath
-          : 'ffmpeg';
-      final proc = await Process.start(ffmpeg, [
-        '-i', url,
-        '-vn',
-        '-c:a', 'libmp3lame',
-        '-q:a', '0',
-        '-f', 'mp3',
-        tmpOut,
-      ], runInShell: true);
+      final proc = await Process.start(
+        'python',
+        [_bridgePath, 'stream-download', query, outBase],
+        runInShell: true,
+        workingDirectory: ConfigService.instance.config.basePath,
+        environment: {'PYTHONIOENCODING': 'utf-8'},
+      );
+      final out = await proc.stdout.transform(utf8.decoder).join();
       await proc.exitCode;
-      if (proc.exitCode != 0 || !File(tmpOut).existsSync()) return '';
-
-      final finalPath = '${cacheDir.path}\\$safeName.mp3';
-      await File(tmpOut).rename(finalPath);
-      _cacheIndex[query] = finalPath;
-      _saveIndex();
-      return finalPath;
+      for (final line in out.split('\n')) {
+        if (!line.trim().isEmpty) {
+          try {
+            final data = jsonDecode(line.trim()) as Map<String, dynamic>;
+            if (data['type'] == 'complete' && data['path'] != null) {
+              final srcPath = data['path'] as String;
+              final finalPath = '${cacheDir.path}\\$safeName.mp3';
+              if (srcPath != finalPath) {
+                await File(srcPath).rename(finalPath);
+              }
+              _cacheIndex[query] = finalPath;
+              _saveIndex();
+              return finalPath;
+            }
+          } catch (_) {}
+        }
+      }
+      return '';
     } catch (_) {
-      try { File(tmpOut).deleteSync(); } catch (_) {}
       return '';
     }
   }

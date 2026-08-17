@@ -28,6 +28,8 @@ class PlayerController {
   String? _coverPath;
   String _statusText = '';
   Timer? _smtcTimer;
+  Timer? _sleepTimer;
+  DateTime? _sleepEndsAt;
 
   // Getters
   AudioPlayer get player => _player;
@@ -45,6 +47,30 @@ class PlayerController {
   List<String> get queueTitles => List.unmodifiable(_queueTitles);
   bool get hasTrack => _index >= 0 && _index < _queue.length;
   String get statusText => _statusText;
+  DateTime? get sleepEndsAt => _sleepEndsAt;
+  String get sleepRemainingText {
+    final end = _sleepEndsAt;
+    if (end == null) return '';
+    final left = end.difference(DateTime.now());
+    if (left.isNegative) return '';
+    final m = left.inMinutes.remainder(60);
+    final h = left.inHours;
+    return h > 0 ? '$h時$m分' : '$m分';
+  }
+
+  void setSleepTimer(Duration? duration) {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    _sleepEndsAt = null;
+    if (duration == null) { _notify(); return; }
+    _sleepTimer = Timer(duration, () {
+      if (_isPlaying) { _player.pause(); _isPlaying = false; }
+      _sleepEndsAt = null;
+      _notify();
+    });
+    _sleepEndsAt = DateTime.now().add(duration);
+    _notify();
+  }
 
   final _listeners = <VoidCallback>[];
   void addListener(VoidCallback fn) => _listeners.add(fn);
