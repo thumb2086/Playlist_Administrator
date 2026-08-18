@@ -89,8 +89,6 @@ class _MainShellState extends State<MainShell> {
     LibraryPage(),
     PipelinePage(),
     StatsPage(),
-    DownloadPage(),
-    AudioExtractorPage(),
     SettingsPage(),
   ];
 
@@ -154,8 +152,6 @@ class _MainShellState extends State<MainShell> {
         _NavItemData(Icons.library_music_outlined, Icons.library_music, t('app.sidebar.library')),
         _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, t('app.sidebar.pipeline')),
         _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, t('app.sidebar.stats')),
-        _NavItemData(Icons.cloud_download_outlined, Icons.cloud_download, t('app.sidebar.download')),
-        _NavItemData(Icons.audio_file_outlined, Icons.audio_file, '音軌抽取'),
         _NavItemData(Icons.settings_outlined, Icons.settings, t('app.sidebar.settings')),
       ];
     });

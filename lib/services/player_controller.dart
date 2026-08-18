@@ -114,13 +114,18 @@ class PlayerController {
       _duration = d;
       _notify();
     });
+    // Attach SMTC: media buttons → PlayerController.
+    SmtcService.instance.attach(
+      onPlayPause: togglePlay,
+      onNext: next,
+      onPrevious: previous,
+      onStop: () { if (_isPlaying) { _player.pause(); _isPlaying = false; _notify(); } },
+      onSeek: (pos) { seek(pos); },
+    );
     // Periodic SMTC push.
     _smtcTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_isPlaying) return;
-      SmtcService.instance.update(
-        title: _title, artist: _artist,
-        playing: true, position: _position, duration: _duration,
-      );
+      _pushSmtc();
     });
   }
 
