@@ -106,7 +106,7 @@ class _MainShellState extends State<MainShell> {
     _updateSvc.addListener(_onUpdate);
     _checkForUpdates();
     // Periodic check every 10 minutes while app is running
-    Timer.periodic(const Duration(minutes: 1), (_) => _checkForUpdates());
+    Timer.periodic(const Duration(minutes: 5), (_) => _checkForUpdates());
   }
 
   void _onUpdate() {
@@ -123,17 +123,22 @@ class _MainShellState extends State<MainShell> {
     }
   }
 
+  bool _updateChecking = false;
+
   void _checkForUpdates() {
     if (!VersionChecker.shouldCheck()) return;
+    if (_updateChecking) return;
+    _updateChecking = true;
     Future.delayed(const Duration(seconds: 3), () async {
-      final info = await VersionChecker.checkForUpdate();
-      if (!info.hasUpdate) return;
-      if (!VersionChecker.isNewerThanSkipped(info.latestVersion)) return;
-      if (!mounted) return;
-      if (ConfigService.instance.config.autoDownloadUpdate) {
-        _updateSvc.startDownload(info);
-      } else {
+      try {
+        final info = await VersionChecker.checkForUpdate();
+        if (!info.hasUpdate) return;
+        if (!VersionChecker.isNewerThanSkipped(info.latestVersion)) return;
+        if (!mounted) return;
+        // Always show dialog — user decides when to download.
         showDialog(context: context, builder: (_) => UpdateDialog(info: info));
+      } finally {
+        _updateChecking = false;
       }
     });
   }
