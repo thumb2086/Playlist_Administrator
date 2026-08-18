@@ -19,7 +19,6 @@ class _UpdateDialogState extends State<UpdateDialog> {
   void initState() {
     super.initState();
     _svc.addListener(_onChanged);
-    // 不再在這裡自動下載 — app.dart 處理了
   }
 
   @override
@@ -39,93 +38,105 @@ class _UpdateDialogState extends State<UpdateDialog> {
     final isError = _svc.state == UpdateState.error;
     final progress = _svc.progress;
 
-    return AlertDialog(
-      backgroundColor: AppColors.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Column(children: [
-        Icon(
-          isReady ? Icons.check_circle : (isError ? Icons.error : Icons.new_releases_rounded),
-          color: isReady ? AppColors.accent : (isError ? AppColors.error : AppColors.accent),
-          size: 40,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          isReady ? '下載完成！' : (isError ? '下載失敗' : '🎉 新版本可用！'),
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-      ]),
-      content: SizedBox(
-        width: 380,
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Text('目前版本: ', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-            Text(t('app.version'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-          ]),
-          const SizedBox(height: 4),
-          Row(children: [
-            const Text('最新版本: ', style: TextStyle(color: AppColors.accent, fontSize: 12)),
-            Text(widget.info.latestVersion, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.accent)),
-          ]),
-          if (isDownloading) ...[
-            const SizedBox(height: 14),
-            TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: progress),
-              duration: const Duration(milliseconds: 200),
-              builder: (ctx, v, _) => ClipRRect(borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(value: v, backgroundColor: AppColors.surfaceLight,
-                    valueColor: const AlwaysStoppedAnimation(AppColors.accent), minHeight: 6)),
-            ),
-            const SizedBox(height: 6),
-            Text('${(progress * 100).toStringAsFixed(0)}% 下載中…',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
-          ],
-          if (!isReady && !isError && widget.info.releaseNotes != null && widget.info.releaseNotes!.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Text('更新內容', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          VersionChecker.markSkipped(widget.info.latestVersion);
+          Navigator.of(context).pop();
+        }
+      },
+      child: AlertDialog(
+        backgroundColor: AppColors.card,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Column(children: [
+          Icon(
+            isReady ? Icons.check_circle : (isError ? Icons.error : Icons.new_releases_rounded),
+            color: isReady ? AppColors.accent : (isError ? AppColors.error : AppColors.accent),
+            size: 40,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            isReady ? '下載完成！' : (isError ? '下載失敗' : '🎉 新版本可用！'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+        ]),
+        content: SizedBox(
+          width: 380,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Text('目前版本: ', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              Text(t('app.version'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            ]),
             const SizedBox(height: 4),
-            Container(
-              height: 120, padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(8)),
-              child: SingleChildScrollView(
-                child: Text(widget.info.releaseNotes!, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary, height: 1.4)),
+            Row(children: [
+              const Text('最新版本: ', style: TextStyle(color: AppColors.accent, fontSize: 12)),
+              Text(widget.info.latestVersion, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.accent)),
+            ]),
+            if (isDownloading) ...[
+              const SizedBox(height: 14),
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: progress),
+                duration: const Duration(milliseconds: 200),
+                builder: (ctx, v, _) => ClipRRect(borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(value: v, backgroundColor: AppColors.surfaceLight,
+                      valueColor: const AlwaysStoppedAnimation(AppColors.accent), minHeight: 6)),
+              ),
+              const SizedBox(height: 6),
+              Text('${(progress * 100).toStringAsFixed(0)}% 下載中…',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+            ],
+            if (!isReady && !isError && widget.info.releaseNotes != null && widget.info.releaseNotes!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text('更新內容', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              Container(
+                height: 120, padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(8)),
+                child: SingleChildScrollView(
+                  child: Text(widget.info.releaseNotes!, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary, height: 1.4)),
+                ),
+              ),
+            ],
+          ]),
+        ),
+        actions: [
+          if (!isReady) ...[
+            TextButton(
+              onPressed: isDownloading ? null : () {
+                VersionChecker.markSkipped(widget.info.latestVersion);
+                Navigator.of(context).pop();
+              },
+              child: Text(t('common.skip'), style: TextStyle(color: isDownloading ? AppColors.textMuted : AppColors.textMuted)),
+            ),
+            TextButton(
+              onPressed: isDownloading ? null : () {
+                VersionChecker.markSkipped(widget.info.latestVersion);
+                Navigator.of(context).pop();
+              },
+              child: Text('稍後提醒', style: TextStyle(color: isDownloading ? AppColors.textMuted : AppColors.textSecondary)),
+            ),
+          ],
+          Container(
+            decoration: isReady
+                ? BoxDecoration(gradient: const LinearGradient(colors: [AppColors.accent, Color(0xFF169C46)]), borderRadius: BorderRadius.circular(8))
+                : null,
+            child: ElevatedButton(
+              onPressed: isDownloading ? null : (isReady ? _svc.launchInstaller : () { _svc.startDownload(widget.info); Navigator.of(context).pop(); }),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isReady ? Colors.transparent : (isDownloading ? AppColors.surfaceLight : AppColors.accent),
+                shadowColor: Colors.transparent,
+                foregroundColor: isDownloading ? AppColors.textMuted : Colors.black,
+              ),
+              child: Text(
+                isDownloading ? '下載中…' : (isReady ? '執行安裝' : '背景下載'),
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
-          ],
-        ]),
-      ),
-      actions: [
-        if (!isReady) ...[
-          TextButton(
-            onPressed: isDownloading ? null : () {
-              VersionChecker.markSkipped(widget.info.latestVersion);
-              Navigator.of(context).pop();
-            },
-            child: Text(t('common.skip'), style: TextStyle(color: isDownloading ? AppColors.textMuted : AppColors.textMuted)),
-          ),
-          TextButton(
-            onPressed: isDownloading ? null : () => Navigator.of(context).pop(),
-            child: Text('稍後提醒', style: TextStyle(color: isDownloading ? AppColors.textMuted : AppColors.textSecondary)),
           ),
         ],
-        Container(
-          decoration: isReady
-              ? BoxDecoration(gradient: const LinearGradient(colors: [AppColors.accent, Color(0xFF169C46)]), borderRadius: BorderRadius.circular(8))
-              : null,
-          child:           ElevatedButton(
-            onPressed: isDownloading ? null : (isReady ? _svc.launchInstaller : () { _svc.startDownload(widget.info); Navigator.of(context).pop(); }),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: isReady ? Colors.transparent : (isDownloading ? AppColors.surfaceLight : AppColors.accent),
-              shadowColor: Colors.transparent,
-              foregroundColor: isDownloading ? AppColors.textMuted : Colors.black,
-            ),
-            child: Text(
-              isDownloading ? '下載中…' : (isReady ? '執行安裝' : '背景下載'),
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
