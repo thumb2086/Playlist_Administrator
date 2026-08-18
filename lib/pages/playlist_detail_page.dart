@@ -207,7 +207,7 @@ class PlaylistDetailPage extends StatelessWidget {
     final ctrl = PlayerController.instance;
     final queries = items.map((i) => i.audioQuery).toList();
     final titles = items.map((i) => i.name).toList();
-    ctrl.setQueue(queries, titles: titles, startIndex: startIndex < 0 ? 0 : startIndex);
+    ctrl.setQueue(queries, titles: titles, startIndex: startIndex < 0 ? 0 : startIndex, items: items);
     final first = items[startIndex < 0 ? 0 : startIndex];
     ctrl.playItem(first);
   }
@@ -216,7 +216,7 @@ class PlaylistDetailPage extends StatelessWidget {
     final ctrl = PlayerController.instance;
     final queries = items.map((i) => i.audioQuery).toList();
     final titles = items.map((i) => i.name).toList();
-    ctrl.setQueue(queries, titles: titles, startIndex: index);
+    ctrl.setQueue(queries, titles: titles, startIndex: index, items: items);
     ctrl.playItem(items[index]);
   }
 }

@@ -131,6 +131,7 @@ def main() -> None:
     ap.add_argument("--reset", action="store_true", help="重建資料庫")
     ap.add_argument("--limit", type=int, default=0, help="只索引前 N 篇 (測試用)")
     ap.add_argument("--workers", type=int, default=6, help="併發 embedding 數")
+    ap.add_argument("--batch", type=int, default=64, help="每批 embedding 數量")
     args = ap.parse_args()
 
     client = chromadb.PersistentClient(path=args.db)
@@ -237,7 +238,7 @@ def main() -> None:
         meta = detect_meta(f)
         sig = file_sig(f)
         try:
-            kept_chunks, vectors = embed_texts(args.model, chunks, workers=args.workers)
+            kept_chunks, vectors = embed_texts(args.model, chunks, batch=args.batch, workers=args.workers)
         except requests.exceptions.HTTPError as e:
             print(f"!! HTTP 錯誤 檔案={meta['file']} 前300字={chunks[0][:300] if chunks else ''}")
             raise

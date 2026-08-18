@@ -1049,6 +1049,7 @@ def cmd_rag_build(args):
     cmd = [sys.executable, script]
     if '--reset' in args:
         cmd.append('--reset')
+    cmd.extend(['--batch', '64', '--workers', '8'])
     env = dict(os.environ)
     env['BASE_PATH'] = env.get('BASE_PATH', '')
     try:

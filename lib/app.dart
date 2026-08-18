@@ -183,10 +183,13 @@ class _MainShellState extends State<MainShell> {
                 _Header(title: _detailWidget != null ? '返回' : _navItems[_selectedIndex].label,
                     onBack: _detailWidget != null ? () => setState(() { _detailWidget = null; }) : null),
                 Expanded(
-                  child: _detailWidget ?? IndexedStack(
-                    index: _selectedIndex,
-                    children: _pages,
-                  ),
+                  child: Stack(children: [
+                    IndexedStack(
+                      index: _selectedIndex,
+                      children: _pages,
+                    ),
+                    if (_detailWidget != null) _detailWidget!,
+                  ]),
                 ),
               ]),
             ),

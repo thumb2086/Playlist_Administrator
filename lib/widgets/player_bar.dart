@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/config_service.dart';
 import '../services/player_controller.dart';
@@ -30,6 +31,25 @@ class _PlayerBarState extends State<PlayerBar> {
 
   void _onState() => setState(() {});
 
+  Widget _buildCover() {
+    final cp = _ctrl.coverPath;
+    if (cp == null) return const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24);
+    final bytes = _ctrl.getArtworkBytes();
+    if (bytes != null) {
+      return Image.memory(bytes, fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24));
+    }
+    if (cp.startsWith('http')) {
+      return Image.network(cp, fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24));
+    }
+    if (File(cp).existsSync()) {
+      return Image.file(File(cp), fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24));
+    }
+    return const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24);
+  }
+
   String _fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -59,10 +79,7 @@ class _PlayerBarState extends State<PlayerBar> {
             child: Container(
               width: 48, height: 48,
               color: AppColors.surfaceLight,
-              child: _ctrl.coverPath != null
-                  ? Image.asset(_ctrl.coverPath!, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24))
-                  : const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24),
+              child: _buildCover(),
             ),
           ),
           const SizedBox(width: 10),
