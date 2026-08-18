@@ -207,9 +207,21 @@ def cmd_stream_resolve(args):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f'ytsearch1:{query}', download=False)
             entry = info['entries'][0] if info.get('entries') else info
-            url = entry.get('url') or entry.get('webpage_url')
+            # 1. Direct URL field (works for most formats).
+            url = entry.get('url')
+            # 2. From formats list — find bestaudio with a usable URL.
             if not url:
-                emit_json({'type': 'error', 'message': 'no stream URL'})
+                formats = entry.get('formats', [])
+                for fmt in reversed(formats):
+                    furl = fmt.get('url')
+                    if furl and fmt.get('acodec', 'none') != 'none':
+                        url = furl
+                        break
+            # 3. Last resort: try ffmpeg_url (manifest-based formats).
+            if not url:
+                url = entry.get('manifest_url')
+            if not url:
+                emit_json({'type': 'error', 'message': f'no stream URL for: {query}'})
                 return
             emit_json({
                 'type': 'complete',
@@ -323,7 +335,6 @@ def cmd_stream_download(args):
                     return
             emit_json({'type': 'error', 'message': 'output file not found'})
     except Exception as e:
-        emit_json({'type': 'error', 'message': str(e)})
         emit_json({'type': 'error', 'message': str(e)})
 
 

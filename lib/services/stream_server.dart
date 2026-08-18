@@ -96,10 +96,11 @@ class StreamServer {
     final dir = Directory(_cacheDir);
     if (!dir.existsSync()) return null;
     final lower = query.toLowerCase();
+    final prefix = lower.substring(0, lower.length.clamp(0, 20));
     for (final f in dir.listSync().whereType<File>()) {
       if (f.path.endsWith('.mp3') && f.lengthSync() > 65536) {
-        final name = f.uri.pathSegments.last.toLowerCase();
-        if (name.contains(lower.substring(0, lower.length.clamp(0, 20)))) {
+        final name = f.path.split(Platform.pathSeparator).last.toLowerCase();
+        if (name.contains(prefix)) {
           return f.path;
         }
       }
@@ -135,25 +136,38 @@ class StreamServer {
   Future<String> _resolve(String query) async {
     final cached = _resolved[query];
     if (cached != null) return cached;
-    final proc = await Process.start(
-      'python',
-      [_bridgePath, 'stream-resolve', query],
-      runInShell: true,
-      workingDirectory: ConfigService.instance.config.basePath,
-      environment: {'PYTHONIOENCODING': 'utf-8'},
-    );
-    final out = await proc.stdout.transform(utf8.decoder).join();
-    await proc.exitCode;
-    for (final line in out.split('\n')) {
-      if (!line.trim().isEmpty) {
-        try {
-          final data = jsonDecode(line.trim()) as Map<String, dynamic>;
-          if (data['type'] == 'complete' && data['url'] != null) {
-            _resolved[query] = data['url'] as String;
-            return data['url'] as String;
-          }
-        } catch (_) {}
+    try {
+      final proc = await Process.start(
+        'python',
+        [_bridgePath, 'stream-resolve', query],
+        runInShell: true,
+        workingDirectory: ConfigService.instance.config.basePath,
+        environment: {'PYTHONIOENCODING': 'utf-8'},
+      );
+      final out = await proc.stdout.transform(utf8.decoder).join();
+      final code = await proc.exitCode;
+      if (code != 0) {
+        print('[StreamServer] stream-resolve failed (exit $code) for: $query');
+        return '';
       }
+      for (final line in out.split('\n')) {
+        if (line.trim().isNotEmpty) {
+          try {
+            final data = jsonDecode(line.trim()) as Map<String, dynamic>;
+            if (data['type'] == 'error') {
+              print('[StreamServer] stream-resolve error: ${data['message']}');
+              return '';
+            }
+            if (data['type'] == 'complete' && data['url'] != null) {
+              _resolved[query] = data['url'] as String;
+              return data['url'] as String;
+            }
+          } catch (_) {}
+        }
+      }
+      print('[StreamServer] stream-resolve: no valid URL for: $query');
+    } catch (e) {
+      print('[StreamServer] stream-resolve exception: $e');
     }
     return '';
   }
@@ -167,9 +181,10 @@ class StreamServer {
     await cacheDir.create(recursive: true);
 
     final safeName = query.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').replaceAll(RegExp(r'\s+'), ' ').trim();
+    final prefix = safeName.substring(0, safeName.length.clamp(0, 20)).toLowerCase();
     for (final f in cacheDir.listSync().whereType<File>()) {
-      if (f.path.contains(safeName.substring(0, safeName.length.clamp(0, 20))) &&
-          f.path.endsWith('.mp3') && f.lengthSync() > 65536) {
+      final name = f.path.split(Platform.pathSeparator).last.toLowerCase();
+      if (name.contains(prefix) && f.path.endsWith('.mp3') && f.lengthSync() > 65536) {
         return f.path;
       }
     }
@@ -196,11 +211,18 @@ class StreamServer {
       final out = await outFuture;
       final code = await exited;
       _activeProc = null;
-      if (code != 0 && code != -1) return '';
+      if (code != 0 && code != -1) {
+        print('[StreamServer] stream-download failed (exit $code) for: $query');
+        return '';
+      }
       for (final line in out.split('\n')) {
-        if (!line.trim().isEmpty) {
+        if (line.trim().isNotEmpty) {
           try {
             final data = jsonDecode(line.trim()) as Map<String, dynamic>;
+            if (data['type'] == 'error') {
+              print('[StreamServer] stream-download error: ${data['message']}');
+              continue;
+            }
             if (data['type'] == 'complete' && data['path'] != null) {
               final srcPath = data['path'] as String;
               final finalPath = '${cacheDir.path}\\$safeName.mp3';
