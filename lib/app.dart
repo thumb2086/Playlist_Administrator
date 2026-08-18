@@ -172,7 +172,10 @@ class _MainShellState extends State<MainShell> {
               items: _navItems,
               selectedIndex: _selectedIndex,
               onSelected: (i) {
-                setState(() => _selectedIndex = i);
+                setState(() {
+                  _selectedIndex = i;
+                  _detailWidget = null;
+                });
               },
             ),
             Expanded(
