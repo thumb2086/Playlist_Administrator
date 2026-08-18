@@ -66,11 +66,21 @@ class VersionChecker {
 
   static Future<VersionInfo> checkForUpdate() async {
     try {
-      final resp = await http.get(
-        Uri.parse(_apiUrl),
-        headers: {'User-Agent': 'playlist-admin/2.0'},
-      );
-      if (resp.statusCode != 200) {
+      http.Response? resp;
+      // Retry up to 3 times on rate limit (429) or server errors (5xx).
+      for (int attempt = 0; attempt < 3; attempt++) {
+        resp = await http.get(
+          Uri.parse(_apiUrl),
+          headers: {'User-Agent': 'playlist-admin/2.0'},
+        );
+        if (resp.statusCode == 200) break;
+        if (resp.statusCode == 429 || resp.statusCode >= 500) {
+          await Future.delayed(Duration(seconds: 2 * (attempt + 1)));
+          continue;
+        }
+        break; // 4xx (non-429) — don't retry
+      }
+      if (resp == null || resp.statusCode != 200) {
         return VersionInfo(latestVersion: currentVersion, htmlUrl: '', hasUpdate: false);
       }
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
