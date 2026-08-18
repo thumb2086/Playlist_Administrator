@@ -33,6 +33,9 @@ class PlayerController {
   Timer? _smtcTimer;
   Timer? _sleepTimer;
   DateTime? _sleepEndsAt;
+  bool _prefetching = false;
+  // PlaylistItem data for prefetch (query + isrc per queue slot).
+  final List<PlaylistItem> _queueItems = [];
 
   // Getters
   AudioPlayer get player => _player;
@@ -125,8 +128,8 @@ class PlayerController {
     _pushSmtc();
   }
 
-  /// Play via streaming: resolve → transcode → local mp3.
-  Future<void> playStream(String query, {String? title, String? artist}) async {
+  /// Play via streaming: download via yt-dlp → play local file.
+  Future<void> playStream(String query, {String? title, String? artist, String? isrc}) async {
     StreamServer.instance.stopActive();
     await _player.stop();
     _title = title ?? query;
@@ -138,7 +141,7 @@ class PlayerController {
       await StreamServer.instance.start();
       _statusText = '解析: $query';
       _notify();
-      final localPath = await StreamServer.instance.resolveToFile(query);
+      final localPath = await StreamServer.instance.resolveToFile(query, isrc: isrc);
       if (localPath.isEmpty || !File(localPath).existsSync()) {
         _statusText = '找不到: $query';
         _notify();
@@ -156,11 +159,11 @@ class PlayerController {
   }
 
   /// Smart play: local file if path exists, otherwise stream.
-  Future<void> play(String pathOrQuery, {String? title, String? artist}) async {
+  Future<void> play(String pathOrQuery, {String? title, String? artist, String? isrc}) async {
     if (File(pathOrQuery).existsSync()) {
       await playFile(pathOrQuery, title: title, artist: artist);
     } else {
-      await playStream(pathOrQuery, title: title, artist: artist);
+      await playStream(pathOrQuery, title: title, artist: artist, isrc: isrc);
     }
   }
 
@@ -265,7 +268,7 @@ class PlayerController {
     }
 
     // 4. Stream via YouTube.
-    await playStream(item.audioQuery, title: item.name, artist: item.artist);
+    await playStream(item.audioQuery, title: item.name, artist: item.artist, isrc: item.isrc);
   }
 
   String? _findLocalTrack(String query) {
@@ -296,6 +299,23 @@ class PlayerController {
         await File(outPath).writeAsBytes(resp.bodyBytes);
       }
     } catch (_) {}
+  }
+
+
+  /// Prefetch next track in background (called at 80% or after play starts).
+  void _prefetchNext() {
+    if (_prefetching || _queue.isEmpty || _index < 0) return;
+    final nextIdx = _index + 1;
+    if (nextIdx >= _queue.length) return;
+    final nextPath = _queue[nextIdx];
+    // Only prefetch if it's NOT a local file (needs download).
+    if (File(nextPath).existsSync()) return;
+    _prefetching = true;
+    StreamServer.instance.start().then((_) {
+      StreamServer.instance.resolveToFile(nextPath).then((_) {
+        _prefetching = false;
+      }).catchError((_) { _prefetching = false; });
+    });
   }
 
   void setQueue(List<String> paths, {List<String>? titles, int startIndex = 0}) {

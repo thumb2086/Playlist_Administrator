@@ -381,7 +381,7 @@ class _HomePageState extends State<HomePage> {
             items: tracks.map((t) => PlaylistItem(
               name: t.name, artist: t.artists.join(', '),
               durationMs: t.durationMs, coverUrl: t.coverUrl,
-              audioQuery: t.displayName,
+              audioQuery: t.displayName, isrc: t.isrc,
             )).toList(),
           ));
           return;

@@ -223,11 +223,52 @@ def cmd_stream_resolve(args):
 
 
 def cmd_stream_download(args):
-    """Download a song via yt-dlp and transcode to mp3 VBR 0, saving to output path."""
+    """Download a song via yt-dlp with ranking (Spotube-style algorithm)."""
     query = args[0]
-    output_path = args[1]  # full path without extension
+    output_path = args[1]
+    isrc = args[2] if len(args) > 2 else ''
 
     import yt_dlp
+    import re
+
+    # Parse query: "Title - Artist" or just "Title"
+    parts = query.split(' - ', 1)
+    track_title = parts[0].strip().lower()
+    track_artist = parts[1].strip().lower() if len(parts) > 1 else ''
+
+    # Spotube-style ranking regex
+    official_re = re.compile(r'official\s*(video|audio|music|lyric|visualizer)', re.I)
+
+    def rank(entries):
+        scored = []
+        for e in entries:
+            score = 0
+            title = (e.get('title') or '').lower()
+            channel = (e.get('channel') or e.get('uploader') or '').lower()
+            # +1 if uploader matches artist
+            if track_artist and track_artist in channel:
+                score += 1
+            # +1 per artist name in title
+            if track_artist and track_artist in title:
+                score += 1
+            # +3 if title contains track name
+            if track_title and track_title in title:
+                score += 3
+            # +1 official flag
+            if official_re.search(title):
+                score += 1
+            # +2 bonus: official + title match
+            if official_re.search(title) and track_title in title:
+                score += 2
+            scored.append((e, score))
+        scored.sort(key=lambda x: -x[1])
+        return [e for e, s in scored]
+
+    # Search strategy: ISRC first, then title+artist
+    search_queries = []
+    if isrc:
+        search_queries.append(f'ytsearch3:{isrc}')
+    search_queries.append(f'ytsearch3:{query}')
 
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -253,25 +294,36 @@ def cmd_stream_download(args):
         'socket_timeout': 60,
         'retries': 2,
     }
+
+    best = None
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f'ytsearch1:{query}', download=False)
-            entry = info['entries'][0] if info.get('entries') else info
-            title = entry.get('title', '')
-            ydl.download([f'ytsearch1:{query}'])
-        # Find the output file
+            for sq in search_queries:
+                info = ydl.extract_info(sq, download=False)
+                entries = info.get('entries', [])
+                if not entries:
+                    continue
+                ranked = rank(entries)
+                if ranked:
+                    best = ranked[0]
+                    break
+            if not best:
+                emit_json({'type': 'error', 'message': 'no results found'})
+                return
+            title = best.get('title', '')
+            emit_json({'type': 'log', 'message': f'ranked: {title[:50]} (score for top)'})
+            ydl.download([best.get('webpage_url') or best.get('url', '')])
         mp3_path = output_path + '.mp3'
         if os.path.exists(mp3_path):
             emit_json({'type': 'complete', 'path': mp3_path, 'title': title})
         else:
-            # Search for any file matching the output template stem
-            base = output_path
             for ext in ['.mp3', '.m4a', '.webm', '.opus']:
-                if os.path.exists(base + ext):
-                    emit_json({'type': 'complete', 'path': base + ext, 'title': title})
+                if os.path.exists(output_path + ext):
+                    emit_json({'type': 'complete', 'path': output_path + ext, 'title': title})
                     return
-            emit_json({'type': 'error', 'message': 'output file not found after download'})
+            emit_json({'type': 'error', 'message': 'output file not found'})
     except Exception as e:
+        emit_json({'type': 'error', 'message': str(e)})
         emit_json({'type': 'error', 'message': str(e)})
 
 

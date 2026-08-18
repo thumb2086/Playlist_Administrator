@@ -7,6 +7,7 @@ class PlaylistItem {
   final String? coverUrl;
   final String audioQuery;  // Music: "Title - Artist"; Podcast: episode title
   final String? audioUrl;   // Podcast: direct RSS mp3 URL (null for music)
+  final String? isrc;       // Spotify ISRC for accurate matching
 
   const PlaylistItem({
     required this.name,
@@ -15,6 +16,7 @@ class PlaylistItem {
     this.coverUrl,
     required this.audioQuery,
     this.audioUrl,
+    this.isrc,
   });
 
   String get durationText {

@@ -39,6 +39,17 @@ class StreamServer {
   Future<void> start() async {
     if (_started) return;
     _loadIndex();
+    // Clean orphaned temp files from previous sessions.
+    try {
+      final dir = Directory(_cacheDir);
+      if (dir.existsSync()) {
+        for (final f in dir.listSync().whereType<File>()) {
+          if (f.uri.pathSegments.last.startsWith('stream_')) {
+            f.deleteSync();
+          }
+        }
+      }
+    } catch (_) {}
     _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _port = _server!.port;
     _server!.listen(_handle);
@@ -151,7 +162,7 @@ class StreamServer {
   Future<String> resolveForTest(String query) => _resolve(query);
 
   /// Resolve a query → yt-dlp download+transcode to mp3 → return local path.
-  Future<String> resolveToFile(String query) async {
+  Future<String> resolveToFile(String query, {String? isrc}) async {
     final cacheDir = Directory(_cacheDir);
     await cacheDir.create(recursive: true);
 
@@ -163,14 +174,14 @@ class StreamServer {
       }
     }
 
-    final outBase = '${cacheDir.path}\\stream_${DateTime.now().millisecondsSinceEpoch}';
+    final outBase = '${cacheDir.path}\\dl_${safeName.hashCode.toRadixString(16)}';
     // Kill any previous streaming process to avoid resource leaks.
     _activeProc?.kill();
     _activeProc = null;
     try {
       final proc = await Process.start(
         'python',
-        [_bridgePath, 'stream-download', query, outBase],
+        [_bridgePath, 'stream-download', query, outBase] + (isrc != null ? [isrc] : []),
         runInShell: true,
         workingDirectory: ConfigService.instance.config.basePath,
         environment: {'PYTHONIOENCODING': 'utf-8'},
