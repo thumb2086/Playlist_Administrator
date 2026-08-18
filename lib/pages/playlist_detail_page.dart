@@ -93,65 +93,63 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   Future<void> _downloadTrack(int index) async {
     if (_isLocal(index) || _isDownloading(index)) return;
     final item = widget.items[index];
-    setState(() { _downloading.add(index); _progress[index] = 0; });
+    if (mounted) setState(() { _downloading.add(index); _progress[index] = 0; });
     try {
       await StreamServer.instance.start();
-      final cacheDir = Directory(ConfigService.instance.config.streamCachePath);
-      await cacheDir.create(recursive: true);
+      final cfg = ConfigService.instance.config;
+      final musicDir = Directory(cfg.musicPath);
+      await musicDir.create(recursive: true);
       final safeName = item.audioQuery.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').replaceAll(RegExp(r'\s+'), ' ').trim();
-      final outBase = '${cacheDir.path}\\dl_${safeName.hashCode.toRadixString(16)}';
+      final outBase = '${musicDir.path}\\dl_${safeName.hashCode.toRadixString(16)}';
       final proc = await Process.start(
         'python',
-        ['${ConfigService.instance.config.toolsPath}\\flutter_download_bridge.py',
+        ['${cfg.toolsPath}\\flutter_download_bridge.py',
          'stream-download', item.audioQuery, outBase] + (item.isrc != null ? [item.isrc!] : []),
         runInShell: true,
-        workingDirectory: ConfigService.instance.config.basePath,
+        workingDirectory: cfg.basePath,
         environment: {'PYTHONIOENCODING': 'utf-8'},
       );
       final out = await proc.stdout.transform(utf8.decoder).join();
       final code = await proc.exitCode;
+      debugPrint('[DL] exit=$code for: ${item.audioQuery}');
       if (code == 0) {
         for (final line in out.split('\n')) {
           final trimmed = line.trim();
-          if (trimmed.isEmpty) continue;
+          if (trimmed.isEmpty || !trimmed.startsWith('{')) continue;
           try {
-            final data = Map<String, dynamic>.from(
-                Map<String, dynamic>.from({'type': ''}));
-            // Manual JSON parse for safety
-            if (!trimmed.startsWith('{')) continue;
-            final parsed = _simpleJsonParse(trimmed);
+            final parsed = jsonDecode(trimmed) as Map<String, dynamic>;
             if (parsed['type'] == 'complete' && parsed['path'] != null) {
               final srcPath = parsed['path'] as String;
-              final finalPath = '${cacheDir.path}\\$safeName.mp3';
+              // Final name: "Title - Artist.mp3"
+              final finalName = '${item.name} - ${item.artist}.mp3'.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+              final finalPath = '${musicDir.path}\\$finalName';
               if (srcPath != finalPath && File(srcPath).existsSync()) {
+                if (File(finalPath).existsSync()) await File(finalPath).delete();
                 await File(srcPath).rename(finalPath);
               }
-              if (mounted) setState(() { _downloaded.add(index); _progress[index] = 1.0; });
+              if (mounted) {
+                _localTracks.add(index);
+                setState(() { _downloaded.add(index); _progress[index] = 1.0; });
+              }
               break;
             }
-          } catch (_) {}
+          } catch (e) {
+            debugPrint('[DL] json parse error: $e');
+          }
+        }
+      } else {
+        debugPrint('[DL] bridge failed exit=$code');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('下載失敗'), duration: Duration(seconds: 2)),
+          );
         }
       }
     } catch (e) {
-      debugPrint('[PlaylistDetail] download error: $e');
+      debugPrint('[DL] error: $e');
     } finally {
       if (mounted) setState(() { _downloading.remove(index); });
     }
-  }
-
-  /// Simple JSON string parser — extracts key-value pairs we care about.
-  Map<String, dynamic> _simpleJsonParse(String json) {
-    final result = <String, dynamic>{};
-    // Extract "type": "value"
-    final typeMatch = RegExp(r'"type"\s*:\s*"([^"]*)"').firstMatch(json);
-    if (typeMatch != null) result['type'] = typeMatch.group(1);
-    // Extract "path": "value"
-    final pathMatch = RegExp(r'"path"\s*:\s*"([^"]*)"').firstMatch(json);
-    if (pathMatch != null) result['path'] = pathMatch.group(1);
-    // Extract "message": "value"
-    final msgMatch = RegExp(r'"message"\s*:\s*"([^"]*)"').firstMatch(json);
-    if (msgMatch != null) result['message'] = msgMatch.group(1);
-    return result;
   }
 
   Future<void> _downloadAll() async {

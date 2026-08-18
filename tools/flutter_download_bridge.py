@@ -276,11 +276,14 @@ def cmd_stream_download(args):
         scored.sort(key=lambda x: -x[1])
         return [e for e, s in scored]
 
-    # Search strategy: ISRC first, then title+artist
+    # Search strategy: ISRC first, then title+artist, then title only
     search_queries = []
     if isrc:
-        search_queries.append(f'ytsearch3:{isrc}')
-    search_queries.append(f'ytsearch3:{query}')
+        search_queries.append(f'ytsearch5:{isrc}')
+    search_queries.append(f'ytsearch5:{query}')
+    # Fallback: title only (for queries with drama/extra info)
+    if track_artist:
+        search_queries.append(f'ytsearch5:{track_title}')
 
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -316,15 +319,24 @@ def cmd_stream_download(args):
                 if not entries:
                     continue
                 ranked = rank(entries)
-                if ranked:
-                    best = ranked[0]
+                # Try each ranked result until one downloads successfully.
+                for candidate in ranked:
+                    url = candidate.get('webpage_url') or candidate.get('url', '')
+                    title = candidate.get('title', '')
+                    try:
+                        ydl.download([url])
+                        best = candidate
+                        break
+                    except Exception as dl_err:
+                        emit_json({'type': 'log', 'message': f'skip: {title[:40]} ({dl_err})'})
+                        continue
+                if best:
                     break
             if not best:
-                emit_json({'type': 'error', 'message': 'no results found'})
+                emit_json({'type': 'error', 'message': f'no downloadable result for: {query}'})
                 return
             title = best.get('title', '')
-            emit_json({'type': 'log', 'message': f'ranked: {title[:50]} (score for top)'})
-            ydl.download([best.get('webpage_url') or best.get('url', '')])
+            emit_json({'type': 'log', 'message': f'downloaded: {title[:50]}'})
         mp3_path = output_path + '.mp3'
         if os.path.exists(mp3_path):
             emit_json({'type': 'complete', 'path': mp3_path, 'title': title})

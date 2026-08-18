@@ -147,7 +147,8 @@ class PlayerController {
     _pushSmtc();
   }
 
-  /// Play via true streaming: HTTP proxy pipes ffmpeg output → audioplayers plays URL.
+  /// Play via download-then-play: yt-dlp download → play local file.
+  /// Prefetch next track in background for instant skip.
   Future<void> playStream(String query, {String? title, String? artist, String? isrc, String? coverUrl}) async {
     StreamServer.instance.stopActive();
     await _player.stop();
@@ -155,38 +156,25 @@ class PlayerController {
     _artist = artist ?? '';
     _coverPath = coverUrl;
     _recordedSongKey = '';
-    _statusText = '串流中: ${_title}';
+    _statusText = '下載中: ${_title}';
     _isPlaying = false;
     _notify();
     try {
       await StreamServer.instance.start();
-      // Build HTTP stream URL — StreamServer._serveTranscoded handles resolve + ffmpeg pipe.
-      final streamUrl = '${StreamServer.instance.baseUrl}/stream/${Uri.encodeComponent(query)}';
-      _statusText = '連線: ${_title}';
-      _notify();
-      _isPlaying = true;
-      await _player.play(UrlSource(streamUrl));
-      _statusText = '';
-      _pushSmtc();
-    } catch (e) {
-      // Fallback: download-then-play if streaming fails.
-      _statusText = '降級下載: ${_title}';
-      _notify();
-      try {
-        final localPath = await StreamServer.instance.resolveToFile(query, isrc: isrc);
-        if (localPath.isEmpty || !File(localPath).existsSync()) {
-          _statusText = '找不到: $query';
-          _notify();
-          return;
-        }
-        _statusText = '';
-        _isPlaying = true;
-        await _player.play(DeviceFileSource(localPath));
-        _pushSmtc();
-      } catch (e2) {
-        _statusText = '錯誤: $e2';
+      final localPath = await StreamServer.instance.resolveToFile(query, isrc: isrc);
+      if (localPath.isEmpty || !File(localPath).existsSync()) {
+        _statusText = '找不到: $query';
         _notify();
+        return;
       }
+      _statusText = '';
+      _isPlaying = true;
+      await _player.play(DeviceFileSource(localPath));
+      _pushSmtc();
+      _prefetchNext();
+    } catch (e) {
+      _statusText = '錯誤: $e';
+      _notify();
     }
     _notify();
   }
@@ -337,17 +325,17 @@ class PlayerController {
   }
 
 
-  /// Prefetch next track in background (called at 80% or after play starts).
+  /// Prefetch next track in background (download ahead of time).
   void _prefetchNext() {
     if (_prefetching || _queue.isEmpty || _index < 0) return;
     final nextIdx = _index + 1;
     if (nextIdx >= _queue.length) return;
-    final nextPath = _queue[nextIdx];
-    // Only prefetch if it's NOT a local file (needs download).
-    if (File(nextPath).existsSync()) return;
+    final nextQuery = _queue[nextIdx];
+    // Only prefetch if not already cached locally.
+    if (StreamServer.instance.findCached(nextQuery) != null) return;
     _prefetching = true;
     StreamServer.instance.start().then((_) {
-      StreamServer.instance.resolveToFile(nextPath).then((_) {
+      StreamServer.instance.resolveToFile(nextQuery).then((_) {
         _prefetching = false;
       }).catchError((_) { _prefetching = false; });
     });
