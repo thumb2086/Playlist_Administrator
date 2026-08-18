@@ -106,7 +106,7 @@ class _MainShellState extends State<MainShell> {
     _updateSvc.addListener(_onUpdate);
     _checkForUpdates();
     // Periodic check every 10 minutes while app is running
-    Timer.periodic(const Duration(minutes: 10), (_) => _checkForUpdates());
+    Timer.periodic(const Duration(minutes: 1), (_) => _checkForUpdates());
   }
 
   void _onUpdate() {

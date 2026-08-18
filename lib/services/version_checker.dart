@@ -66,12 +66,15 @@ class VersionChecker {
 
   static Future<VersionInfo> checkForUpdate() async {
     try {
+      final token = ConfigService.instance.config.githubToken;
+      final headers = <String, String>{'User-Agent': 'playlist-admin/2.0'};
+      if (token.isNotEmpty) headers['Authorization'] = 'Bearer $token';
       http.Response? resp;
       // Retry up to 3 times on rate limit (429) or server errors (5xx).
       for (int attempt = 0; attempt < 3; attempt++) {
         resp = await http.get(
           Uri.parse(_apiUrl),
-          headers: {'User-Agent': 'playlist-admin/2.0'},
+          headers: headers,
         );
         if (resp.statusCode == 200) break;
         if (resp.statusCode == 429 || resp.statusCode >= 500) {

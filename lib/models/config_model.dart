@@ -13,6 +13,7 @@ class AppConfig {
   String lyricsFolderName;
   bool autoUpdateCheck;
   bool autoDownloadUpdate;
+  String githubToken;
   bool enableRetroactiveLyrics;
   String theme;
   String skippedVersion;
@@ -45,6 +46,7 @@ class AppConfig {
     this.lyricsFolderName = 'Lyrics',
     this.autoUpdateCheck = true,
     this.autoDownloadUpdate = false,
+    this.githubToken = '',
     this.enableRetroactiveLyrics = false,
     this.theme = 'dark',
     this.skippedVersion = '',
@@ -108,6 +110,7 @@ class AppConfig {
         lyricsFolderName: json['lyrics_folder_name'] as String? ?? 'Lyrics',
         autoUpdateCheck: json['auto_update_check'] as bool? ?? true,
         autoDownloadUpdate: json['auto_download_update'] as bool? ?? false,
+        githubToken: json['github_token'] as String? ?? '',
         enableRetroactiveLyrics: json['enable_retroactive_lyrics'] as bool? ?? false,
         theme: json['theme'] as String? ?? 'dark',
         skippedVersion: json['skipped_version'] as String? ?? '',
@@ -144,6 +147,7 @@ class AppConfig {
         'lyrics_folder_name': lyricsFolderName,
         'auto_update_check': autoUpdateCheck,
         'auto_download_update': autoDownloadUpdate,
+        'github_token': githubToken,
         'enable_retroactive_lyrics': enableRetroactiveLyrics,
         'theme': theme,
         'skipped_version': skippedVersion,
