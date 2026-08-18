@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../services/config_service.dart';
 import '../services/i18n.dart';
 import '../services/chinese_converter.dart';
+import '../services/rag_service.dart';
 import '../services/history_recorder.dart';
 import '../pipeline/pipeline_orchestrator.dart';
 import '../pipeline/podcast_pipeline.dart';
@@ -26,8 +27,10 @@ class _PipelinePageState extends State<PipelinePage> {
   PipelineState _podcastState = PipelineState();
   bool _musicRunning = false;
   bool _podcastRunning = false;
+  bool _ragRunning = false;
   double _musicProgress = 0;
   double _podcastProgress = 0;
+  double _ragProgress = 0;
   int _musicStep = 0;
 
   late List<String> _stepLabels;
@@ -118,25 +121,27 @@ class _PipelinePageState extends State<PipelinePage> {
   }
 
   Future<void> _runRagOnly() async {
-    if (_musicRunning) return;
-    setState(() { _musicRunning = true; _musicProgress = 0; _musicStep = 0; });
-    _musicState = PipelineState();
+    if (_ragRunning || _musicRunning) return;
+    setState(() { _ragRunning = true; _ragProgress = 0; });
     _musicLog('RAG 索引更新啟動中…');
     await Future<void>.delayed(const Duration(milliseconds: 50));
     try {
-      final orch = PipelineOrchestrator(
-        config: ConfigService.instance.config,
-        onLog: _musicLog,
-        onProgress: (c, t, stepIdx) {
-          try { if (mounted) setState(() { _musicProgress = t > 0 ? c / t : 0.0; _musicStep = stepIdx; }); } catch (_) {}
-        },
-        state: _musicState,
-      );
-      await orch.runRagOnly();
+      final ragStart = DateTime.now();
+      await RagService.instance.build((line) {
+        _musicLog(line);
+        // Parse progress: [50/1668] 3.0% ...
+        final match = RegExp(r'\[(\d+)/(\d+)\]\s+([\d.]+)%').firstMatch(line);
+        if (match != null) {
+          final pct = (double.tryParse(match.group(3) ?? '') ?? 0) / 100;
+          if (mounted) setState(() => _ragProgress = pct);
+        }
+      });
+      final elapsed = DateTime.now().difference(ragStart).inMinutes;
+      _musicLog('RAG 完成 (${elapsed}分)');
     } catch (e) {
       _musicLog('  ❌ RAG 更新錯誤: $e');
     } finally {
-      if (mounted) setState(() { _musicRunning = false; _musicProgress = 0; });
+      if (mounted) setState(() { _ragRunning = false; _ragProgress = 0; });
     }
   }
 
@@ -231,7 +236,7 @@ class _PipelinePageState extends State<PipelinePage> {
             _PButton(t('pipeline.run_scrape'), Icons.cloud_download, () => _run(fromStep: 1, toStep: 2), _musicRunning),
 _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 2, toStep: 3), _musicRunning),
         _PButton(t('pipeline.run_podcast'), Icons.podcasts, _runPodcast, _podcastRunning, color: const Color(0xFFCE93D8)),
-        _PButton(t('pipeline.run_rag'), Icons.auto_awesome, _runRagOnly, _musicRunning, color: const Color(0xFF4DB6AC)),
+        _PButton(t('pipeline.run_rag'), Icons.auto_awesome, _runRagOnly, _ragRunning || _musicRunning, color: const Color(0xFF4DB6AC)),
         _PButton(t('pipeline.run_opencode'), Icons.forum_outlined, _openOpencode, false, color: const Color(0xFF9575CD)),
             if (_musicRunning) ...[
               _PButton(t('pipeline.pause'), Icons.pause_rounded, () {
@@ -287,7 +292,7 @@ _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 
           ]),
           const SizedBox(height: 20),
           AnimatedSize(duration: const Duration(milliseconds: 300), curve: Curves.easeOut,
-            child: (_musicRunning || _musicProgress > 0 || _podcastRunning || _podcastProgress > 0)
+            child: (_musicRunning || _musicProgress > 0 || _podcastRunning || _podcastProgress > 0 || _ragRunning || _ragProgress > 0)
                 ? Column(children: [
                     if (_musicRunning || _musicProgress > 0) ...[
                       ClipRRect(
@@ -321,6 +326,24 @@ _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 
                             style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                         const Spacer(),
                         if (_podcastRunning)
+                          const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
+                      ]),
+                    ],
+                    if (_ragRunning || _ragProgress > 0) ...[
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: _ragProgress, backgroundColor: AppColors.surfaceLight,
+                          valueColor: const AlwaysStoppedAnimation(Color(0xFF4DB6AC)), minHeight: 7,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Text('RAG 向量索引  (${(_ragProgress * 100).toStringAsFixed(0)}%)',
+                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                        const Spacer(),
+                        if (_ragRunning)
                           const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
                       ]),
                     ],
