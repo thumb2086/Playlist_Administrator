@@ -47,8 +47,12 @@ class SpotifySession extends ChangeNotifier {
       _spT = data['sp_t'] as String?;
       _accessToken = data['access_token'] as String?;
       _tokenExpiryMs = (data['expiry_ms'] as num?)?.toInt() ?? 0;
+      // Load cached nuances from session file.
+      final nuData = data['nuances'] as Map<String, dynamic>?;
+      if (nuData != null) {
+        _nuancesCache = {for (final e in nuData.entries) int.parse(e.key): e.value as String};
+      }
       if (_spDc == null || _spDc!.isEmpty) return;
-      // Refresh immediately if expired or within 5 minutes.
       if (_tokenExpiryMs - DateTime.now().millisecondsSinceEpoch <
           const Duration(minutes: 5).inMilliseconds) {
         await refreshToken();
@@ -127,19 +131,33 @@ class SpotifySession extends ChangeNotifier {
         'sp_t': _spT,
         'access_token': _accessToken,
         'expiry_ms': _tokenExpiryMs,
+        'nuances': _nuancesCache?.map((k, v) => MapEntry(k.toString(), v)),
       }));
     } catch (_) {}
   }
 
   Future<Map<int, String>> _fetchNuances() async {
-    final resp = await http.get(Uri.parse(_nuancesUrl));
-    if (resp.statusCode != 200) throw Exception('nuances ${resp.statusCode}');
-    final list = jsonDecode(resp.body) as List<dynamic>;
-    return {
-      for (final e in list.cast<Map<String, dynamic>>())
-        (e['v'] as num).toInt(): e['s'] as String,
-    };
+    // Try cached first (avoids GitHub rate limits).
+    if (_nuancesCache != null && _nuancesCache!.isNotEmpty) return _nuancesCache!;
+    try {
+      final resp = await http.get(Uri.parse(_nuancesUrl))
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode == 200) {
+        final list = jsonDecode(resp.body) as List<dynamic>;
+        _nuancesCache = {
+          for (final e in list.cast<Map<String, dynamic>>())
+            (e['v'] as num).toInt(): e['s'] as String,
+        };
+        _save();
+        return _nuancesCache!;
+      }
+    } catch (_) {}
+    // Fallback: try loading from session file cache.
+    if (_nuancesCache != null && _nuancesCache!.isNotEmpty) return _nuancesCache!;
+    throw Exception('nuances unavailable');
   }
+
+  Map<int, String>? _nuancesCache;
 
   Future<int> _fetchServerTime() async {
     final resp = await http.get(Uri.parse('https://open.spotify.com/api/server-time'));
