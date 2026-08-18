@@ -318,8 +318,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             child: Container(
               width: 40, height: 40,
               color: AppColors.surfaceLight,
-              child: item.coverUrl != null
-                  ? Image.network(item.coverUrl!, fit: BoxFit.cover,
+              child: (item.coverUrl ?? widget.coverUrl) != null
+                  ? Image.network(item.coverUrl ?? widget.coverUrl!, fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => const Icon(Icons.music_note_rounded, size: 16, color: AppColors.textMuted))
                   : const Icon(Icons.music_note_rounded, size: 16, color: AppColors.textMuted),
             ),

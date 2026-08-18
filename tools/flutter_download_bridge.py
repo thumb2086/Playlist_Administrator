@@ -297,6 +297,9 @@ def cmd_stream_download(args):
             'preferredcodec': 'mp3',
             'preferredquality': '0',
         }],
+        'postprocessor_args': {
+            'FFmpegExtractAudio': ['-ac', '2'],
+        },
         'extractor_args': {
             'youtube': {
                 'player_client': ['tv', 'web_embedded', 'android'],
