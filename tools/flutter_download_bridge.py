@@ -257,53 +257,59 @@ def cmd_stream_download(args):
             score = 0
             title = (e.get('title') or '').lower()
             channel = (e.get('channel') or e.get('uploader') or '').lower()
+            duration = e.get('duration') or 0
+            # Penalize very short (<30s) or very long (>600s) — likely not the song.
+            if duration and (duration < 30 or duration > 600):
+                score -= 3
+            # Penalize non-music channels (news, clips, talk).
+            non_music_re = re.compile(r'新聞|news|clip|shorts|民視|TVBS|中天|東森', re.I)
+            if non_music_re.search(channel) or non_music_re.search(title):
+                score -= 5
+            # +3 if title contains track name (fuzzy: remove spaces/punct for CJK).
+            clean_title = re.sub(r'[\s\-_·・]', '', title)
+            clean_track = re.sub(r'[\s\-_·・]', '', track_title)
+            if clean_track and clean_track in clean_title:
+                score += 3
             # +1 if uploader matches artist
             if track_artist and track_artist in channel:
                 score += 1
             # +1 per artist name in title
             if track_artist and track_artist in title:
                 score += 1
-            # +3 if title contains track name
-            if track_title and track_title in title:
-                score += 3
             # +1 official flag
             if official_re.search(title):
                 score += 1
             # +2 bonus: official + title match
-            if official_re.search(title) and track_title in title:
+            if official_re.search(title) and clean_track in clean_title:
                 score += 2
             scored.append((e, score))
         scored.sort(key=lambda x: -x[1])
-        return [e for e, s in scored]
+        return [e for e, s in scored if s >= 2]  # minimum score threshold
 
-    # Search strategy: ISRC first, then title+artist, then title only
+    # Search strategy: try multiple queries, pick best match.
     search_queries = []
     if isrc:
         search_queries.append(f'ytsearch5:{isrc}')
+    # Full query (title - artist)
     search_queries.append(f'ytsearch5:{query}')
-    # Fallback: title only (for queries with drama/extra info)
+    # Title only (YouTube struggles with "title artist" for CJK)
+    search_queries.append(f'ytsearch5:{track_title} official audio')
+    search_queries.append(f'ytsearch5:{track_title} official')
+    # Artist + title order swap
     if track_artist:
-        search_queries.append(f'ytsearch5:{track_title}')
+        search_queries.append(f'ytsearch5:{track_artist} {track_title}')
 
     ydl_opts = {
-        'format': 'bestaudio/best',
+        'format': 'bestaudio',
         'outtmpl': output_path + '.%(ext)s',
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'extract_audio': True,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '0',
-        }],
-        'postprocessor_args': {
-            'FFmpegExtractAudio': ['-ac', '2'],
-        },
+        'extract_audio': False,
+        'postprocessors': [],
         'extractor_args': {
             'youtube': {
-                'player_client': ['tv', 'web_embedded', 'android'],
-                'player_skip': ['webpage', 'configs'],
+                'player_client': ['web', 'tv'],
             }
         },
         'http_headers': {
@@ -340,15 +346,45 @@ def cmd_stream_download(args):
                 return
             title = best.get('title', '')
             emit_json({'type': 'log', 'message': f'downloaded: {title[:50]}'})
+
+        # Find the downloaded raw file.
+        raw_path = ''
+        for ext in ['.webm', '.m4a', '.opus', '.mp4', '.mp3', '.ogg']:
+            if os.path.exists(output_path + ext):
+                raw_path = output_path + ext
+                break
+        if not raw_path:
+            emit_json({'type': 'error', 'message': 'downloaded file not found'})
+            return
+
         mp3_path = output_path + '.mp3'
-        if os.path.exists(mp3_path):
+        # If already mp3, done.
+        if raw_path == mp3_path:
             emit_json({'type': 'complete', 'path': mp3_path, 'title': title})
-        else:
-            for ext in ['.mp3', '.m4a', '.webm', '.opus']:
-                if os.path.exists(output_path + ext):
-                    emit_json({'type': 'complete', 'path': output_path + ext, 'title': title})
-                    return
-            emit_json({'type': 'error', 'message': 'output file not found'})
+            return
+
+        # Convert to mp3 with ffmpeg (-ac 2 for stereo).
+        import subprocess
+        ffmpeg = 'ffmpeg'
+        for p in [r'C:\ffmpeg\bin\ffmpeg.exe', r'C:\tools\ffmpeg.exe']:
+            if os.path.exists(p):
+                ffmpeg = p
+                break
+        try:
+            result = subprocess.run([
+                ffmpeg, '-y', '-i', raw_path,
+                '-vn', '-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2',
+                mp3_path,
+            ], capture_output=True, timeout=120)
+            if result.returncode == 0 and os.path.exists(mp3_path):
+                os.remove(raw_path)
+                emit_json({'type': 'complete', 'path': mp3_path, 'title': title})
+                return
+        except Exception as e:
+            emit_json({'type': 'log', 'message': f'ffmpeg convert failed: {e}'})
+
+        # Fallback: return raw file as-is.
+        emit_json({'type': 'complete', 'path': raw_path, 'title': title})
     except Exception as e:
         emit_json({'type': 'error', 'message': str(e)})
 
