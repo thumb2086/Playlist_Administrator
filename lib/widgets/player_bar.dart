@@ -114,18 +114,6 @@ class _PlayerBarState extends State<PlayerBar> {
           const SizedBox(width: 16),
         ],
 
-        // --- Shuffle ---
-        SizedBox(
-          width: 20, height: 20,
-          child: IconButton(
-            icon: Icon(Icons.shuffle_rounded, size: 14,
-                color: _ctrl.shuffle ? AppColors.accent : AppColors.textMuted),
-            onPressed: hasTrack ? _ctrl.toggleShuffle : null,
-            tooltip: '隨機播放',
-            padding: EdgeInsets.zero,
-          ),
-        ),
-
         // --- Previous ---
         IconButton(
           icon: const Icon(Icons.skip_previous_rounded, size: 22),
@@ -157,14 +145,22 @@ class _PlayerBarState extends State<PlayerBar> {
           constraints: const BoxConstraints(minWidth: 28),
         ),
 
-        // --- Loop ---
+        // --- Shuffle + Loop ---
         IconButton(
-          icon: Icon(_ctrl.loop ? Icons.repeat_rounded : Icons.repeat_one_rounded, size: 18,
+          icon: Icon(Icons.shuffle_rounded, size: 16,
+              color: _ctrl.shuffle ? AppColors.accent : AppColors.textMuted),
+          onPressed: hasTrack ? _ctrl.toggleShuffle : null,
+          tooltip: _ctrl.shuffle ? '隨機播放 (開)' : '隨機播放 (關)',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 24),
+        ),
+        IconButton(
+          icon: Icon(_ctrl.loop ? Icons.repeat_rounded : Icons.repeat_one_rounded, size: 16,
               color: _ctrl.loop ? AppColors.accent : AppColors.textMuted),
           onPressed: hasTrack ? _ctrl.toggleLoop : null,
           tooltip: _ctrl.loop ? '循環播放' : '單曲循環',
           padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 28),
+          constraints: const BoxConstraints(minWidth: 24),
         ),
 
         // --- Seek bar ---
