@@ -115,13 +115,15 @@ class _PlayerBarState extends State<PlayerBar> {
         ],
 
         // --- Shuffle ---
-        IconButton(
-          icon: Icon(Icons.shuffle_rounded, size: 18,
-              color: _ctrl.shuffle ? AppColors.accent : AppColors.textMuted),
-          onPressed: hasTrack ? _ctrl.toggleShuffle : null,
-          tooltip: '隨機播放',
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 28),
+        SizedBox(
+          width: 20, height: 20,
+          child: IconButton(
+            icon: Icon(Icons.shuffle_rounded, size: 14,
+                color: _ctrl.shuffle ? AppColors.accent : AppColors.textMuted),
+            onPressed: hasTrack ? _ctrl.toggleShuffle : null,
+            tooltip: '隨機播放',
+            padding: EdgeInsets.zero,
+          ),
         ),
 
         // --- Previous ---
