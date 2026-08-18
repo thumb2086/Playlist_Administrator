@@ -11,6 +11,7 @@ import '../pipeline/pipeline_orchestrator.dart';
 import '../pipeline/podcast_pipeline.dart';
 import '../models/pipeline_step.dart';
 import '../widgets/dark_theme.dart';
+import 'audio_extractor_page.dart';
 
 class PipelinePage extends StatefulWidget {
   const PipelinePage({super.key});
@@ -118,6 +119,12 @@ class _PipelinePageState extends State<PipelinePage> {
     } catch (e) {
       _musicLog('⚠️ 無法啟動 opencode: $e');
     }
+  }
+
+  void _openExtractor() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const AudioExtractorPage(),
+    ));
   }
 
   Future<void> _runRagOnly() async {
@@ -238,6 +245,7 @@ _PButton(t('pipeline.run_prune'), Icons.cleaning_services, () => _run(fromStep: 
         _PButton(t('pipeline.run_podcast'), Icons.podcasts, _runPodcast, _podcastRunning, color: const Color(0xFFCE93D8)),
         _PButton(t('pipeline.run_rag'), Icons.auto_awesome, _runRagOnly, _ragRunning || _musicRunning, color: const Color(0xFF4DB6AC)),
         _PButton(t('pipeline.run_opencode'), Icons.forum_outlined, _openOpencode, false, color: const Color(0xFF9575CD)),
+        _PButton('音軌抽取', Icons.audio_file_outlined, _openExtractor, false, color: const Color(0xFFFFB74D)),
             if (_musicRunning) ...[
               _PButton(t('pipeline.pause'), Icons.pause_rounded, () {
                 _musicState.pause();
