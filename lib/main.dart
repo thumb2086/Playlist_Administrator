@@ -2,6 +2,7 @@
 import 'dart:ffi';
 import 'dart:io' as io; // dk: Platform 與 Flutter 的 Platform 衝突，用別名
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:win32/win32.dart';
 import 'app.dart';
@@ -81,9 +82,15 @@ void main() async {
   }
 
   WidgetsFlutterBinding.ensureInitialized();
-  _ensureSingleInstance();
+  // 單一實例鎖（Win32 專用）只在 Windows 桌面執行，手機上跳過。
+  if (!kIsWeb && io.Platform.isWindows) {
+    _ensureSingleInstance();
+  }
   await ConfigService.instance.load();
-  LogManager.instance.enable(ConfigService.instance.config.basePath);
+  final basePath = ConfigService.instance.config.basePath;
+  if (basePath.isNotEmpty) {
+    LogManager.instance.enable(basePath);
+  }
   await SpotifySession.instance.load();
   PlayerController.instance.init();
   FlutterError.onError = (details) {

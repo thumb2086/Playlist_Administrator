@@ -8,8 +8,76 @@ on:
     branches: [main]
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
+  # =====================================================================
+  # Android APK（手機版）
+  # =====================================================================
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      # flutter_discord_rpc 用 cargokit 編 Rust native code，需要 cargo。
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Get version from tag
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            [ -n "$version" ] || version=2.0.0
+          else
+            version=$(sed -n 's/^version: *\(.*\)/\1/p' pubspec.yaml)
+            [ -n "$version" ] || version=0.0.0-dev
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+
+      - run: flutter pub get
+
+      - name: Analyze
+        if: github.ref_type != 'tag'
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Sync bridge to assets
+        run: |
+          mkdir -p assets/tools/rag
+          cp tools/flutter_download_bridge.py assets/tools/
+          cp tools/download_podcast_srts.py assets/tools/
+          cp rag/*.py assets/tools/rag/
+          cp tools/deepfilter_daemon.py assets/tools/
+
+      - name: Build APK (release)
+        run: flutter build apk --release --dart-define=APP_VERSION=$APP_VERSION
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: playlist-admin-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Attach APK to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  # =====================================================================
+  # Windows 桌面版
+  # =====================================================================
   build:
     runs-on: windows-2022
     defaults:

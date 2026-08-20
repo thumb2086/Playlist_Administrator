@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'widgets/dark_theme.dart';
 import 'pages/home_page.dart';
 import 'pages/search_page.dart';
+import 'pages/jam_page.dart';
 import 'pages/library_page.dart';
 import 'pages/pipeline_page.dart';
 import 'pages/stats_page.dart';
@@ -86,6 +87,7 @@ class _MainShellState extends State<MainShell> {
   final _pages = const [
     HomePage(),
     SearchPage(),
+    JamPage(),
     LibraryPage(),
     PipelinePage(),
     StatsPage(),
@@ -154,6 +156,7 @@ class _MainShellState extends State<MainShell> {
       _navItems = [
         _NavItemData(Icons.home_outlined, Icons.home, '首頁'),
         _NavItemData(Icons.search_outlined, Icons.search, '搜尋'),
+        _NavItemData(Icons.groups_outlined, Icons.groups_rounded, '一起聽'),
         _NavItemData(Icons.library_music_outlined, Icons.library_music, t('app.sidebar.library')),
         _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, t('app.sidebar.pipeline')),
         _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, t('app.sidebar.stats')),
@@ -165,40 +168,76 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     _context = context;
-    return Scaffold(
-      body: Column(children: [
-        Expanded(
-          child: Row(children: [
-            _Sidebar(
-              items: _navItems,
-              selectedIndex: _selectedIndex,
-              onSelected: (i) {
+    return LayoutBuilder(builder: (context, constraints) {
+      final mobile = constraints.maxWidth < 760;
+      return Scaffold(
+        body: Column(children: [
+          Expanded(
+            child: mobile
+                ? Column(children: [
+                    _MobileHeader(
+                      title: _detailWidget != null ? '返回' : _navItems[_selectedIndex].label,
+                      onBack: _detailWidget != null
+                          ? () => setState(() => _detailWidget = null)
+                          : null,
+                    ),
+                    Expanded(
+                      child: Stack(children: [
+                        IndexedStack(index: _selectedIndex, children: _pages),
+                        if (_detailWidget != null) _detailWidget!,
+                      ]),
+                    ),
+                  ])
+                : Row(children: [
+                    _Sidebar(
+                      items: _navItems,
+                      selectedIndex: _selectedIndex,
+                      onSelected: (i) {
+                        setState(() {
+                          _selectedIndex = i;
+                          _detailWidget = null;
+                        });
+                      },
+                    ),
+                    Expanded(
+                      child: Column(children: [
+                        _Header(
+                            title: _detailWidget != null ? '返回' : _navItems[_selectedIndex].label,
+                            onBack: _detailWidget != null
+                                ? () => setState(() => _detailWidget = null)
+                                : null),
+                        Expanded(
+                          child: Stack(children: [
+                            IndexedStack(index: _selectedIndex, children: _pages),
+                            if (_detailWidget != null) _detailWidget!,
+                          ]),
+                        ),
+                      ]),
+                    ),
+                  ]),
+          ),
+          const PlayerBar(),
+          if (mobile)
+            NavigationBar(
+              selectedIndex: _selectedIndex.clamp(0, _navItems.length - 1),
+              onDestinationSelected: (i) {
                 setState(() {
                   _selectedIndex = i;
                   _detailWidget = null;
                 });
               },
+              destinations: [
+                for (final it in _navItems.take(5))
+                  NavigationDestination(
+                    icon: Icon(it.icon),
+                    selectedIcon: Icon(it.activeIcon),
+                    label: it.label,
+                  ),
+              ],
             ),
-            Expanded(
-              child: Column(children: [
-                _Header(title: _detailWidget != null ? '返回' : _navItems[_selectedIndex].label,
-                    onBack: _detailWidget != null ? () => setState(() { _detailWidget = null; }) : null),
-                Expanded(
-                  child: Stack(children: [
-                    IndexedStack(
-                      index: _selectedIndex,
-                      children: _pages,
-                    ),
-                    if (_detailWidget != null) _detailWidget!,
-                  ]),
-                ),
-              ]),
-            ),
-          ]),
-        ),
-        const PlayerBar(),
-      ]),
-    );
+        ]),
+      );
+    });
   }
 }
 
@@ -396,6 +435,44 @@ class _Header extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 手機版頂部列（窄螢幕用）。
+class _MobileHeader extends StatelessWidget {
+  final String title;
+  final VoidCallback? onBack;
+  const _MobileHeader({required this.title, this.onBack});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: const BoxDecoration(
+        color: AppColors.bg,
+        border: Border(bottom: BorderSide(color: AppColors.border, width: 1)),
+      ),
+      child: Row(children: [
+        if (onBack != null)
+          IconButton(
+            icon: const Icon(Icons.arrow_back_rounded, size: 20),
+            onPressed: onBack,
+            padding: EdgeInsets.zero,
+          ),
+        Text(title,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        const Spacer(),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppColors.accentDim,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: const Text('PLAYLIST ADMIN',
+              style: TextStyle(color: AppColors.accent, fontSize: 8, letterSpacing: 1.2)),
+        ),
+      ]),
     );
   }
 }

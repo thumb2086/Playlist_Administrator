@@ -11,6 +11,7 @@ import '../services/stream_server.dart';
 import '../services/smtc_service.dart';
 import '../services/playback_history.dart';
 import '../services/metadata_reader.dart';
+import '../services/jam_service.dart';
 
 /// Central playback controller: owns the AudioPlayer, queue, and all state.
 /// Used by both PlayerBar (bottom bar) and the queue drawer / PlayerPage.
@@ -37,6 +38,8 @@ class PlayerController {
   Timer? _sleepTimer;
   DateTime? _sleepEndsAt;
   bool _prefetching = false;
+  // 在「一起聽」房間內以成員身份連線時為 true：控制動作改送給房主。
+  bool jamFollowMode = false;
   // PlaylistItem data for prefetch (query + isrc per queue slot).
   final List<PlaylistItem> _queueItems = [];
   // Playback history scrobble state.
@@ -98,6 +101,7 @@ class PlayerController {
     _volume = ConfigService.instance.config.volume.clamp(0.0, 1.0);
     _player.setVolume(_volume);
     _player.onPlayerComplete.listen((_) {
+      if (jamFollowMode) return; // jam 成員：由房主決定下一首
       if (_loop || _shuffle) {
         next();
       } else {
@@ -418,6 +422,10 @@ class PlayerController {
   }
 
   void next() {
+    if (jamFollowMode) {
+      JamService.instance.next();
+      return;
+    }
     if (_queue.isEmpty) return;
     if (_shuffle) {
       _index = DateTime.now().millisecondsSinceEpoch % _queue.length;
@@ -432,6 +440,10 @@ class PlayerController {
   }
 
   void previous() {
+    if (jamFollowMode) {
+      JamService.instance.previous();
+      return;
+    }
     if (_queue.isEmpty) return;
     _index = (_index - 1 + _queue.length) % _queue.length;
     if (_index < _queueItems.length && _queueItems[_index] != null) {
@@ -442,6 +454,10 @@ class PlayerController {
   }
 
   void togglePlay() {
+    if (jamFollowMode) {
+      JamService.instance.togglePlay();
+      return;
+    }
     if (_isPlaying) {
       _player.pause();
       _isPlaying = false;
@@ -451,6 +467,61 @@ class PlayerController {
     }
     _notify();
     _pushSmtc();
+  }
+
+  /// 播放（resume）— jam 房間房主/成員共用。
+  Future<void> resume() async {
+    if (jamFollowMode) {
+      JamService.instance.togglePlay();
+      return;
+    }
+    await _player.resume();
+    _isPlaying = true;
+    _notify();
+    _pushSmtc();
+  }
+
+  /// 暫停 — jam 房間房主/成員共用。
+  Future<void> pause() async {
+    if (jamFollowMode) {
+      JamService.instance.togglePlay();
+      return;
+    }
+    await _player.pause();
+    _isPlaying = false;
+    _notify();
+    _pushSmtc();
+  }
+
+  /// 停止並清掉目前播放狀態（不碰佇列）。
+  Future<void> stop() async {
+    await _player.stop();
+    _isPlaying = false;
+    _notify();
+  }
+
+  /// 播放一個遠端 URL（jam 成員收到房主提供的串流 URL 時用）。
+  Future<void> playJamUrl(String url,
+      {String? title, String? artist, String? coverUrl}) async {
+    StreamServer.instance.stopActive();
+    await _player.stop();
+    _title = title ?? '';
+    _artist = artist ?? '';
+    _coverPath = coverUrl;
+    _recordedSongKey = '';
+    _statusText = '';
+    _isPlaying = true;
+    _notify();
+    await _player.play(UrlSource(url));
+    _pushSmtc();
+  }
+
+  /// 本機 seek（jam 成員做 drift 校正用，不會送指令給房主）。
+  Future<void> jamSeekLocal(Duration pos) async {
+    if (pos.inMilliseconds < 0) return;
+    await _player.seek(pos);
+    _position = pos;
+    _notify();
   }
 
   void toggleShuffle() { _shuffle = !_shuffle; _notify(); }
@@ -465,6 +536,10 @@ class PlayerController {
   }
 
   Future<void> seek(Duration pos) async {
+    if (jamFollowMode) {
+      JamService.instance.seek(pos);
+      return;
+    }
     await _player.seek(pos);
     _position = pos;
     _notify();

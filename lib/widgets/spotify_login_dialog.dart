@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_windows/webview_windows.dart';
 import '../services/spotify_session.dart';
@@ -119,7 +121,15 @@ class _SpotifyLoginDialogState extends State<SpotifyLoginDialog> {
 }
 
 /// Opens the login dialog. Returns true if logged in.
+/// WebView2 只有 Windows 桌面版才有；其他平台直接提示。
 Future<bool> showSpotifyLogin(BuildContext context) async {
+  if (!kIsWeb && !Platform.isWindows) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+          content: Text('Spotify 登入僅支援 Windows 桌面版，手機上可加入房主的房間一起聽')),
+    );
+    return false;
+  }
   final ok = await showDialog<bool>(
     context: context,
     builder: (_) => const SpotifyLoginDialog(),

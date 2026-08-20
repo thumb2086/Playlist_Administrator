@@ -15,6 +15,11 @@ class StreamServer {
   int _port = 0;
   bool _started = false;
 
+  /// LAN 成員用來連串流伺服器的基底網址（由外部（JamService）注入）。
+  String publicBase = 'http://127.0.0.1:0';
+
+  int get port => _port;
+
   /// query -> resolved URL cache (in-memory, per session)
   final Map<String, String> _resolved = {};
 
@@ -50,7 +55,7 @@ class StreamServer {
         }
       }
     } catch (_) {}
-    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
     _port = _server!.port;
     _server!.listen(_handle);
     _started = true;

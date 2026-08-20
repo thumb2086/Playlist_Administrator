@@ -16,6 +16,9 @@ Spotify home feed, search & stream, playlist sync, batch downloads, and stats.
 - **Sleep timer / Crossfade / 全域熱鍵**（Space、←/→ seek、N/P 切歌）
 - **Podcast + RAG** — RSS 下載、Groq 轉錄、Ollama chroma 問答
 - **Discord RPC** — 現播歌曲 + 封面
+- **一起聽（Jam）** — 免費版 Spotify Jam：開房間（免註冊/免外部伺服器），
+  同一個 Wi-Fi 下大家加入，共享播放佇列、即時同步播放進度、投票跳歌、
+  聊天室。手機（Android/iOS）也能加入房主一起聽。
 
 ## 資料夾結構（`Music\playlist-admin\`）
 
@@ -39,8 +42,34 @@ config.json   ← 設定
 
 ```bash
 flutter pub get
-flutter build windows --release
+flutter build windows --release   # 桌面版
+flutter build apk --release       # Android（手機版）
+flutter build ios --release       # iOS（需 macOS + Xcode）
 ```
+
+## 一起聽（Jam）
+
+在側邊欄選「一起聽」：
+
+1. **建立房間** — 輸入暱稱 →「建立新房間」。房主端會自動開啟
+   WebSocket + 音訊串流伺服器，並顯示房主位址（`IP:埠口`）與 6 位房間代碼。
+2. **加入房間** — 對方輸入房主位址 + 房間代碼 + 暱稱即可加入
+   （手機/桌機皆可；手機需與房主連同一個 Wi-Fi）。
+3. 任何人都能**搜尋 Spotify 加歌**（房主需先在本機「搜尋」頁登入 Spotify）、
+   **投票**（上下箭頭排序）、**投票跳歌**（達半數跳過）、**聊天**。
+   播放進度由房主掌控，成員每幾秒做 drift 校正，確保同步。
+
+技術重點：
+
+- 房主是「伺服器」：`lib/services/jam_service.dart` 用 `dart:io` 自架
+  HttpServer + WebSocket，成員連 `ws://<ip>:<port>/jam/ws`。
+- 歌曲來源：本機音樂庫（`local`，`/jam/audio` 支援 Range 串流）或
+  Spotify 搜尋後由 yt-dlp 串流（`stream`，走既有的 `StreamServer`）。
+- 成員端透過 `PlayerController.playJamUrl()` 播放房主提供的 URL，
+  `jamFollowMode` 讓播放/暫停/上下首/seek 指令自動轉送給房主。
+- 手機相容：Windows 專用程式碼（win32 單一實例、SMTC、WebView 登入）
+  都已加平台守衛；Android/iOS 已加入 `flutter create` 平台資料夾與
+  網路權限（INTERNET / cleartext / 本地網路描述）。
 
 ## CLI
 
