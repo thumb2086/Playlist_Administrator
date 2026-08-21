@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'widgets/dark_theme.dart';
 import 'pages/home_page.dart';
@@ -83,8 +85,9 @@ class _MainShellState extends State<MainShell> {
   Widget? _detailWidget;
 
   late List<_NavItemData> _navItems;
+  late List<Widget> _pages;
 
-  final _pages = const [
+  final _allPages = const [
     HomePage(),
     SearchPage(),
     JamPage(),
@@ -152,16 +155,38 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _rebuildNav() {
+    if (!mounted) return;
     setState(() {
+      // 手機版只顯示：首頁、搜尋、一起聽、音樂庫、設定
+      final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+      final showPipeline = !isMobile;
+      final showStats = !isMobile;
+
       _navItems = [
         _NavItemData(Icons.home_outlined, Icons.home, '首頁'),
         _NavItemData(Icons.search_outlined, Icons.search, '搜尋'),
         _NavItemData(Icons.groups_outlined, Icons.groups_rounded, '一起聽'),
         _NavItemData(Icons.library_music_outlined, Icons.library_music, t('app.sidebar.library')),
-        _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, t('app.sidebar.pipeline')),
-        _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, t('app.sidebar.stats')),
+        if (showPipeline)
+          _NavItemData(Icons.play_circle_outline, Icons.play_circle_filled, t('app.sidebar.pipeline')),
+        if (showStats)
+          _NavItemData(Icons.bar_chart_rounded, Icons.bar_chart_rounded, t('app.sidebar.stats')),
         _NavItemData(Icons.settings_outlined, Icons.settings, t('app.sidebar.settings')),
       ];
+
+      _pages = [
+        _allPages[0], // 首頁
+        _allPages[1], // 搜尋
+        _allPages[2], // 一起聽
+        _allPages[3], // 音樂庫
+        if (showPipeline) _allPages[4], // Pipeline
+        if (showStats) _allPages[5],    // Stats
+        _allPages[6], // 設定
+      ];
+
+      if (_selectedIndex >= _pages.length) {
+        _selectedIndex = _pages.length - 1;
+      }
     });
   }
 
