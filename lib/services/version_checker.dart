@@ -86,12 +86,20 @@ class VersionChecker {
       if (resp == null || resp.statusCode != 200) {
         return VersionInfo(latestVersion: currentVersion, htmlUrl: '', hasUpdate: false);
       }
-      // /releases 回傳陣列，取最新（含 Pre-release）。
+      // /releases 回傳陣列，含 Pre-release。
       final List<dynamic> releases = jsonDecode(resp.body) as List<dynamic>;
       if (releases.isEmpty) {
         return VersionInfo(latestVersion: currentVersion, htmlUrl: '', hasUpdate: false);
       }
-      final data = releases.first as Map<String, dynamic>;
+      // 根據設定過濾 Pre-release。
+      final cfg = ConfigService.instance.config;
+      final filtered = cfg.receiveBetaUpdates
+          ? releases
+          : releases.where((r) => (r['prerelease'] as bool?) != true).toList();
+      if (filtered.isEmpty) {
+        return VersionInfo(latestVersion: currentVersion, htmlUrl: '', hasUpdate: false);
+      }
+      final data = filtered.first as Map<String, dynamic>;
       final latestTag = (data['tag_name'] as String?) ?? '';
       final htmlUrl = (data['html_url'] as String?) ?? '';
       final body = (data['body'] as String?) ?? '';

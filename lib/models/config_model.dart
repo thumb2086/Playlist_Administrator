@@ -28,6 +28,7 @@ class AppConfig {
   double crossfadeSeconds;
   bool streamCacheEnabled;
   int streamCacheMaxMb;
+  bool receiveBetaUpdates;
   Map<String, String> podcastSubscriptions;
   Map<String, String> podcastHistory;
   Map<String, String> urlNames;
@@ -61,6 +62,7 @@ class AppConfig {
     this.crossfadeSeconds = 3.0,
     this.streamCacheEnabled = false,
     this.streamCacheMaxMb = 2048,
+    this.receiveBetaUpdates = false,
     Map<String, String>? podcastSubscriptions,
     Map<String, String>? podcastHistory,
     Map<String, String>? urlNames,
@@ -128,6 +130,7 @@ class AppConfig {
         crossfadeSeconds: (json['crossfade_seconds'] as num?)?.toDouble() ?? 3.0,
         streamCacheEnabled: json['stream_cache_enabled'] as bool? ?? false,
         streamCacheMaxMb: json['stream_cache_max_mb'] as int? ?? 2048,
+        receiveBetaUpdates: json['receive_beta_updates'] as bool? ?? false,
         podcastSubscriptions: (json['podcast_subscriptions'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         podcastHistory: (json['podcast_history'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
         urlNames: (json['url_names'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as String)) ?? {},
@@ -162,6 +165,7 @@ class AppConfig {
         'crossfade_seconds': crossfadeSeconds,
         'stream_cache_enabled': streamCacheEnabled,
         'stream_cache_max_mb': streamCacheMaxMb,
+        'receive_beta_updates': receiveBetaUpdates,
         'podcast_subscriptions': podcastSubscriptions,
         'podcast_history': podcastHistory,
         'url_names': urlNames,
