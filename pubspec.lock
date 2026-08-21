@@ -89,14 +89,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.2"
-  build_cli_annotations:
+  buffer:
     dependency: transitive
     description:
-      name: build_cli_annotations
-      sha256: e563c2e01de8974566a1998410d3f6f03521788160a02503b0b1f1a46c7b3d95
+      name: buffer
+      sha256: "389da2ec2c16283c8787e0adaede82b1842102f8c8aae2f49003a766c5c6b3d1"
       url: "https://pub.dev"
     source: hosted
-    version: "2.1.1"
+    version: "1.2.3"
   characters:
     dependency: transitive
     description:
@@ -138,7 +138,7 @@ packages:
     source: hosted
     version: "0.3.5+4"
   crypto:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: crypto
       sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf
@@ -161,6 +161,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.15"
+  discord_rich_presence:
+    dependency: "direct main"
+    description:
+      name: discord_rich_presence
+      sha256: ed30f3aa310fb96afe1d410ac0263f4f3013943981935332db08a037f340f4fd
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.1"
   equatable:
     dependency: transitive
     description:
@@ -222,13 +230,6 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
-  flutter_discord_rpc:
-    dependency: "direct main"
-    description:
-      path: "vendor/flutter_discord_rpc"
-      relative: true
-    source: path
-    version: "1.1.0"
   flutter_lints:
     dependency: "direct dev"
     description:
@@ -245,14 +246,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.35"
-  flutter_rust_bridge:
-    dependency: "direct main"
-    description:
-      name: flutter_rust_bridge
-      sha256: "37ef40bc6f863652e865f0b2563ea07f0d3c58d8efad803cc01933a4b2ee067e"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.11.1"
   flutter_test:
     dependency: "direct dev"
     description: flutter

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../models/playlist_item.dart';
 import '../services/player_controller.dart';
 import '../services/config_service.dart';
+import '../services/favorites_service.dart';
 import '../services/stream_server.dart';
 import '../widgets/dark_theme.dart';
 
@@ -40,11 +41,38 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   final Map<int, double> _progress = {};
   /// Which tracks are already on disk at startup.
   late Set<int> _localTracks;
+  Set<String> _favorites = {};
 
   @override
   void initState() {
     super.initState();
     _localTracks = _findLocalTracks();
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    final favs = await FavoritesService.load();
+    if (mounted) setState(() => _favorites = favs);
+  }
+
+  bool _isFav(PlaylistItem item) {
+    final key = '${item.name} - ${item.artist}'.toLowerCase();
+    return _favorites.any((f) => f.toLowerCase().contains(key) || key.contains(f.toLowerCase()));
+  }
+
+  Future<void> _toggleFav(PlaylistItem item) async {
+    final key = '${item.name} - ${item.artist}';
+    final favs = await FavoritesService.load();
+    final match = favs.firstWhere(
+      (f) => f.toLowerCase().contains(key.toLowerCase()) || key.toLowerCase().contains(f.toLowerCase()),
+      orElse: () => '',
+    );
+    if (match.isNotEmpty) {
+      await FavoritesService.toggle(match);
+    } else {
+      await FavoritesService.toggle(key);
+    }
+    await _loadFavorites();
   }
 
   /// Check which tracks already exist in the local music library.
@@ -287,6 +315,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         const SizedBox(width: 50, child: Text('時長', textAlign: TextAlign.right,
             style: TextStyle(fontSize: 11, color: AppColors.textMuted))),
         const SizedBox(width: 32),
+        const SizedBox(width: 32),
       ]),
     );
   }
@@ -348,6 +377,20 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             width: 50,
             child: Text(item.durationText, textAlign: TextAlign.right,
                 style: const TextStyle(fontSize: 11, color: AppColors.textMuted, fontFamily: 'Consolas')),
+          ),
+          // Favorite star
+          SizedBox(
+            width: 32,
+            child: IconButton(
+              icon: Icon(
+                _isFav(item) ? Icons.star_rounded : Icons.star_border_rounded,
+                size: 18,
+                color: _isFav(item) ? AppColors.accent : AppColors.textMuted,
+              ),
+              onPressed: () => _toggleFav(item),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32),
+            ),
           ),
           // Download / play button
           if (!widget.isPodcast)

@@ -18,16 +18,13 @@ dependencies:
   audioplayers: ^6.1.0
   file_picker: ^11.0.3
   path_provider: ^2.1.0
-  flutter_discord_rpc:
-    path: vendor/flutter_discord_rpc
-  flutter_rust_bridge: 2.11.1
-  crypto: ^3.0.3
   webview_windows:
     path: vendor/webview_windows
   media_kit: ^1.2.6
   media_kit_libs_audio: ^1.0.7
   youtube_explode_dart: ^3.1.0
   logger: ^2.7.0
+  discord_rich_presence: ^1.1.1
 
 dev_dependencies:
   flutter_test:
