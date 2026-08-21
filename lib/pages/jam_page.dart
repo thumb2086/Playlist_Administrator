@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../services/jam_service.dart';
 import '../services/player_controller.dart';
 import '../widgets/dark_theme.dart';
 
-/// 「一起聽」— 免費的 Spotify Jam。
-/// 開房間 → 大家在同一 Wi-Fi 下加入，共享佇列、同步播放、投票跳歌、聊天。
+/// 「一起聽」— Cloudflare Relay 版 Spotify Jam。
+/// 不需輸入 IP，任何網路都能加入。
 class JamPage extends StatefulWidget {
   const JamPage({super.key});
   @override
@@ -14,8 +15,7 @@ class JamPage extends StatefulWidget {
 }
 
 class _JamPageState extends State<JamPage> {
-  final _nameCtrl = TextEditingController();
-  final _hostCtrl = TextEditingController();
+  final _nameCtrl = TextEditingController(text: '我');
   final _codeCtrl = TextEditingController();
   final _searchCtrl = TextEditingController();
   final _chatCtrl = TextEditingController();
@@ -88,7 +88,7 @@ class _JamPageState extends State<JamPage> {
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
               const SizedBox(height: 4),
-              const Text('免費版 Spotify Jam — 同一 Wi-Fi 下，大家一起聽同一首歌',
+              const Text('免費版 Spotify Jam — 任何網路、不用輸入 IP',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
               const SizedBox(height: 24),
@@ -116,9 +116,7 @@ class _JamPageState extends State<JamPage> {
                   Expanded(child: Divider()),
                 ]),
               ),
-              _field('房主位址（IP:埠口）', _hostCtrl, hint: '192.168.1.5:12345'),
-              const SizedBox(height: 8),
-              _field('房間代碼', _codeCtrl, hint: '6 位代碼', maxLength: 6),
+              _field('輸入房間代碼', _codeCtrl, hint: '6 位碼', maxLength: 6),
               const SizedBox(height: 12),
               ElevatedButton.icon(
                 onPressed: _joining
@@ -126,14 +124,13 @@ class _JamPageState extends State<JamPage> {
                     : () async {
                         setState(() => _joining = true);
                         await JamService.instance.connect(
-                          address: _hostCtrl.text.trim(),
                           code: _codeCtrl.text.trim(),
                           name: _nameCtrl.text.trim(),
                         );
                         if (mounted) setState(() => _joining = false);
                       },
                 icon: const Icon(Icons.login_rounded, size: 18),
-                label: Text(_joining ? '連線中…' : '加入房間'),
+                label: Text(_joining ? '加入中…' : '加入房間'),
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
@@ -145,7 +142,7 @@ class _JamPageState extends State<JamPage> {
                     style: const TextStyle(color: AppColors.error, fontSize: 12)),
               ],
               const SizedBox(height: 20),
-              const Text('🔒 免費・免註冊・免伺服器 — 任何一台裝置都能當房主',
+              const Text('🔒 免費・免註冊・免 IP — 只要同個代碼就能一起聽',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
             ],
@@ -209,24 +206,32 @@ class _JamPageState extends State<JamPage> {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(children: [
-        const Icon(Icons.groups_rounded, color: AppColors.accent, size: 20),
-        const SizedBox(width: 8),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(jam.isHost ? '我是房主' : '我是成員',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 2),
-          Text('${jam.roomCode} · ${jam.hostAddress}',
-              style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
-        ]),
-        const Spacer(),
+        // QR Code
+        QrImageView(
+          data: jam.roomCode,
+          version: QrVersions.auto,
+          size: 64,
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black,
+        ),
+        const SizedBox(width: 12),
+        // Code + info
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(jam.isHost ? '我是房主' : '我是成員',
+                style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+            const SizedBox(height: 2),
+            Text(jam.roomCode,
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 4)),
+          ]),
+        ),
+        // 成員 chips
         Wrap(spacing: 6, children: [
           for (final m in jam.members)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: (m['isHost'] == true)
-                    ? AppColors.accentDim
-                    : AppColors.bg,
+                color: m['isHost'] == true ? AppColors.accentDim : AppColors.bg,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -239,9 +244,13 @@ class _JamPageState extends State<JamPage> {
         ]),
         const SizedBox(width: 8),
         IconButton(
-          tooltip: '複製邀請位址',
+          tooltip: '複製代碼',
           icon: const Icon(Icons.copy_rounded, size: 18),
-          onPressed: () => _copy(jam.inviteText),
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: jam.roomCode));
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('已複製'), duration: Duration(seconds: 1)));
+          },
         ),
         IconButton(
           tooltip: '離開房間',

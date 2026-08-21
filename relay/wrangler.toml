@@ -1,0 +1,12 @@
+name = "jam-relay"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+
+[durable_objects]
+bindings = [
+  { name = "JAM_ROOMS", class_name = "JamRoom" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["JamRoom"]
