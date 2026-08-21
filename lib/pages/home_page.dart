@@ -8,7 +8,7 @@ import '../services/config_service.dart';
 import '../services/spotify_session.dart';
 import '../services/spotify_gql_client.dart';
 import '../services/player_controller.dart';
-import '../services/stream_server.dart';
+import '../services/playback_history.dart';
 import '../widgets/dark_theme.dart';
 import '../widgets/spotify_login_dialog.dart';
 import 'playlist_detail_page.dart';
@@ -47,7 +47,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onSession() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      if (SpotifySession.instance.isLoggedIn && _sections.isEmpty) {
+        _load();
+      }
+    }
   }
 
   /// Extract cover image URL from a GQL content data map.
@@ -252,30 +257,75 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildLoginPrompt() {
     return Expanded(
-      child: Center(
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const Icon(Icons.music_note_rounded, size: 56, color: AppColors.textMuted),
-          const SizedBox(height: 16),
-          const Text('連接你的 Spotify 帳號', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Text('登入後即可瀏覽個人化主頁、你的歌單並搜尋串流',
-              style: TextStyle(fontSize: 12, color: AppColors.textMuted.withValues(alpha: 0.8))),
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 24),
+        children: [
           const SizedBox(height: 20),
-          ElevatedButton.icon(
-            onPressed: () async {
-              await showSpotifyLogin(context);
-              await SpotifySession.instance.load();
-              _load();
-            },
-            icon: const Icon(Icons.login_rounded, size: 18),
-            label: const Text('Spotify 登入'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1DB954),
-              foregroundColor: Colors.black,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
+          // Spotify 登入區
+          Center(
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Icon(Icons.music_note_rounded, size: 56, color: AppColors.textMuted),
+              const SizedBox(height: 16),
+              const Text('連接你的 Spotify 帳號', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Text('登入後即可瀏覽個人化主頁、你的歌單並搜尋串流',
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted.withValues(alpha: 0.8))),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  await showSpotifyLogin(context);
+                  await SpotifySession.instance.load();
+                  _load();
+                },
+                icon: const Icon(Icons.login_rounded, size: 18),
+                label: const Text('Spotify 登入'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1DB954),
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+              ),
+            ]),
           ),
-        ]),
+          const SizedBox(height: 32),
+          // 快速操作
+          const Text('快速操作', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          Row(children: [
+            _quickAction(Icons.groups_rounded, '一起聽', () {
+              // Switch to Jam tab
+            }),
+            const SizedBox(width: 12),
+            _quickAction(Icons.search_rounded, '搜尋', () {
+              // Switch to Search tab
+            }),
+            const SizedBox(width: 12),
+            _quickAction(Icons.library_music_rounded, '音樂庫', () {
+              // Switch to Library tab
+            }),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _quickAction(IconData icon, String label, VoidCallback onTap) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceLight,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(children: [
+            Icon(icon, size: 28, color: AppColors.accent),
+            const SizedBox(height: 8),
+            Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          ]),
+        ),
       ),
     );
   }
