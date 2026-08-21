@@ -1,6 +1,7 @@
 name = "jam-relay"
 main = "src/index.js"
 compatibility_date = "2024-12-01"
+account_id = "e54950142f6a8b045cfa0bb474af60a2"
 
 [durable_objects]
 bindings = [
@@ -9,4 +10,4 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["JamRoom"]
+new_sqlite_classes = ["JamRoom"]

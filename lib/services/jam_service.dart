@@ -15,7 +15,7 @@ class JamService extends ChangeNotifier {
   static final JamService instance = JamService._();
 
   // ---------- Relay ----------
-  static const _relayUrl = 'wss://jam-relay.thumb2086.workers.dev/jam';
+  static const _relayUrl = 'wss://jam-relay.cpxru83.workers.dev/jam';
 
   // ---------- 公開狀態 ----------
   String mode = 'idle'; // 'idle' | 'host' | 'client'
