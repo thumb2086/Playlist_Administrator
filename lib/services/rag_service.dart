@@ -17,6 +17,7 @@ class RagService {
     final bridge = await BridgeService.instance.bridgePath;
     final env = Map<String, String>.from(Platform.environment);
     env['PYTHONIOENCODING'] = 'utf-8';
+    env['PYTHONUNBUFFERED'] = '1';
     final basePath = ConfigService.instance.config.basePath;
     if (basePath.isNotEmpty) env['BASE_PATH'] = basePath;
     final proc = await Process.start(

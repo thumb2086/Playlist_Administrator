@@ -217,10 +217,9 @@ packages:
   flutter_discord_rpc:
     dependency: "direct main"
     description:
-      name: flutter_discord_rpc
-      sha256: "7ee12a3ff928e85e5e0a60c7c23417a2f1f4e604e4983fc0789ff6562fb15f2b"
-      url: "https://pub.dev"
-    source: hosted
+      path: "vendor/flutter_discord_rpc"
+      relative: true
+    source: path
     version: "1.1.0"
   flutter_lints:
     dependency: "direct dev"

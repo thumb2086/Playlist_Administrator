@@ -83,15 +83,29 @@ def generate_answer(question: str, hits: list[dict]) -> str:
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "stream": False,
+                    "stream": True,
                 },
                 timeout=600,
+                stream=True,
             )
             if resp.status_code in (400, 401, 404):
                 errors.append(f"{model}: HTTP {resp.status_code}")
                 continue
             resp.raise_for_status()
-            return resp.json()["message"]["content"].strip()
+            answer = []
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        answer.append(token)
+                        print(token, end="", flush=True)
+                except json.JSONDecodeError:
+                    pass
+            print()  # 換行
+            return "".join(answer).strip()
         except requests.RequestException as e:
             errors.append(f"{model}: {e}")
     if errors:
