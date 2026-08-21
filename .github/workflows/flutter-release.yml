@@ -29,18 +29,24 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # flutter_discord_rpc 用 cargokit 編 Rust native code，需要 cargo。
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Get version from tag
-        id: version
+      - name: Get version & channel
+        id: info
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
-            [ -n "$version" ] || version=2.0.0
+            [ -n "$version" ] || version=3.0.0-beta.1
+            if echo "$version" | grep -qi "beta\|alpha\|rc\|dev"; then
+              echo "CHANNEL=beta" >> "$GITHUB_ENV"
+              echo "PRERELEASE=true" >> "$GITHUB_ENV"
+            else
+              echo "CHANNEL=stable" >> "$GITHUB_ENV"
+              echo "PRERELEASE=false" >> "$GITHUB_ENV"
+            fi
           else
             version=$(sed -n 's/^version: *\(.*\)/\1/p' pubspec.yaml)
             [ -n "$version" ] || version=0.0.0-dev
+            echo "CHANNEL=dev" >> "$GITHUB_ENV"
+            echo "PRERELEASE=true" >> "$GITHUB_ENV"
           fi
           echo "APP_VERSION=$version" >> "$GITHUB_ENV"
 
@@ -50,28 +56,22 @@ jobs:
         if: github.ref_type != 'tag'
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Sync bridge to assets
-        run: |
-          mkdir -p assets/tools/rag
-          cp tools/flutter_download_bridge.py assets/tools/
-          cp tools/download_podcast_srts.py assets/tools/
-          cp rag/*.py assets/tools/rag/
-          cp tools/deepfilter_daemon.py assets/tools/
-
       - name: Build APK (release)
-        run: flutter build apk --release --dart-define=APP_VERSION=$APP_VERSION
+        run: flutter build apk --release --split-per-abi --dart-define=APP_VERSION=$APP_VERSION
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: playlist-admin-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: playlist-admin-apk-${{ env.CHANNEL }}
+          path: build/app/outputs/flutter-apk/*.apk
 
       - name: Attach APK to GitHub Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: build/app/outputs/flutter-apk/app-release.apk
+          name: "playlist-admin ${{ github.ref_name }} (${{ env.CHANNEL }})"
+          prerelease: ${{ env.PRERELEASE }}
+          files: build/app/outputs/flutter-apk/*.apk
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
@@ -93,18 +93,26 @@ jobs:
           architecture: x64
           cache: true
 
-      - name: Get version from tag
-        id: version
+      - name: Get version & channel
+        id: info
         run: |
           if ("${{ github.ref_type }}" -eq "tag") {
             $tag = "${{ github.ref_name }}"
             $version = $tag -replace '^v', ''
-            if (-not $version) { $version = '2.0.0' }
+            if (-not $version) { $version = '3.0.0-beta.1' }
+            if ($version -match '(?i)(beta|alpha|rc|dev)') {
+              "CHANNEL=beta" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              "PRERELEASE=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            } else {
+              "CHANNEL=stable" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              "PRERELEASE=false" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            }
           } else {
-            # Branch push: use version from pubspec.yaml as-is
             $yaml = Get-Content pubspec.yaml | Select-String '^version: (.+)'
             $version = $yaml.Matches.Groups[1].Value
             if (-not $version) { $version = '0.0.0-dev' }
+            "CHANNEL=dev" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "PRERELEASE=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -113,14 +121,6 @@ jobs:
       - name: Analyze
         if: github.ref_type != 'tag'
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
-
-      - name: Sync bridge to assets
-        run: |
-          Copy-Item -Path "tools\flutter_download_bridge.py" -Destination "assets\tools\flutter_download_bridge.py" -Force
-          Copy-Item -Path "tools\download_podcast_srts.py" -Destination "assets\tools\download_podcast_srts.py" -Force
-          New-Item -ItemType Directory -Path "assets\tools\rag" -Force | Out-Null
-          Copy-Item -Path "rag\*.py" -Destination "assets\tools\rag\" -Force
-          Copy-Item -Path "tools\deepfilter_daemon.py" -Destination "assets\tools\deepfilter_daemon.py" -Force
 
       - name: Build Windows
         if: github.ref_type == 'tag'
@@ -139,14 +139,15 @@ jobs:
         if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v4
         with:
-          name: playlist-admin-Setup
+          name: playlist-admin-Setup-${{ env.CHANNEL }}
           path: installer\playlist-admin-Setup-*.exe
 
       - name: Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          name: "playlist-admin ${{ github.ref_name }}"
+          name: "playlist-admin ${{ github.ref_name }} (${{ env.CHANNEL }})"
+          prerelease: ${{ env.PRERELEASE }}
           files: installer\playlist-admin-Setup-*.exe
         env:
           GITHUB_TOKEN: ${{ github.token }}
