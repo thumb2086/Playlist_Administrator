@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:http/http.dart' as http;
@@ -43,7 +43,7 @@ class PlayerPage extends StatefulWidget {
 }
 
 class _PlayerPageState extends State<PlayerPage> {
-  final _player = AudioPlayer();
+  final _player = Player();
   final _playlistCtrl = ScrollController();
   final _searchCtrl = TextEditingController();
 
@@ -92,7 +92,7 @@ class _PlayerPageState extends State<PlayerPage> {
     _statusText = t('common.done');
     I18N.instance.addListener(() { if (mounted) setState(() {}); });
     _listenPlayRequests();
-    _player.onPlayerComplete.listen((_) {
+    _player.stream.completed.listen((_) {
       if (!mounted) return;
       if (_loop || _shuffle) {
         _next();
