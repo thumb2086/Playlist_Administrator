@@ -24,7 +24,7 @@ class VersionInfo {
 class VersionChecker {
   static const _owner = 'thumb2086';
   static const _repo = 'playlist-admin';
-  static const _apiUrl = 'https://api.github.com/repos/$_owner/$_repo/releases/latest';
+  static const _apiUrl = 'https://api.github.com/repos/$_owner/$_repo/releases';
 
   static String get currentVersion => appVersion.startsWith('v') ? appVersion : 'v$appVersion';
 
@@ -86,7 +86,12 @@ class VersionChecker {
       if (resp == null || resp.statusCode != 200) {
         return VersionInfo(latestVersion: currentVersion, htmlUrl: '', hasUpdate: false);
       }
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      // /releases 回傳陣列，取最新（含 Pre-release）。
+      final List<dynamic> releases = jsonDecode(resp.body) as List<dynamic>;
+      if (releases.isEmpty) {
+        return VersionInfo(latestVersion: currentVersion, htmlUrl: '', hasUpdate: false);
+      }
+      final data = releases.first as Map<String, dynamic>;
       final latestTag = (data['tag_name'] as String?) ?? '';
       final htmlUrl = (data['html_url'] as String?) ?? '';
       final body = (data['body'] as String?) ?? '';
