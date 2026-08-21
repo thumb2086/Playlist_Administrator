@@ -5,8 +5,7 @@ import 'package:discord_rich_presence/discord_rich_presence.dart';
 import 'log_manager.dart';
 
 /// Discord Rich Presence（使用 discord_rich_presence 純 Dart 套件）。
-/// 需先在 config 設定 discord_application_id（Discord Developer Portal 申請）
-/// 與 discord_presence_enabled = true。
+/// 從 .env 讀取 Client ID。
 class DiscordRpcService {
   static final DiscordRpcService instance = DiscordRpcService._();
   DiscordRpcService._();
@@ -18,11 +17,30 @@ class DiscordRpcService {
 
   bool get usable => _enabled && _connected;
 
+  /// 從 .env 檔案載入 Discord Client ID。
+  static String _loadClientId() {
+    try {
+      final envFile = File('.env');
+      if (envFile.existsSync()) {
+        for (final line in envFile.readAsLinesSync()) {
+          if (line.startsWith('DISCORD_CLIENT_ID=')) {
+            return line.substring('DISCORD_CLIENT_ID='.length).trim();
+          }
+        }
+      }
+    } catch (_) {}
+    return '1537277062098980944';
+  }
+
   Future<void> attach({
     required bool enabled,
     required String applicationId,
     void Function()? onReady,
   }) async {
+    // 如果 applicationId 是預設值，嘗試從 .env 覆蓋。
+    final clientId = (applicationId.isNotEmpty && applicationId != '1537277062098980944')
+        ? applicationId
+        : _loadClientId();
     if (enabled == _enabled && _client != null) {
       if (onReady != null && _connected) onReady();
       return;
@@ -30,11 +48,11 @@ class DiscordRpcService {
 
     _enabled = enabled;
     LogManager.instance.info(
-        'DiscordRPC attach enabled=$enabled appId=${applicationId.isNotEmpty ? 'ok' : 'EMPTY'}');
+        'DiscordRPC attach enabled=$enabled appId=${clientId.isNotEmpty ? 'ok' : 'EMPTY'}');
 
-    if (_enabled && applicationId.isNotEmpty) {
+    if (_enabled && clientId.isNotEmpty) {
       try {
-        _client = Client(clientId: applicationId);
+        _client = Client(clientId: clientId);
         await _client!.connect();
         _connected = true;
         LogManager.instance.info('DiscordRPC connected');
