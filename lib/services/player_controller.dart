@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:media_kit/media_kit.dart';
 import 'package:flutter/foundation.dart';
@@ -28,6 +29,7 @@ class PlayerController {
   bool _isPlaying = false;
   bool _shuffle = false;
   bool _loop = true;
+  List<int> _shuffleOrder = [];
   double _volume = 0.7;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -357,6 +359,7 @@ class PlayerController {
       ..clear()
       ..addAll(items ?? []);
     _index = startIndex;
+    if (_shuffle) _buildShuffleOrder();
     _notify();
   }
 
@@ -429,7 +432,11 @@ class PlayerController {
     }
     if (_queue.isEmpty) return;
     if (_shuffle) {
-      _index = DateTime.now().millisecondsSinceEpoch % _queue.length;
+      if (_shuffleOrder.isEmpty) _buildShuffleOrder();
+      final pos = _shuffleOrder.indexOf(_index);
+      final nextPos = (pos + 1) % _shuffleOrder.length;
+      _index = _shuffleOrder[nextPos];
+      if (nextPos == 0) _buildShuffleOrder(); // 重新洗牌
     } else {
       _index = (_index + 1) % _queue.length;
     }
@@ -446,7 +453,14 @@ class PlayerController {
       return;
     }
     if (_queue.isEmpty) return;
-    _index = (_index - 1 + _queue.length) % _queue.length;
+    if (_shuffle) {
+      if (_shuffleOrder.isEmpty) _buildShuffleOrder();
+      final pos = _shuffleOrder.indexOf(_index);
+      final prevPos = (pos - 1 + _shuffleOrder.length) % _shuffleOrder.length;
+      _index = _shuffleOrder[prevPos];
+    } else {
+      _index = (_index - 1 + _queue.length) % _queue.length;
+    }
     if (_index < _queueItems.length && _queueItems[_index] != null) {
       playItem(_queueItems[_index]);
     } else {
@@ -525,7 +539,29 @@ class PlayerController {
     _notify();
   }
 
-  void toggleShuffle() { _shuffle = !_shuffle; _notify(); }
+  void toggleShuffle() {
+    _shuffle = !_shuffle;
+    if (_shuffle) _buildShuffleOrder();
+    _notify();
+  }
+
+  /// Fisher-Yates shuffle: 產生完整的隨機播放順序，確保每首歌只播一次才重洗。
+  void _buildShuffleOrder() {
+    _shuffleOrder = List<int>.generate(_queue.length, (i) => i);
+    final rng = Random();
+    for (int i = _shuffleOrder.length - 1; i > 0; i--) {
+      final j = rng.nextInt(i + 1);
+      final temp = _shuffleOrder[i];
+      _shuffleOrder[i] = _shuffleOrder[j];
+      _shuffleOrder[j] = temp;
+    }
+    // 確保不在開頭就重複目前曲目。
+    if (_shuffleOrder.isNotEmpty && _index >= 0 && _shuffleOrder.first == _index && _shuffleOrder.length > 1) {
+      final swap = _shuffleOrder[1];
+      _shuffleOrder[1] = _shuffleOrder.first;
+      _shuffleOrder.first = swap;
+    }
+  }
   void toggleLoop() { _loop = !_loop; _notify(); }
 
   Future<void> setVolume(double v) async {
