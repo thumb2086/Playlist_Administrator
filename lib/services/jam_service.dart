@@ -117,7 +117,7 @@ class JamService extends ChangeNotifier {
 
       // 監聽房主的播放完成 → 自動下一首。
       _hostEndedHandled = false;
-      PlayerController.instance.player.onPlayerComplete.listen((_) {
+      PlayerController.instance.player.stream.completed.listen((_) {
         if (mode != 'host' || _hostEndedHandled) return;
         _hostEndedHandled = true;
         Timer(const Duration(milliseconds: 300), () {

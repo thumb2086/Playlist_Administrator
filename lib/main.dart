@@ -5,6 +5,7 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:win32/win32.dart';
+import 'package:media_kit/media_kit.dart';
 import 'app.dart';
 import 'cli_main.dart' show runCli;
 import 'services/config_service.dart';
@@ -92,6 +93,7 @@ void main() async {
     LogManager.instance.enable(basePath);
   }
   await SpotifySession.instance.load();
+  MediaKit.ensureInitialized();
   PlayerController.instance.init();
   FlutterError.onError = (details) {
     LogManager.instance.error('FlutterError: ${details.exception}\n${details.stack}');

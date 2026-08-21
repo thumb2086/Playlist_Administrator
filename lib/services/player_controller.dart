@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/playlist_item.dart';
@@ -12,15 +12,16 @@ import '../services/smtc_service.dart';
 import '../services/playback_history.dart';
 import '../services/metadata_reader.dart';
 import '../services/jam_service.dart';
+import '../services/youtube_service.dart';
 
-/// Central playback controller: owns the AudioPlayer, queue, and all state.
+/// Central playback controller: owns the MediaKit Player, queue, and all state.
 /// Used by both PlayerBar (bottom bar) and the queue drawer / PlayerPage.
 class PlayerController {
   static PlayerController? _instance;
   static PlayerController get instance => _instance ??= PlayerController._();
   PlayerController._();
 
-  final AudioPlayer _player = AudioPlayer();
+  final Player _player = Player();
   final List<String> _queue = [];           // local file paths
   final List<String> _queueTitles = [];     // display names
   int _index = -1;
@@ -48,7 +49,7 @@ class PlayerController {
   final Map<String, Uint8List?> _artworkCache = {};
 
   // Getters
-  AudioPlayer get player => _player;
+  Player get player => _player;
   bool get isPlaying => _isPlaying;
   bool get shuffle => _shuffle;
   bool get loop => _loop;
@@ -100,8 +101,8 @@ class PlayerController {
   void init() {
     _volume = ConfigService.instance.config.volume.clamp(0.0, 1.0);
     _player.setVolume(_volume);
-    _player.onPlayerComplete.listen((_) {
-      if (jamFollowMode) return; // jam 成員：由房主決定下一首
+    _player.stream.completed.listen((_) {
+      if (jamFollowMode) return;
       if (_loop || _shuffle) {
         next();
       } else {
@@ -109,12 +110,12 @@ class PlayerController {
         _notify();
       }
     });
-    _player.onPositionChanged.listen((p) {
+    _player.stream.position.listen((p) {
       _position = p;
       _checkPlaybackRecord(p);
       _notify();
     });
-    _player.onDurationChanged.listen((d) {
+    _player.stream.duration.listen((d) {
       _duration = d;
       _notify();
     });
@@ -147,35 +148,35 @@ class PlayerController {
     if (_coverPath == null) {
       _loadEmbeddedArtwork(path);
     }
-    await _player.play(DeviceFileSource(path));
+    await _player.open(Media('file://$path'));
     _pushSmtc();
   }
 
-  /// Play via download-then-play: yt-dlp download → play local file.
-  /// Prefetch next track in background for instant skip.
+  /// Play via YouTube stream: youtube_explode_dart → MediaKit play URL.
   Future<void> playStream(String query, {String? title, String? artist, String? isrc, String? coverUrl}) async {
-    StreamServer.instance.stopActive();
     await _player.stop();
     _title = title ?? query;
     _artist = artist ?? '';
     _coverPath = coverUrl;
     _recordedSongKey = '';
-    _statusText = '下載中: ${_title}';
+    _statusText = '搜尋: ${_title}';
     _isPlaying = false;
     _notify();
     try {
-      await StreamServer.instance.start();
-      final localPath = await StreamServer.instance.resolveToFile(query, isrc: isrc);
-      if (localPath.isEmpty || !File(localPath).existsSync()) {
+      final result = await YoutubeService.instance.resolveStream(query);
+      if (result == null || result.audioUrl.isEmpty) {
         _statusText = '找不到: $query';
         _notify();
         return;
       }
+      _title = title ?? result.title;
+      _artist = artist ?? result.author;
+      _coverPath = coverUrl ?? result.thumbnailUrl;
       _statusText = '';
       _isPlaying = true;
-      await _player.play(DeviceFileSource(localPath));
+      _notify();
+      await _player.open(Media(result.audioUrl));
       _pushSmtc();
-      _prefetchNext();
     } catch (e) {
       _statusText = '錯誤: $e';
       _notify();
@@ -229,7 +230,7 @@ class PlayerController {
       _artist = showName;
       _statusText = '播放: ${_title}';
       _notify();
-      await _player.play(UrlSource(ep['url']!));
+      await _player.open(Media(ep['url']!));
       _isPlaying = true;
       _pushSmtc();
     } catch (e) {
@@ -274,7 +275,7 @@ class PlayerController {
       _notify();
       // Cache RSS audio: play URL, cache in background.
       _cacheRssAudio(item);
-      await _player.play(UrlSource(item.audioUrl!));
+      await _player.open(Media(item.audioUrl!));
       _pushSmtc();
       _notify();
       return;
@@ -462,7 +463,7 @@ class PlayerController {
       _player.pause();
       _isPlaying = false;
     } else {
-      _player.resume();
+      _player.play();
       _isPlaying = true;
     }
     _notify();
@@ -475,7 +476,7 @@ class PlayerController {
       JamService.instance.togglePlay();
       return;
     }
-    await _player.resume();
+    await _player.play();
     _isPlaying = true;
     _notify();
     _pushSmtc();
@@ -512,7 +513,7 @@ class PlayerController {
     _statusText = '';
     _isPlaying = true;
     _notify();
-    await _player.play(UrlSource(url));
+    await _player.open(Media(url));
     _pushSmtc();
   }
 
