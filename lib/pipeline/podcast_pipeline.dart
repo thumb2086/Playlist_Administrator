@@ -121,6 +121,15 @@ class PodcastPipeline {
     // Only episodes truly missing files enter the parallel batch.
     final tasks = <_PodTask>[];
     int alreadyHave = 0;
+    // Pre-scan: build a set of existing file stems for fuzzy matching.
+    final existingStems = <String>{};
+    try {
+      for (final f in Directory(podDir).listSync().whereType<File>()) {
+        final stem = f.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+        if (stem.length > 10) existingStems.add(stem.toLowerCase());
+      }
+    } catch (_) {}
+
     for (int i = 0; i < episodes.length; i++) {
       if (state.isCancelled) break;
       final ep = episodes[i];
@@ -130,6 +139,15 @@ class PodcastPipeline {
       final txtPath = '$podDir\\$name.txt';
       var hasSrt = srtPath != null;
       var hasTxt = File(txtPath).existsSync();
+      // Fuzzy match: if exact name fails, check by prefix (30 chars) or EP number.
+      if (!hasSrt && !hasTxt) {
+        final fuzzy = _fuzzyFindFile(existingStems, name, ep.title);
+        if (fuzzy != null) {
+          hasSrt = fuzzy.endsWith('.srt');
+          hasTxt = fuzzy.endsWith('.txt');
+          if (hasSrt) srtPath = '$podDir\\$fuzzy';
+        }
+      }
       if (hasSrt || hasTxt) {
         // Backfill missing txt right here (fast, local).
         if (hasSrt && !hasTxt) {
@@ -231,6 +249,26 @@ class PodcastPipeline {
         }
       }
     } catch (_) {}
+    return null;
+  }
+
+  /// Fuzzy find: match by EP number or first 30 chars of normalized name.
+  String? _fuzzyFindFile(Set<String> existingStems, String normalizedName, String rawTitle) {
+    final lowerName = normalizedName.toLowerCase();
+    final prefix = lowerName.substring(0, lowerName.length.clamp(0, 30));
+    // EP number matching (e.g., "ep110", "EP110", "ep_110")
+    final epMatch = RegExp(r'(?:ep|EP)[_\s]?(\d+)').firstMatch(rawTitle);
+    final epNum = epMatch?.group(1);
+    for (final stem in existingStems) {
+      // Prefix match (covers 90%+ of title differences).
+      if (prefix.length >= 15 && stem.startsWith(prefix)) {
+        return stem;
+      }
+      // EP number match.
+      if (epNum != null && stem.contains('ep$epNum') || (epNum != null && stem.contains(RegExp(r'ep[\s_]?' + epNum)))) {
+        return stem;
+      }
+    }
     return null;
   }
 
