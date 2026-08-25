@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,7 +6,7 @@ import '../models/playlist_item.dart';
 import '../services/player_controller.dart';
 import '../services/config_service.dart';
 import '../services/favorites_service.dart';
-import '../services/stream_server.dart';
+import '../services/youtube_service.dart';
 import '../widgets/dark_theme.dart';
 
 /// Unified detail page for music playlists AND podcast shows.
@@ -123,55 +122,39 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     final item = widget.items[index];
     if (mounted) setState(() { _downloading.add(index); _progress[index] = 0; });
     try {
-      await StreamServer.instance.start();
       final cfg = ConfigService.instance.config;
       final musicDir = Directory(cfg.musicPath);
       await musicDir.create(recursive: true);
-      final safeName = item.audioQuery.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').replaceAll(RegExp(r'\s+'), ' ').trim();
-      final outBase = '${musicDir.path}\\dl_${safeName.hashCode.toRadixString(16)}';
+      final finalName = '${item.name} - ${item.artist}'.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final finalPath = '${musicDir.path}\\$finalName.mp3';
+      if (File(finalPath).existsSync()) {
+        if (mounted) { _localTracks.add(index); setState(() { _downloaded.add(index); _progress[index] = 1.0; }); }
+        return;
+      }
+      final searchQuery = (item.isrc != null && item.isrc!.isNotEmpty) ? item.isrc! : item.audioQuery;
+      final streamResult = await YoutubeService.instance.resolveStream(searchQuery);
+      if (streamResult == null) {
+        debugPrint('[DL] no YouTube result for: ${item.audioQuery}');
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('找不到音源'), duration: Duration(seconds: 2)));
+        return;
+      }
+      if (mounted) setState(() { _progress[index] = 0.3; });
+      final tmpPath = '${musicDir.path}\\dl_${finalName.hashCode.toRadixString(16)}.mp3';
+      final ffmpeg = cfg.ffmpegPath.isNotEmpty ? cfg.ffmpegPath : 'ffmpeg';
       final proc = await Process.start(
-        'python',
-        ['${cfg.toolsPath}\\flutter_download_bridge.py',
-         'stream-download', item.audioQuery, outBase] + (item.isrc != null ? [item.isrc!] : []),
+        ffmpeg,
+        ['-y', '-i', streamResult.audioUrl, '-vn', '-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2', tmpPath],
         runInShell: true,
-        workingDirectory: cfg.basePath,
-        environment: {'PYTHONIOENCODING': 'utf-8'},
       );
-      final out = await proc.stdout.transform(utf8.decoder).join();
+      if (mounted) setState(() { _progress[index] = 0.5; });
       final code = await proc.exitCode;
-      debugPrint('[DL] exit=$code for: ${item.audioQuery}');
-      if (code == 0) {
-        for (final line in out.split('\n')) {
-          final trimmed = line.trim();
-          if (trimmed.isEmpty || !trimmed.startsWith('{')) continue;
-          try {
-            final parsed = jsonDecode(trimmed) as Map<String, dynamic>;
-            if (parsed['type'] == 'complete' && parsed['path'] != null) {
-              final srcPath = parsed['path'] as String;
-              // Final name: "Title - Artist.mp3"
-              final finalName = '${item.name} - ${item.artist}.mp3'.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-              final finalPath = '${musicDir.path}\\$finalName';
-              if (srcPath != finalPath && File(srcPath).existsSync()) {
-                if (File(finalPath).existsSync()) await File(finalPath).delete();
-                await File(srcPath).rename(finalPath);
-              }
-              if (mounted) {
-                _localTracks.add(index);
-                setState(() { _downloaded.add(index); _progress[index] = 1.0; });
-              }
-              break;
-            }
-          } catch (e) {
-            debugPrint('[DL] json parse error: $e');
-          }
-        }
+      if (code == 0 && File(tmpPath).existsSync()) {
+        if (File(finalPath).existsSync()) await File(finalPath).delete();
+        await File(tmpPath).rename(finalPath);
+        if (mounted) { _localTracks.add(index); setState(() { _downloaded.add(index); _progress[index] = 1.0; }); }
       } else {
-        debugPrint('[DL] bridge failed exit=$code');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('下載失敗'), duration: Duration(seconds: 2)),
-          );
-        }
+        debugPrint('[DL] ffmpeg failed exit=$code for: ${item.audioQuery}');
       }
     } catch (e) {
       debugPrint('[DL] error: $e');

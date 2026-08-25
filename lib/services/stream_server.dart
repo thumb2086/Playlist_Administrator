@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'config_service.dart';
+import 'youtube_service.dart';
 
-/// Local streaming server: resolves a song query via yt-dlp (through the
-/// Python bridge) and serves the audio bytes over http://127.0.0.1:PORT/stream.
-/// Optional caching to cache/stream/ (Spotube-style cacheMusic).
+/// Local streaming server: resolves a song query via YoutubeService (native Dart)
+/// and serves the audio bytes over http://127.0.0.1:PORT/stream.
 class StreamServer {
   static StreamServer? _instance;
   static StreamServer get instance => _instance ??= StreamServer._();
@@ -15,43 +16,28 @@ class StreamServer {
   int _port = 0;
   bool _started = false;
 
-  /// LAN 成員用來連串流伺服器的基底網址（由外部（JamService）注入）。
   String publicBase = 'http://127.0.0.1:0';
 
   int get port => _port;
 
-  /// query -> resolved URL cache (in-memory, per session)
   final Map<String, String> _resolved = {};
-
-  /// Currently running stream-download process (kill on new request).
   Process? _activeProc;
-
-  /// query -> cached file path (persisted across restarts via index)
   final Map<String, String> _cacheIndex = {};
 
   bool get isRunning => _started;
-
   String get baseUrl => 'http://127.0.0.1:$_port';
 
-  static String get _bridgePath =>
-      '${ConfigService.instance.config.toolsPath}\\flutter_download_bridge.py';
-
-  static String get _cacheDir =>
-      ConfigService.instance.config.streamCachePath;
-
+  static String get _cacheDir => ConfigService.instance.config.streamCachePath;
   static String get _indexPath => '$_cacheDir\\stream_index.json';
 
   Future<void> start() async {
     if (_started) return;
     _loadIndex();
-    // Clean orphaned temp files from previous sessions.
     try {
       final dir = Directory(_cacheDir);
       if (dir.existsSync()) {
         for (final f in dir.listSync().whereType<File>()) {
-          if (f.uri.pathSegments.last.startsWith('stream_')) {
-            f.deleteSync();
-          }
+          if (f.uri.pathSegments.last.startsWith('stream_')) f.deleteSync();
         }
       }
     } catch (_) {}
@@ -87,10 +73,8 @@ class StreamServer {
     } catch (_) {}
   }
 
-  /// Look up a cached stream for [query]; null if not cached.
   String? cachedPathFor(String query) => _cacheIndex[query];
 
-  /// Kill any active streaming process.
   void stopActive() {
     _activeProc?.kill();
     _activeProc = null;
@@ -105,9 +89,7 @@ class StreamServer {
     for (final f in dir.listSync().whereType<File>()) {
       if (f.path.endsWith('.mp3') && f.lengthSync() > 65536) {
         final name = f.path.split(Platform.pathSeparator).last.toLowerCase();
-        if (name.contains(prefix)) {
-          return f.path;
-        }
+        if (name.contains(prefix)) return f.path;
       }
     }
     return null;
@@ -116,16 +98,14 @@ class StreamServer {
   Future<void> _handle(HttpRequest request) async {
     final path = request.uri.pathSegments;
     if (path.isNotEmpty && path[0] == 'stream' && path.length >= 2) {
-      final query = path[1];
+      final query = Uri.decodeComponent(path.sublist(1).join('/'));
       try {
-        // 1. Cached file first — serve instantly.
         final cached = _cacheIndex[query];
         if (cached != null && File(cached).existsSync()) {
           await _serveFile(request, File(cached));
           return;
         }
-        // 2. No cache — resolve + transcode on-the-fly (true streaming).
-        await _serveTranscoded(request, '', query);
+        await _serveTranscoded(request, query);
       } catch (e) {
         try {
           request.response.statusCode = HttpStatus.internalServerError;
@@ -138,54 +118,33 @@ class StreamServer {
     await request.response.close();
   }
 
+  /// Resolve URL via YoutubeService (native).
   Future<String> _resolve(String query) async {
     final cached = _resolved[query];
     if (cached != null) return cached;
     try {
-      final proc = await Process.start(
-        'python',
-        [_bridgePath, 'stream-resolve', query],
-        runInShell: true,
-        workingDirectory: ConfigService.instance.config.basePath,
-        environment: {'PYTHONIOENCODING': 'utf-8'},
-      );
-      final out = await proc.stdout.transform(utf8.decoder).join();
-      final code = await proc.exitCode;
-      if (code != 0) {
-        print('[StreamServer] stream-resolve failed (exit $code) for: $query');
+      final result = await YoutubeService.instance.resolveStream(query);
+      if (result == null) {
+        print('[StreamServer] resolve failed for: $query');
         return '';
       }
-      for (final line in out.split('\n')) {
-        if (line.trim().isNotEmpty) {
-          try {
-            final data = jsonDecode(line.trim()) as Map<String, dynamic>;
-            if (data['type'] == 'error') {
-              print('[StreamServer] stream-resolve error: ${data['message']}');
-              return '';
-            }
-            if (data['type'] == 'complete' && data['url'] != null) {
-              _resolved[query] = data['url'] as String;
-              return data['url'] as String;
-            }
-          } catch (_) {}
-        }
-      }
-      print('[StreamServer] stream-resolve: no valid URL for: $query');
+      _resolved[query] = result.audioUrl;
+      return result.audioUrl;
     } catch (e) {
-      print('[StreamServer] stream-resolve exception: $e');
+      print('[StreamServer] resolve exception: $e');
     }
     return '';
   }
 
-  /// Public resolve used by SearchPage to prepare a stream URL.
   Future<String> resolveForTest(String query) => _resolve(query);
 
-  /// Resolve a query → yt-dlp download+transcode to mp3 → return local path.
+  /// Resolve → download via ffmpeg → return local mp3 path.
   Future<String> resolveToFile(String query, {String? isrc}) async {
     final cacheDir = Directory(_cacheDir);
     await cacheDir.create(recursive: true);
 
     final safeName = query.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').replaceAll(RegExp(r'\s+'), ' ').trim();
+    // Check cache first.
     final prefix = safeName.substring(0, safeName.length.clamp(0, 20)).toLowerCase();
     for (final f in cacheDir.listSync().whereType<File>()) {
       final name = f.path.split(Platform.pathSeparator).last.toLowerCase();
@@ -194,80 +153,67 @@ class StreamServer {
       }
     }
 
-    final outBase = '${cacheDir.path}\\dl_${safeName.hashCode.toRadixString(16)}';
-    // Kill any previous streaming process to avoid resource leaks.
     _activeProc?.kill();
     _activeProc = null;
+
     try {
+      // 1. Resolve audio URL via YoutubeService (native).
+      final url = await _resolve(query);
+      if (url.isEmpty) {
+        print('[StreamServer] resolveToFile: no URL for: $query');
+        return '';
+      }
+
+      // 2. Download + convert to mp3 via ffmpeg.
+      final outBase = '${cacheDir.path}\\dl_${safeName.hashCode.toRadixString(16)}';
+      final mp3Path = '$outBase.mp3';
+      final ffmpeg = ConfigService.instance.config.ffmpegPath.isNotEmpty
+          ? ConfigService.instance.config.ffmpegPath
+          : 'ffmpeg';
+
       final proc = await Process.start(
-        'python',
-        [_bridgePath, 'stream-download', query, outBase] + (isrc != null ? [isrc] : []),
+        ffmpeg,
+        ['-y', '-i', url, '-vn', '-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2', mp3Path],
         runInShell: true,
-        workingDirectory: ConfigService.instance.config.basePath,
-        environment: {'PYTHONIOENCODING': 'utf-8'},
       );
       _activeProc = proc;
-      // Timeout: kill if stuck for 90 seconds (yt-dlp can take 45-60s).
-      final outFuture = proc.stdout.transform(utf8.decoder).join();
-      final exited = proc.exitCode.timeout(
+
+      final code = await proc.exitCode.timeout(
         const Duration(seconds: 90),
         onTimeout: () { proc.kill(); return -1; },
       );
-      final out = await outFuture;
-      final code = await exited;
       _activeProc = null;
-      if (code != 0 && code != -1) {
-        print('[StreamServer] stream-download failed (exit $code) for: $query');
-        return '';
+
+      if (code == 0 && File(mp3Path).existsSync()) {
+        final finalPath = '${cacheDir.path}\\$safeName.mp3';
+        if (mp3Path != finalPath) await File(mp3Path).rename(finalPath);
+        _cacheIndex[query] = finalPath;
+        _saveIndex();
+        return finalPath;
       }
-      for (final line in out.split('\n')) {
-        if (line.trim().isNotEmpty) {
-          try {
-            final data = jsonDecode(line.trim()) as Map<String, dynamic>;
-            if (data['type'] == 'error') {
-              print('[StreamServer] stream-download error: ${data['message']}');
-              continue;
-            }
-            if (data['type'] == 'complete' && data['path'] != null) {
-              final srcPath = data['path'] as String;
-              final finalPath = '${cacheDir.path}\\$safeName.mp3';
-              if (srcPath != finalPath) {
-                await File(srcPath).rename(finalPath);
-              }
-              _cacheIndex[query] = finalPath;
-              _saveIndex();
-              return finalPath;
-            }
-          } catch (_) {}
-        }
-      }
+      print('[StreamServer] ffmpeg failed (exit $code) for: $query');
       return '';
-    } catch (_) {
+    } catch (e) {
       _activeProc?.kill();
       _activeProc = null;
+      print('[StreamServer] resolveToFile error: $e');
       return '';
     }
   }
 
-  /// True streaming: resolve URL → ffmpeg reads URL directly → pipe mp3 to
-  /// HTTP response + write to cache simultaneously. Starts playing ASAP.
-  Future<void> _serveTranscoded(
-      HttpRequest request, String url, String query) async {
-    // Resolve URL if not provided.
+  /// True streaming: resolve URL → ffmpeg pipe → HTTP response.
+  Future<void> _serveTranscoded(HttpRequest request, String query) async {
+    final url = await _resolve(query);
     if (url.isEmpty) {
-      url = await _resolve(query);
-      if (url.isEmpty) {
-        request.response.statusCode = HttpStatus.notFound;
-        await request.response.close();
-        return;
-      }
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+      return;
     }
 
     final ffmpeg = ConfigService.instance.config.ffmpegPath.isNotEmpty
         ? ConfigService.instance.config.ffmpegPath
         : 'ffmpeg';
 
-    // ffmpeg reads remote URL directly — starts transcoding immediately.
     final args = [
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       '-i', url,
@@ -275,7 +221,6 @@ class StreamServer {
     ];
     final ff = await Process.start(ffmpeg, args, runInShell: true);
 
-    // Cache: tee into file while streaming.
     final cacheEnabled = ConfigService.instance.config.streamCacheEnabled;
     IOSink? cacheSink;
     File? cacheFile;
@@ -292,19 +237,14 @@ class StreamServer {
     request.response.headers.contentType = ContentType('audio', 'mpeg');
     request.response.headers.set('Cache-Control', 'no-store');
 
-    // Pipe ffmpeg stdout → HTTP response + optional cache.
     await request.response.addStream(ff.stdout.transform(
         StreamTransformer.fromHandlers(
-            handleData: (data, sink) {
-              cacheSink?.add(data);
-              sink.add(data);
-            },
+            handleData: (data, sink) { cacheSink?.add(data); sink.add(data); },
             handleError: (e, st, sink) {},
             handleDone: (sink) => sink.close())));
     await request.response.close();
     await cacheSink?.close();
 
-    // Update cache index.
     if (cacheEnabled && cacheFile != null && cacheFile.existsSync() && cacheFile.lengthSync() > 65536) {
       _cacheIndex[query] = cacheFile.path;
       _saveIndex();
@@ -318,7 +258,6 @@ class StreamServer {
     await request.response.close();
   }
 
-  /// Cache size cap: 2GB default; evicts oldest entries.
   Future<void> _enforceCacheLimit() async {
     final maxBytes = ConfigService.instance.config.streamCacheMaxMb * 1024 * 1024;
     final files = <File>[];
@@ -334,9 +273,7 @@ class StreamServer {
     for (final f in files) {
       if (total <= maxBytes) break;
       final len = await f.length();
-      try {
-        await f.delete();
-      } catch (_) {}
+      try { await f.delete(); } catch (_) {}
       total -= len;
       _cacheIndex.removeWhere((k, v) => v == f.path);
     }
