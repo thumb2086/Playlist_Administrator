@@ -11,12 +11,12 @@ class SnapshotManager {
   static Map<String, dynamic> _loadCache() {
     try {
       final f = File(_cachePath);
-      if (!f.existsSync()) return {'playlists': {}, 'version': '1.0'};
+      if (!f.existsSync()) return {'playlists': <String, dynamic>{}, 'version': '1.0'};
       final data = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
       if (data.containsKey('playlists')) return data;
-      return {'playlists': {}, 'version': '1.0'};
+      return {'playlists': <String, dynamic>{}, 'version': '1.0'};
     } catch (_) {
-      return {'playlists': {}, 'version': '1.0'};
+      return {'playlists': <String, dynamic>{}, 'version': '1.0'};
     }
   }
 
