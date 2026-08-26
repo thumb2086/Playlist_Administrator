@@ -178,10 +178,17 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   Future<void> _downloadAll() async {
     _registerSpotifyUrl();
+    final toDownload = <int>[];
     for (int i = 0; i < widget.items.length; i++) {
       if (!_isLocal(i) && !_isDownloading(i)) {
-        await _downloadTrack(i);
+        toDownload.add(i);
       }
+    }
+    if (toDownload.isEmpty) return;
+    // Download 3 at a time, each with independent timeout.
+    for (int batch = 0; batch < toDownload.length; batch += 3) {
+      final chunk = toDownload.skip(batch).take(3).toList();
+      await Future.wait(chunk.map((i) => _downloadTrack(i)), eagerError: false);
     }
   }
 
