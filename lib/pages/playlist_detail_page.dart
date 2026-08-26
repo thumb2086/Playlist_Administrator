@@ -17,6 +17,7 @@ class PlaylistDetailPage extends StatefulWidget {
   final String? coverUrl;
   final List<PlaylistItem> items;
   final bool isPodcast;
+  final String? spotifyUrl;
 
   const PlaylistDetailPage({
     super.key,
@@ -25,6 +26,7 @@ class PlaylistDetailPage extends StatefulWidget {
     this.coverUrl,
     required this.items,
     this.isPodcast = false,
+    this.spotifyUrl,
   });
 
   @override
@@ -117,6 +119,15 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   bool _isLocal(int index) => _localTracks.contains(index) || _downloaded.contains(index);
   bool _isDownloading(int index) => _downloading.contains(index);
 
+  /// Register the Spotify playlist URL in config so Pipeline can scrape it.
+  void _registerSpotifyUrl() {
+    if (widget.spotifyUrl == null || widget.isPodcast) return;
+    final cfg = ConfigService.instance.config;
+    if (cfg.urlNames.containsKey(widget.spotifyUrl)) return;
+    cfg.urlNames[widget.spotifyUrl!] = widget.title;
+    ConfigService.instance.save();
+  }
+
   Future<void> _downloadTrack(int index) async {
     if (_isLocal(index) || _isDownloading(index)) return;
     final item = widget.items[index];
@@ -164,6 +175,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   }
 
   Future<void> _downloadAll() async {
+    _registerSpotifyUrl();
     for (int i = 0; i < widget.items.length; i++) {
       if (!_isLocal(i) && !_isDownloading(i)) {
         await _downloadTrack(i);

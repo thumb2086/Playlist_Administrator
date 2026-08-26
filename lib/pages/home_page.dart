@@ -426,8 +426,10 @@ class _HomePageState extends State<HomePage> {
           return t;
         }();
         if (tracks.isNotEmpty && mounted) {
+          final spotifyUrl = 'https://open.spotify.com/playlist/$id';
           MainShell.showDetail(PlaylistDetailPage(
             title: c.name, subtitle: c.subtitle, coverUrl: c.coverUrl,
+            spotifyUrl: spotifyUrl,
             items: tracks.map((t) => PlaylistItem(
               name: t.name, artist: t.artists.join(', '),
               durationMs: t.durationMs, coverUrl: t.coverUrl,
