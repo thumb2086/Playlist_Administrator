@@ -54,11 +54,13 @@ class YoutubeService {
   /// 根據查詢一次搞定：搜尋 → 取最佳音訊 URL。
   /// 回傳 best match 的 URL 和元資料。
   Future<YoutubeStreamResult?> resolveStream(String query) async {
-    final results = await search(query, limit: 5);
+    final results = await search(query, limit: 5)
+        .timeout(const Duration(seconds: 20), onTimeout: () => []);
     if (results.isEmpty) return null;
 
     final best = results.first;
-    final url = await getAudioUrl(best.videoId);
+    final url = await getAudioUrl(best.videoId)
+        .timeout(const Duration(seconds: 15), onTimeout: () => null);
     if (url == null) return null;
 
     return YoutubeStreamResult(

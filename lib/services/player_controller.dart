@@ -155,7 +155,7 @@ class PlayerController {
     _pushSmtc();
   }
 
-  /// Play via YouTube stream: youtube_explode_dart → MediaKit play URL.
+  /// Play via download-then-play: resolve → ffmpeg download → play local mp3.
   Future<void> playStream(String query, {String? title, String? artist, String? isrc, String? coverUrl}) async {
     await _player.stop();
     _title = title ?? query;
@@ -167,7 +167,12 @@ class PlayerController {
     _notify();
     try {
       await StreamServer.instance.start();
-      final localPath = await StreamServer.instance.resolveToFile(query, isrc: isrc);
+      final localPath = await StreamServer.instance.resolveToFile(query, isrc: isrc)
+          .timeout(const Duration(seconds: 60), onTimeout: () {
+        _statusText = '下載逾時: $query';
+        _notify();
+        return '';
+      });
       if (localPath.isEmpty || !File(localPath).existsSync()) {
         _statusText = '找不到: $query';
         _notify();
@@ -175,7 +180,7 @@ class PlayerController {
       }
       _statusText = '';
       _isPlaying = true;
-      await _player.open(Media('file://$localPath'));
+      await _player.open(Media(Uri.file(localPath).toString()));
       _pushSmtc();
       _prefetchNext();
     } catch (e) {

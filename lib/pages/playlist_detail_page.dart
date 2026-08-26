@@ -143,11 +143,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         return;
       }
       final searchQuery = (item.isrc != null && item.isrc!.isNotEmpty) ? item.isrc! : item.audioQuery;
-      final streamResult = await YoutubeService.instance.resolveStream(searchQuery);
+      final streamResult = await YoutubeService.instance.resolveStream(searchQuery)
+          .timeout(const Duration(seconds: 30), onTimeout: () => null);
       if (streamResult == null) {
-        debugPrint('[DL] no YouTube result for: ${item.audioQuery}');
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('找不到音源'), duration: Duration(seconds: 2)));
+          SnackBar(content: Text('找不到: ${item.name}'), duration: const Duration(seconds: 2)));
         return;
       }
       if (mounted) setState(() { _progress[index] = 0.3; });
@@ -159,7 +159,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         runInShell: true,
       );
       if (mounted) setState(() { _progress[index] = 0.5; });
-      final code = await proc.exitCode;
+      final code = await proc.exitCode.timeout(
+        const Duration(seconds: 90), onTimeout: () { proc.kill(); return -1; },
+      );
       if (code == 0 && File(tmpPath).existsSync()) {
         if (File(finalPath).existsSync()) await File(finalPath).delete();
         await File(tmpPath).rename(finalPath);
