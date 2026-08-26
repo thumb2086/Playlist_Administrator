@@ -330,9 +330,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           SizedBox(
             width: 32,
             child: isDownloading
-                ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(
-                    strokeWidth: 2, value: progress > 0 ? progress : null,
-                    color: AppColors.accent))
+                ? const Icon(Icons.downloading_rounded, size: 16, color: AppColors.accent)
                 : Text('${index + 1}',
                     style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
           ),
