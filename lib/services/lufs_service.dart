@@ -59,10 +59,20 @@ class LufsService {
     if (entry.isEmpty) return null;
     if (!entry.contains('.') && !entry.contains('\\') && !entry.contains('/')) return null;
 
+    // Try resolving against playlists directory (handles ../music/ relative paths).
     final resolved = '${playlistsPath}\\$entry';
-    if (File(resolved).existsSync()) return resolved;
+    if (File(resolved).existsSync()) {
+      // Normalize to absolute path (remove ..) so ffmpeg works correctly.
+      try {
+        return File(resolved).resolveSymbolicLinksSync();
+      } catch (_) {
+        return File(resolved).absolute.path;
+      }
+    }
 
-    if (File(entry).existsSync()) return entry;
+    if (File(entry).existsSync()) {
+      try { return File(entry).resolveSymbolicLinksSync(); } catch (_) { return File(entry).absolute.path; }
+    }
 
     final fname = File(entry).uri.pathSegments.last;
     for (final base in [basePath, libraryPath, playlistsPath]) {
