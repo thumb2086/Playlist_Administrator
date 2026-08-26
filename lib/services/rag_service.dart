@@ -14,15 +14,19 @@ class RagService {
 
   /// 增量重建 RAG 索引；逐行回傳進度。
   Future<void> build(void Function(String line) onLog) async {
-    final bridge = await BridgeService.instance.bridgePath;
+    final basePath = ConfigService.instance.config.basePath;
+    final ragScript = '$basePath\\rag\\build_db.py';
+    if (!File(ragScript).existsSync()) {
+      onLog('找不到 rag/build_db.py，跳過 RAG');
+      return;
+    }
     final env = Map<String, String>.from(Platform.environment);
     env['PYTHONIOENCODING'] = 'utf-8';
     env['PYTHONUNBUFFERED'] = '1';
-    final basePath = ConfigService.instance.config.basePath;
     if (basePath.isNotEmpty) env['BASE_PATH'] = basePath;
     final proc = await Process.start(
       'python',
-      [bridge, 'rag-build'],
+      ['-X', 'utf8', ragScript, '--batch', '64', '--workers', '8'],
       runInShell: true,
       workingDirectory: basePath.isNotEmpty ? basePath : Directory.current.path,
       environment: env,
