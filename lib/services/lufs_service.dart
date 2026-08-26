@@ -15,8 +15,22 @@ class LufsService {
       final f = File(_cacheFile(fmt));
       if (!f.existsSync()) return {};
       final json = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
-      return json.map((k, v) => MapEntry(k, (v as num).toDouble()));
+      final result = <String, double>{};
+      for (final e in json.entries) {
+        // Normalize cache keys: resolve ../ or ..\\ in paths.
+        final key = e.key.replaceAll('\\', '/').contains('..')
+            ? _normalizeCacheKey(e.key) : e.key;
+        result[key] = (e.value as num).toDouble();
+      }
+      return result;
     } catch (_) { return {}; }
+  }
+
+  static String _normalizeCacheKey(String path) {
+    try {
+      final f = File(path);
+      return f.absolute.path;
+    } catch (_) { return path; }
   }
 
   void _save(String fmt, Map<String, double> cache) {
@@ -216,7 +230,7 @@ class LufsService {
 
     final base = absPath.substring(0, absPath.lastIndexOf('.'));
     final tmp = '${base}_tmp.mp3';
-    final name = absPath.split('\\').last;
+    final name = absPath.split(Platform.pathSeparator).last;
 
     try {
       final proc = await Process.start(ffmpeg, [

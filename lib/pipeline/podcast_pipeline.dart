@@ -252,24 +252,54 @@ class PodcastPipeline {
     return null;
   }
 
-  /// Fuzzy find: match by EP number or first 30 chars of normalized name.
+  /// Fuzzy find: match by EP number, date prefix, or longest common substring.
   String? _fuzzyFindFile(Set<String> existingStems, String normalizedName, String rawTitle) {
     final lowerName = normalizedName.toLowerCase();
-    final prefix = lowerName.substring(0, lowerName.length.clamp(0, 30));
-    // EP number matching (e.g., "ep110", "EP110", "ep_110")
+
+    // 1. EP number matching (most reliable for numbered podcasts).
     final epMatch = RegExp(r'(?:ep|EP)[_\s]?(\d+)').firstMatch(rawTitle);
     final epNum = epMatch?.group(1);
-    for (final stem in existingStems) {
-      // Prefix match (covers 90%+ of title differences).
-      if (prefix.length >= 15 && stem.startsWith(prefix)) {
-        return stem;
-      }
-      // EP number match.
-      if (epNum != null && stem.contains('ep$epNum') || (epNum != null && stem.contains(RegExp(r'ep[\s_]?' + epNum)))) {
-        return stem;
+    if (epNum != null) {
+      for (final stem in existingStems) {
+        if (RegExp(r'ep[\s_]*' + epNum + r'[\s_\b.]', caseSensitive: false).hasMatch(stem)) {
+          return stem;
+        }
       }
     }
+
+    // 2. Date prefix matching (for daily shows like "2026_8_26(三)...").
+    final dateMatch = RegExp(r'(\d{4}[_-]\d{1,2}[_-]\d{1,2})').firstMatch(rawTitle);
+    if (dateMatch != null) {
+      final dateStr = dateMatch.group(1)!.replaceAll('-', '_');
+      for (final stem in existingStems) {
+        if (stem.contains(dateStr)) return stem;
+      }
+    }
+
+    // 3. Longest common substring (8+ chars).
+    final stripped = lowerName.replaceAll(RegExp(r'[^\w\u4e00-\u9fff]'), '');
+    if (stripped.length >= 8) {
+      String best = '';
+      String? bestStem;
+      for (final stem in existingStems) {
+        final stemStripped = stem.replaceAll(RegExp(r'[^\w\u4e00-\u9fff]'), '');
+        // Check if stripped name starts with same 8+ chars as stem.
+        final commonLen = _commonPrefixLen(stripped, stemStripped);
+        if (commonLen >= 8 && commonLen > best.length) {
+          best = stripped.substring(0, commonLen);
+          bestStem = stem;
+        }
+      }
+      if (bestStem != null) return bestStem;
+    }
+
     return null;
+  }
+
+  static int _commonPrefixLen(String a, String b) {
+    int i = 0;
+    while (i < a.length && i < b.length && a[i] == b[i]) i++;
+    return i;
   }
 
   Future<void> _srtToTxt(String srtPath, String txtPath) async {
