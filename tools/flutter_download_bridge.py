@@ -309,7 +309,7 @@ def cmd_stream_download(args):
         'postprocessors': [],
         'extractor_args': {
             'youtube': {
-                'player_client': ['web', 'tv'],
+                'player_client': ['android', 'ios'],
             }
         },
         'http_headers': {
