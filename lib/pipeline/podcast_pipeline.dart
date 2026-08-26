@@ -197,6 +197,15 @@ class PodcastPipeline {
       onLog('  無新集數 (${alreadyHave} 集已處理過)');
       return;
     }
+    // If 80%+ of episodes already have txt files, the remaining are just
+    // title-encoding mismatches between Dart XML and old Python ET.
+    // Skip them to avoid unnecessary re-downloading.
+    final txtCount = Directory(podDir).listSync().whereType<File>()
+        .where((f) => f.path.endsWith('.txt') && f.lengthSync() > 50).length;
+    if (txtCount >= episodes.length * 0.8 && tasks.length < episodes.length * 0.5) {
+      onLog('  已有 $txtCount/${episodes.length} 集逐字稿 (${tasks.length} 集標題不匹配但已足夠)');
+      return;
+    }
     onLog('  需處理: ${tasks.length} 集 (×4 並行)');
     final total = tasks.length;
     final groqQueue = <_PodTask>[];
@@ -222,15 +231,21 @@ class PodcastPipeline {
       if (state.isCancelled) break;
 
       final batch = tasks.skip(i).take(4).toList();
-      await Future.wait(batch.asMap().entries.map((e) async {
-        final needGroq = await _processOne(e.value, podcastName, rssUrl, podDir, ext, cache, onLog);
-        // Save immediately after each episode so progress is never lost.
-        _saveCache(cache);
-        if (needGroq && hasGroq) {
-          groqQueue.add(e.value);
-          _tryGroq();
+      final batchFutures = <Future<bool>>[];
+      for (final e in batch) {
+        if (state.isCancelled) break;
+        batchFutures.add(_processOne(e, podcastName, rssUrl, podDir, ext, cache, onLog, state));
+      }
+      final results = await Future.wait(batchFutures);
+      _saveCache(cache);
+      if (hasGroq) {
+        for (int j = 0; j < batch.length; j++) {
+          if (results[j] && j < batch.length) {
+            groqQueue.add(batch[j]);
+          }
         }
-      }));
+        _tryGroq();
+      }
 
       final done = (i + batch.length).clamp(0, total);
       onProgress(done * 100 ~/ total, 100, stepIndex);
@@ -243,9 +258,9 @@ class PodcastPipeline {
     }
 
     final srtCount = cache.values.where((v) => v['srt'] == true).length;
-    final txtCount = cache.values.where((v) => v['txt'] == true).length;
+    final txtDone = cache.values.where((v) => v['txt'] == true).length;
     final errCount = cache.values.where((v) => v['status'] == 'error').length;
-    onLog('  $podcastName 完成: 總處理 ${cache.length} 集 (SRT $srtCount, 逐字稿 $txtCount, 錯誤 $errCount)');
+    onLog('  $podcastName 完成: 總處理 ${cache.length} 集 (SRT $srtCount, 逐字稿 $txtDone, 錯誤 $errCount)');
   }
 
   /// Resolve the actual SRT file for an episode. yt-dlp may save
@@ -363,7 +378,9 @@ class PodcastPipeline {
   Future<bool> _processOne(
     _PodTask t, String podcastName, String rssUrl, String podDir, String ext,
     Map<String, Map<String, dynamic>> cache, void Function(String) onLog,
+    PipelineState state,
   ) async {
+    if (state.isCancelled) return false;
     final name = PodcastService.normalizeFileName(t.episode.title);
     final audioPath = '$podDir\\$name.$ext';
     final srtPath = _findSrt(podDir, name);
@@ -371,6 +388,7 @@ class PodcastPipeline {
 
     // Download audio if missing
     if (!await File(audioPath).exists()) {
+      if (state.isCancelled) return false;
       onLog('  [${t.index}] ⬇️ $name');
       try {
         await PodcastService.instance.downloadEpisode(rssUrl, t.index, (pct) {},
@@ -412,6 +430,7 @@ class PodcastPipeline {
     }
 
     onLog('    🔍 $name');
+    if (state.isCancelled) return false;
     // Stagger only real YT searches (0~1.2s) to avoid rate limit,
     // never delay episodes that skip instantly.
     await Future.delayed(Duration(milliseconds: (t.index % 4) * 300));
