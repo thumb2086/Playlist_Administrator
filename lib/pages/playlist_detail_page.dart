@@ -142,14 +142,21 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         if (mounted) { _localTracks.add(index); setState(() { _downloaded.add(index); _progress[index] = 1.0; }); }
         return;
       }
-      final searchQuery = (item.isrc != null && item.isrc!.isNotEmpty) ? item.isrc! : item.audioQuery;
+      // Prefer artist+title for better YouTube matching, not ISRC.
+      final searchQuery = '${item.artist} ${item.name}'.trim();
+      debugPrint('[DL] $index start: query="$searchQuery" isrc=${item.isrc}');
       final streamResult = await YoutubeService.instance.resolveStream(searchQuery)
-          .timeout(const Duration(seconds: 30), onTimeout: () => null);
+          .timeout(const Duration(seconds: 30), onTimeout: () {
+        debugPrint('[DL] $index TIMEOUT resolving: $searchQuery');
+        return null;
+      });
       if (streamResult == null) {
+        debugPrint('[DL] $index NOT FOUND: ${item.name}');
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('找不到: ${item.name}'), duration: const Duration(seconds: 2)));
         return;
       }
+      debugPrint('[DL] $index resolved: ${streamResult.title}');
       if (mounted) setState(() { _progress[index] = 0.3; });
       final tmpPath = '${musicDir.path}\\dl_${finalName.hashCode.toRadixString(16)}.mp3';
       final ffmpeg = cfg.ffmpegPath.isNotEmpty ? cfg.ffmpegPath : 'ffmpeg';
@@ -165,9 +172,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       if (code == 0 && File(tmpPath).existsSync()) {
         if (File(finalPath).existsSync()) await File(finalPath).delete();
         await File(tmpPath).rename(finalPath);
+        debugPrint('[DL] $index OK: $finalPath');
         if (mounted) { _localTracks.add(index); setState(() { _downloaded.add(index); _progress[index] = 1.0; }); }
       } else {
-        debugPrint('[DL] ffmpeg failed exit=$code for: ${item.audioQuery}');
+        debugPrint('[DL] $index ffmpeg FAILED exit=$code for: ${item.audioQuery}');
       }
     } catch (e) {
       debugPrint('[DL] error: $e');
