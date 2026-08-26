@@ -161,24 +161,22 @@ class PlayerController {
     _artist = artist ?? '';
     _coverPath = coverUrl;
     _recordedSongKey = '';
-    _statusText = '搜尋: ${_title}';
+    _statusText = '下載中: ${_title}';
     _isPlaying = false;
     _notify();
     try {
-      final result = await YoutubeService.instance.resolveStream(query);
-      if (result == null || result.audioUrl.isEmpty) {
+      await StreamServer.instance.start();
+      final localPath = await StreamServer.instance.resolveToFile(query, isrc: isrc);
+      if (localPath.isEmpty || !File(localPath).existsSync()) {
         _statusText = '找不到: $query';
         _notify();
         return;
       }
-      _title = title ?? result.title;
-      _artist = artist ?? result.author;
-      _coverPath = coverUrl ?? result.thumbnailUrl;
       _statusText = '';
       _isPlaying = true;
-      _notify();
-      await _player.open(Media(result.audioUrl));
+      await _player.open(Media('file://$localPath'));
       _pushSmtc();
+      _prefetchNext();
     } catch (e) {
       _statusText = '錯誤: $e';
       _notify();
@@ -186,13 +184,19 @@ class PlayerController {
     _notify();
   }
 
-  /// Smart play: local file if path exists, otherwise stream.
+  /// Smart play: local file if path exists, otherwise search music library, then stream.
   Future<void> play(String pathOrQuery, {String? title, String? artist, String? isrc, String? coverUrl}) async {
     if (File(pathOrQuery).existsSync()) {
       await playFile(pathOrQuery, title: title, artist: artist, coverUrl: coverUrl);
-    } else {
-      await playStream(pathOrQuery, title: title, artist: artist, isrc: isrc, coverUrl: coverUrl);
+      return;
     }
+    // Check music library for matching file.
+    final local = _findLocalTrack(pathOrQuery);
+    if (local != null) {
+      await playFile(local, title: title, artist: artist, coverUrl: coverUrl);
+      return;
+    }
+    await playStream(pathOrQuery, title: title, artist: artist, isrc: isrc, coverUrl: coverUrl);
   }
 
   /// Play podcast show: look up RSS feed, get episodes, play latest.
