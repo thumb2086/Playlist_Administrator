@@ -235,6 +235,7 @@ class LufsService {
     try {
       final proc = await Process.start(ffmpeg, [
         '-y', '-i', absPath,
+        '-vn',
         '-af', 'loudnorm=I=$target:TP=-1:LRA=7',
         '-c:a', 'libmp3lame', '-q:a', '2', tmp,
       ]);

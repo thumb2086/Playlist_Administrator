@@ -121,12 +121,18 @@ class PodcastPipeline {
     // Only episodes truly missing files enter the parallel batch.
     final tasks = <_PodTask>[];
     int alreadyHave = 0;
-    // Pre-scan: build a set of existing file stems for fuzzy matching.
-    final existingStems = <String>{};
+    // Pre-scan: build canonical lookup for all existing files.
+    // Canonical form: lowercase, strip all non-alphanumeric/CJK chars.
+    final canonicalToStem = <String, String>{};
     try {
       for (final f in Directory(podDir).listSync().whereType<File>()) {
         final stem = f.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-        if (stem.length > 10) existingStems.add(stem.toLowerCase());
+        if (stem.length < 5) continue;
+        final canonical = _canonicalize(stem);
+        if (canonical.isNotEmpty) canonicalToStem[canonical] = stem;
+        // Also store without CJK for cross-encoding matches.
+        final alphaOnly = stem.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+        if (alphaOnly.length >= 8) canonicalToStem[alphaOnly] = stem;
       }
     } catch (_) {}
 
@@ -139,13 +145,23 @@ class PodcastPipeline {
       final txtPath = '$podDir\\$name.txt';
       var hasSrt = srtPath != null;
       var hasTxt = File(txtPath).existsSync();
-      // Fuzzy match: if exact name fails, check by prefix (30 chars) or EP number.
+      // Canonical match: strip all formatting, compare content characters.
       if (!hasSrt && !hasTxt) {
-        final fuzzy = _fuzzyFindFile(existingStems, name, ep.title);
+        final canonical = _canonicalize(ep.title);
+        final match = canonicalToStem[canonical];
+        if (match != null) {
+          hasTxt = File('$podDir\\$match.txt').existsSync();
+          hasSrt = File('$podDir\\$match.srt').existsSync() || _findSrt(podDir, match) != null;
+          if (hasSrt) srtPath = _findSrt(podDir, match);
+        }
+      }
+      // EP number fallback.
+      if (!hasSrt && !hasTxt) {
+        final fuzzy = _fuzzyFindFile(canonicalToStem.values.toSet(), name, ep.title);
         if (fuzzy != null) {
           hasSrt = fuzzy.endsWith('.srt');
-          hasTxt = fuzzy.endsWith('.txt');
-          if (hasSrt) srtPath = '$podDir\\$fuzzy';
+          hasTxt = File('$podDir\\$fuzzy.txt').existsSync();
+          if (hasSrt) srtPath = '$podDir\\$fuzzy.srt';
         }
       }
       if (hasSrt || hasTxt) {
@@ -294,6 +310,14 @@ class PodcastPipeline {
     }
 
     return null;
+  }
+
+  /// Canonical form: lowercase + strip all non-alphanumeric/non-CJK chars.
+  /// Both Dart XML and Python ET titles will produce the same canonical form.
+  static String _canonicalize(String s) {
+    return s.toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\u4e00-\u9fff\u3400-\u4dbf]'), '')
+        .trim();
   }
 
   static int _commonPrefixLen(String a, String b) {
