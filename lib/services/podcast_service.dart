@@ -44,7 +44,10 @@ class PodcastService {
     if (resp.statusCode != 200) {
       throw Exception('RSS fetch failed (${resp.statusCode})');
     }
-    final doc = XmlDocument.parse(resp.body);
+    // Force UTF-8 decode: http.Response.body may not decode correctly
+    // when Content-Type lacks charset (e.g. SoundOn feeds → Latin-1).
+    final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
+    final doc = XmlDocument.parse(body);
     final channel = doc.findAllElements('channel').firstOrNull;
     if (channel == null) throw Exception('No <channel> in RSS');
     final title = channel.findAllElements('title').firstOrNull?.innerText ?? '';
@@ -78,7 +81,8 @@ class PodcastService {
       'User-Agent': 'playlist-admin/2.0',
     });
     if (resp.statusCode != 200) return null;
-    final doc = XmlDocument.parse(resp.body);
+    final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
+    final doc = XmlDocument.parse(body);
     final items = doc.findAllElements('item').toList();
     if (index < 0 || index >= items.length) return null;
     final item = items[index];
@@ -132,10 +136,11 @@ class PodcastService {
     if (audioUrl == null || audioUrl.isEmpty) throw Exception('No audio URL found');
 
     // Get title from RSS.
-    final resp = await http.get(Uri.parse(rssUrl), headers: {
+    final resp2 = await http.get(Uri.parse(rssUrl), headers: {
       'User-Agent': 'playlist-admin/2.0',
     });
-    final doc = XmlDocument.parse(resp.body);
+    final body2 = utf8.decode(resp2.bodyBytes, allowMalformed: true);
+    final doc = XmlDocument.parse(body2);
     final items = doc.findAllElements('item').toList();
     final title = index < items.length
         ? items[index].findAllElements('title').firstOrNull?.innerText ?? 'episode_$index'

@@ -197,15 +197,6 @@ class PodcastPipeline {
       onLog('  無新集數 (${alreadyHave} 集已處理過)');
       return;
     }
-    // If 80%+ of episodes already have txt files, the remaining are just
-    // title-encoding mismatches between Dart XML and old Python ET.
-    // Skip them to avoid unnecessary re-downloading.
-    final txtCount = Directory(podDir).listSync().whereType<File>()
-        .where((f) => f.path.endsWith('.txt') && f.lengthSync() > 50).length;
-    if (txtCount >= episodes.length * 0.8 && tasks.length < episodes.length * 0.5) {
-      onLog('  已有 $txtCount/${episodes.length} 集逐字稿 (${tasks.length} 集標題不匹配但已足夠)');
-      return;
-    }
     onLog('  需處理: ${tasks.length} 集 (×4 並行)');
     final total = tasks.length;
     final groqQueue = <_PodTask>[];

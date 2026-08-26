@@ -12,6 +12,7 @@ import '../services/file_renamer.dart';
 import '../services/playlist_parser.dart';
 import '../services/lufs_service.dart';
 import '../services/rag_service.dart';
+import '../services/youtube_service.dart';
 
 class PipelineOrchestrator {
   final AppConfig config;
@@ -85,88 +86,98 @@ class PipelineOrchestrator {
     final musicDir = Directory(config.musicPath);
     await musicDir.create(recursive: true);
 
-    // Load snapshot to get song list
-    final snapFile = File('${config.basePath}\\original_snapshot.json');
+    // Load snapshot_cache.json (built by Step 1 via SnapshotManager).
+    final snapFile = File('${config.basePath}\\snapshot_cache.json');
     if (!await snapFile.exists()) {
-      onLog('找不到 original_snapshot.json，跳過下載');
+      onLog('找不到 snapshot_cache.json，跳過下載');
       progress(100); return;
     }
     final snap = jsonDecode(await snapFile.readAsString()) as Map<String, dynamic>;
     final playlists = snap['playlists'] as Map<String, dynamic>? ?? {};
 
-    // Collect all unique songs from playlists
+    // Collect all unique songs from playlists.
     final allSongs = <String>{};
-    for (final tracks in playlists.values) {
-      for (final t in (tracks as List<dynamic>)) {
+    for (final pl in playlists.values) {
+      final tracks = (pl as Map<String, dynamic>)['tracks'] as List<dynamic>? ?? [];
+      for (final t in tracks) {
         allSongs.add(t as String);
       }
     }
+    if (allSongs.isEmpty) {
+      onLog('無歌曲需下載');
+      progress(100); return;
+    }
     onLog('播放清單共 ${allSongs.length} 首歌曲');
 
-    // Check which already exist in musicPath
+    // Check which already exist in musicPath.
     final existing = <String>{};
     if (await musicDir.exists()) {
       await for (final f in musicDir.list()) {
         if (f is File) {
           final stem = File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-          existing.add(stem);
+          existing.add(stem.toLowerCase());
         }
       }
     }
-    onLog('已有 ${existing.length} 首，需下載 ${allSongs.length - existing.length} 首');
+    final missing = allSongs.where((s) => !existing.contains(s.toLowerCase())).toList();
+    onLog('已有 ${existing.length} 首，需下載 ${missing.length} 首');
 
-    if (existing.length >= allSongs.length) {
+    if (missing.isEmpty) {
       onLog('所有歌曲已下載');
       progress(100); return;
     }
 
-    // Download missing songs via Python bridge
-    final bridge = _findBridge();
-    if (bridge.isEmpty) {
-      onLog('找不到 flutter_download_bridge.py');
-      progress(100); return;
-    }
-
+    // Download missing songs using native YoutubeService + ffmpeg.
     int done = 0;
     int ok = 0;
     int fail = 0;
-    final total = allSongs.length;
-    for (final song in allSongs) {
+    final total = missing.length;
+    final ffmpeg = config.ffmpegPath.isNotEmpty ? config.ffmpegPath : 'ffmpeg';
+    final yt = YoutubeService.instance;
+
+    for (final song in missing) {
       if (state.isCancelled) return;
       await state.waitIfPaused();
       if (state.isCancelled) return;
 
-      final stem = song.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      if (existing.contains(stem)) {
-        done++;
-        continue;
-      }
+      final safeName = song.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final outPath = '${musicDir.path}\\$safeName.mp3';
 
       try {
-        final env = Map<String, String>.from(Platform.environment);
-        env['PYTHONIOENCODING'] = 'utf-8';
+        final result = await yt.resolveStream(song);
+        if (result == null) {
+          onLog('  ❌ 找不到: $song');
+          fail++;
+          done++;
+          progress((done / total * 100).toDouble());
+          continue;
+        }
+        final tmpPath = '${musicDir.path}\\dl_${safeName.hashCode.toRadixString(16)}.mp3';
         final proc = await Process.start(
-          'python',
-          [bridge, 'download-song', song, config.musicPath, 'mp3'],
+          ffmpeg,
+          ['-y', '-i', result.audioUrl, '-vn', '-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2', tmpPath],
           runInShell: true,
-          workingDirectory: config.basePath,
-          environment: env,
         );
-        // Consume output to prevent blocking
-        proc.stdout.transform(utf8.decoder).drain();
-        proc.stderr.transform(utf8.decoder).drain();
-        final exitCode = await proc.exitCode;
-        if (exitCode == 0) { ok++; } else { fail++; }
+        final code = await proc.exitCode.timeout(
+          const Duration(seconds: 90),
+          onTimeout: () { proc.kill(); return -1; },
+        );
+        if (code == 0 && File(tmpPath).existsSync()) {
+          if (File(outPath).existsSync()) await File(outPath).delete();
+          await File(tmpPath).rename(outPath);
+          ok++;
+        } else {
+          fail++;
+        }
       } catch (e) {
         fail++;
       }
       done++;
-      if (done % 10 == 0 || done == total) {
-        onLog('  [$done/$total] 成功 $ok，失敗 $fail');
-        progress(done / total * 100);
-      }
+      progress((done / total * 100).toDouble());
     }
-    onLog('下載完成: 成功 $ok，失敗 $fail');
+
+    onLog('下載完成: $ok 成功, $fail 失敗 (共 $total 首)');
+    progress(100);
   }
 
   String _findBridge() {
