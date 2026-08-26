@@ -200,23 +200,17 @@ class PipelineOrchestrator {
     await Directory(config.playlistsPath).create(recursive: true);
 
     final scraper = SpotifyScraper(log: onLog, playlistsPath: config.playlistsPath, libraryPath: config.libraryPath);
-    final plNames = await scraper.scrapeAll(urls);
+    final plResults = await scraper.scrapeAll(urls);
 
-    // Snapshot: detect removed songs per playlist
+    // Snapshot: save ALL track names from scraper (not just resolved ones from m3u8).
     int totalRemoved = 0;
-    for (final plName in plNames) {
-      final plFile = File('${config.playlistsPath}\\$plName.m3u8');
-      if (!await plFile.exists()) continue;
-      try {
-        final tracks = PlaylistParser.parseTrackNames(plFile.path);
-        if (tracks.isEmpty) continue;
-        final removed = SnapshotManager.processPlaylist(plName, tracks);
-        if (removed > 0) {
-          onLog('  📋 $plName: 偵測到 $removed 首已移除歌曲');
-          totalRemoved += removed;
-        }
-      } catch (e) {
-        onLog('  ⚠️ 無法處理 $plName 快照: $e');
+    for (final entry in plResults.entries) {
+      final plName = entry.key;
+      final allTracks = entry.value;
+      final removed = SnapshotManager.processPlaylist(plName, allTracks);
+      if (removed > 0) {
+        onLog('  📋 $plName: 偵測到 $removed 首已移除歌曲');
+        totalRemoved += removed;
       }
     }
     if (totalRemoved > 0) {

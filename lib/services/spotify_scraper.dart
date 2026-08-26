@@ -104,20 +104,20 @@ class SpotifyScraper {
     return null;
   }
 
-  Future<List<String>> scrapeAll(List<String> urls) async {
-    final plNames = <String>[];
+  Future<Map<String, List<String>>> scrapeAll(List<String> urls) async {
+    final results = <String, List<String>>{};
     int processed = 0;
     for (final url in urls) {
       processed++;
       log('[$processed/${urls.length}] 處理: $url');
       try {
-        final name = await _scrapeOne(url);
-        if (name != null) plNames.add(name);
+        final result = await _scrapeOne(url);
+        if (result != null) results[result.$1] = result.$2;
       } catch (e) {
         log('  錯誤: $e');
       }
     }
-    return plNames;
+    return results;
   }
 
   Map<String, dynamic>? _getPath(Map<String, dynamic> obj, List<String> keys) {
@@ -132,7 +132,7 @@ class SpotifyScraper {
     return current;
   }
 
-  Future<String?> _scrapeOne(String url) async {
+  Future<(String, List<String>)?> _scrapeOne(String url) async {
     final spId = url.split('playlist/').last.split('?').first;
     final embedUrl = 'https://open.spotify.com/embed/playlist/$spId';
 
@@ -265,8 +265,11 @@ class SpotifyScraper {
         }
         buffer.writeln(relPath);
         resolved++;
+      } else {
+        // Write unmatched track too — snapshot needs full track list for download step.
+        buffer.writeln('#EXTINF:-1,$t');
+        buffer.writeln('#NEEDS_DOWNLOAD:$t');
       }
-      // skip unmatched — consistent with Python pipeline behavior
     }
     await File(m3uPath).writeAsString(buffer.toString(), flush: true);
     log('  已儲存: $plName.m3u8 (已解析路徑: $resolved/${tracks.length})');
@@ -274,7 +277,7 @@ class SpotifyScraper {
     // Update config with the real playlist name
     ConfigService.instance.config.urlNames[url] = plName;
     ConfigService.instance.save();
-    return plName;
+    return (plName, tracks);
   }
 
   String _relativePath(String absPath, String relativeTo) {
