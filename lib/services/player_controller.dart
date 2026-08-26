@@ -150,7 +150,8 @@ class PlayerController {
     if (_coverPath == null) {
       _loadEmbeddedArtwork(path);
     }
-    await _player.open(Media('file://$path'));
+    final uri = Uri.file(path).toString();
+    await _player.open(Media(uri));
     _pushSmtc();
   }
 
