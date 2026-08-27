@@ -132,7 +132,7 @@ class PipelineOrchestrator {
     int ok = 0;
     int fail = 0;
     final total = missing.length;
-    final ffmpeg = config.ffmpegPath.isNotEmpty ? config.ffmpegPath : 'ffmpeg';
+        final ffmpeg = config.resolvedFfmpegPath;
     final yt = YoutubeService.instance;
 
     for (final song in missing) {

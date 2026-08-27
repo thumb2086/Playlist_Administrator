@@ -167,9 +167,7 @@ class StreamServer {
       // 2. Download + convert to mp3 via ffmpeg.
       final outBase = '${cacheDir.path}\\dl_${safeName.hashCode.toRadixString(16)}';
       final mp3Path = '$outBase.mp3';
-      final ffmpeg = ConfigService.instance.config.ffmpegPath.isNotEmpty
-          ? ConfigService.instance.config.ffmpegPath
-          : 'ffmpeg';
+      final ffmpeg = ConfigService.instance.config.resolvedFfmpegPath;
 
       final proc = await Process.start(
         ffmpeg,
@@ -210,9 +208,7 @@ class StreamServer {
       return;
     }
 
-    final ffmpeg = ConfigService.instance.config.ffmpegPath.isNotEmpty
-        ? ConfigService.instance.config.ffmpegPath
-        : 'ffmpeg';
+    final ffmpeg = ConfigService.instance.config.resolvedFfmpegPath;
 
     final args = [
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',

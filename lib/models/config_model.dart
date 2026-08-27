@@ -101,6 +101,54 @@ class AppConfig {
   String get podcastsPath => '$basePath${Platform.pathSeparator}podcasts';
   String get toolsPath => '$basePath${Platform.pathSeparator}tools';
 
+  /// Resolve ffmpeg path — try config first, then PATH, then common locations.
+  static String resolveFfmpeg(String configPath) {
+    if (configPath.isNotEmpty && File(configPath).existsSync()) return configPath;
+    // Try the configured path relative to basePath.
+    if (configPath.isNotEmpty) {
+      final resolved = File(configPath);
+      if (resolved.existsSync()) return resolved.absolute.path;
+    }
+    // Try PATH.
+    try {
+      final result = Process.runSync('where', ['ffmpeg']);
+      if (result.exitCode == 0) {
+        final lines = (result.stdout as String).trim().split('\n');
+        if (lines.isNotEmpty && lines.first.trim().isNotEmpty) {
+          return lines.first.trim();
+        }
+      }
+    } catch (_) {}
+    // Common Windows locations.
+    final candidates = [
+      r'C:\ffmpeg\bin\ffmpeg.exe',
+      r'C:\tools\ffmpeg.exe',
+      r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
+      r'C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe',
+    ];
+    // WinGet package location.
+    final userProfile = Platform.environment['LOCALAPPDATA'] ?? '';
+    if (userProfile.isNotEmpty) {
+      final wingetDir = Directory('$userProfile\\Microsoft\\WinGet\\Packages');
+      if (wingetDir.existsSync()) {
+        for (final d in wingetDir.listSync().whereType<Directory>()) {
+          if (d.path.toLowerCase().contains('ffmpeg')) {
+            for (final f in d.listSync(recursive: true).whereType<File>()) {
+              if (f.path.toLowerCase().endsWith('ffmpeg.exe')) return f.path;
+            }
+          }
+        }
+      }
+    }
+    for (final c in candidates) {
+      if (File(c).existsSync()) return c;
+    }
+    return 'ffmpeg'; // fallback to PATH
+  }
+
+  /// Getter that auto-resolves ffmpeg path.
+  String get resolvedFfmpegPath => resolveFfmpeg(ffmpegPath);
+
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
         basePath: json['base_path'] as String? ?? '',
         language: json['language'] as String? ?? 'zh-TW',

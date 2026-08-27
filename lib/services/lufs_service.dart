@@ -46,22 +46,8 @@ class LufsService {
 
   Future<String> _resolveFfmpeg() async {
     if (_ffmpegPath != null) return _ffmpegPath!;
-    final cfg = ConfigService.instance.config.ffmpegPath;
-    if (cfg.isNotEmpty && File(cfg).existsSync()) {
-      _ffmpegPath = cfg; return cfg;
-    }
-    final pathEnv = Platform.environment['PATH'] ?? '';
-    for (final dir in pathEnv.split(';')) {
-      if (dir.trim().isEmpty) continue;
-      try {
-        final candidate = '${dir.trim()}\\ffmpeg.exe';
-        if (File(candidate).existsSync()) {
-          _ffmpegPath = candidate; return candidate;
-        }
-      } catch (_) {}
-    }
-    _ffmpegPath = 'ffmpeg';
-    return 'ffmpeg';
+    _ffmpegPath = ConfigService.instance.config.resolvedFfmpegPath;
+    return _ffmpegPath!;
   }
 
   /// Resolve a playlist entry path to an absolute file path.

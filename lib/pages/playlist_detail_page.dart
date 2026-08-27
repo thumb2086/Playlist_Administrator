@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -160,12 +161,15 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       debugPrint('[DL] $index resolved: ${streamResult.title}');
       if (mounted) setState(() { _progress[index] = 0.3; });
       final tmpPath = '${musicDir.path}\\dl_${finalName.hashCode.toRadixString(16)}.mp3';
-      final ffmpeg = cfg.ffmpegPath.isNotEmpty ? cfg.ffmpegPath : 'ffmpeg';
+      final ffmpeg = cfg.resolvedFfmpegPath;
+      debugPrint('[DL] $index ffmpeg: $ffmpeg');
       final proc = await Process.start(
         ffmpeg,
         ['-y', '-i', streamResult.audioUrl, '-vn', '-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2', tmpPath],
         runInShell: true,
       );
+      // Capture stderr for debugging.
+      final stderrOutput = await proc.stderr.transform(utf8.decoder).join();
       if (mounted) setState(() { _progress[index] = 0.5; });
       final code = await proc.exitCode.timeout(
         const Duration(seconds: 90), onTimeout: () { proc.kill(); return -1; },
@@ -176,7 +180,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         debugPrint('[DL] $index OK: $finalPath');
         if (mounted) { _localTracks.add(index); setState(() { _downloaded.add(index); _progress[index] = 1.0; }); }
       } else {
-        debugPrint('[DL] $index ffmpeg FAILED exit=$code for: ${item.audioQuery}');
+        debugPrint('[DL] $index ffmpeg FAILED exit=$code stderr=$stderrOutput');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('下載失敗: ${item.name} (exit=$code)'), duration: const Duration(seconds: 3)));
+        }
       }
     } catch (e) {
       debugPrint('[DL] error: $e');
