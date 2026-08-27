@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/services.dart';
 import '../models/playlist_item.dart';
 import '../services/player_controller.dart';
@@ -235,8 +236,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
               width: 140, height: 140,
               color: AppColors.surfaceLight,
               child: widget.coverUrl != null
-                  ? Image.network(widget.coverUrl!, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Icon(
+                  ? CachedNetworkImage(imageUrl: widget.coverUrl!, fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(color: AppColors.surfaceLight),
+                      errorWidget: (_, __, ___) => Icon(
                           widget.isPodcast ? Icons.podcasts_rounded : Icons.music_note_rounded,
                           color: AppColors.textMuted, size: 48))
                   : Icon(
@@ -358,8 +360,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
               width: 40, height: 40,
               color: AppColors.surfaceLight,
               child: (item.coverUrl ?? widget.coverUrl) != null
-                  ? Image.network(item.coverUrl ?? widget.coverUrl!, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Icon(Icons.music_note_rounded, size: 16, color: AppColors.textMuted))
+                  ? CachedNetworkImage(imageUrl: item.coverUrl ?? widget.coverUrl!, fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(color: AppColors.surfaceLight),
+                      errorWidget: (_, __, ___) => const Icon(Icons.music_note_rounded, size: 16, color: AppColors.textMuted))
                   : const Icon(Icons.music_note_rounded, size: 16, color: AppColors.textMuted),
             ),
           ),

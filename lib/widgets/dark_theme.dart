@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class AppColors {
   // Dark theme colors
@@ -216,4 +217,50 @@ ThemeData buildLightTheme() {
       labelMedium: TextStyle(color: AppColors.textSecondaryLight, fontSize: 12, fontWeight: FontWeight.w500),
     ),
   );
+}
+
+/// Cached network image with fallback — replaces all Image.network calls.
+class CachedCover extends StatelessWidget {
+  final String? url;
+  final double? width;
+  final double? height;
+  final BoxFit fit;
+  final IconData icon;
+  final double iconSize;
+
+  const CachedCover({
+    super.key,
+    this.url,
+    this.width,
+    this.height,
+    this.fit = BoxFit.cover,
+    this.icon = Icons.music_note_rounded,
+    this.iconSize = 24,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (url == null || url!.isEmpty) {
+      return _fallback;
+    }
+    return CachedNetworkImage(
+      imageUrl: url!,
+      width: width,
+      height: height,
+      fit: fit,
+      placeholder: (_, __) => Container(
+        width: width, height: height,
+        color: AppColors.surfaceLight,
+        child: _fallback,
+      ),
+      errorWidget: (_, __, ___) => Container(
+        width: width, height: height,
+        color: AppColors.surfaceLight,
+        child: _fallback,
+      ),
+      fadeInDuration: const Duration(milliseconds: 200),
+    );
+  }
+
+  Widget get _fallback => Icon(icon, color: AppColors.textMuted, size: iconSize);
 }

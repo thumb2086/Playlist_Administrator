@@ -11,14 +11,17 @@ class YoutubeService {
   YoutubeService._();
   static final instance = YoutubeService._();
 
-  final YoutubeExplode _yt = YoutubeExplode();
   bool _closed = false;
+
+  /// Create fresh instance per call to avoid stale connections.
+  YoutubeExplode _fresh() => YoutubeExplode();
 
   /// 搜尋 YouTube 並回傳前 N 個結果。
   Future<List<YoutubeSearchResult>> search(String query, {int limit = 5}) async {
     if (_closed) return [];
+    final yt = _fresh();
     try {
-      final searchList = await _yt.search.search(query);
+      final searchList = await yt.search.search(query);
       final results = searchList.take(limit).map((v) => YoutubeSearchResult(
         videoId: v.id.value,
         title: v.title,
@@ -31,6 +34,8 @@ class YoutubeService {
     } catch (e) {
       _log.e('YouTube 搜尋失敗: $e');
       return [];
+    } finally {
+      yt.close();
     }
   }
 
@@ -38,8 +43,9 @@ class YoutubeService {
   /// 回傳可直接播放的 HTTP URL。
   Future<String?> getAudioUrl(String videoId) async {
     if (_closed) return null;
+    final yt = _fresh();
     try {
-      final manifest = await _yt.videos.streams.getManifest(VideoId(videoId));
+      final manifest = await yt.videos.streams.getManifest(VideoId(videoId));
       final audioOnly = manifest.audioOnly.sortByBitrate();
       if (audioOnly.isEmpty) return null;
       final best = audioOnly.last;
@@ -48,6 +54,8 @@ class YoutubeService {
     } catch (e) {
       _log.e('YouTube 取串流失敗: $e');
       return null;
+    } finally {
+      yt.close();
     }
   }
 
@@ -83,7 +91,6 @@ class YoutubeService {
 
   void close() {
     _closed = true;
-    _yt.close();
   }
 }
 

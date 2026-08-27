@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
 import '../app.dart';
 import '../models/playlist_item.dart';
@@ -370,8 +371,9 @@ class _HomePageState extends State<HomePage> {
                   SizedBox(
                     width: 110, height: 110,
                     child: c.coverUrl != null
-                        ? Image.network(c.coverUrl!, fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
+                        ? CachedNetworkImage(imageUrl: c.coverUrl!, fit: BoxFit.cover,
+                            placeholder: (_, __) => Container(color: AppColors.surfaceLight),
+                            errorWidget: (_, __, ___) => Container(
                                 color: AppColors.surfaceLight,
                                 child: Icon(isPodcast ? Icons.podcasts_rounded : Icons.music_note_rounded,
                                     color: AppColors.textMuted)))
@@ -660,8 +662,9 @@ class _PlaylistSheet extends StatelessWidget {
                 leading: ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: t.coverUrl != null
-                      ? Image.network(t.coverUrl!, width: 36, height: 36, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
+                      ? CachedNetworkImage(imageUrl: t.coverUrl!, width: 36, height: 36, fit: BoxFit.cover,
+                          placeholder: (_, __) => Container(width: 36, height: 36, color: AppColors.surfaceLight),
+                          errorWidget: (_, __, ___) => Container(
                               width: 36, height: 36, color: AppColors.surfaceLight,
                               child: const Icon(Icons.music_note_rounded, size: 16, color: AppColors.textMuted)))
                       : Container(width: 36, height: 36, color: AppColors.surfaceLight,

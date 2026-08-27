@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/config_service.dart';
 import '../services/player_controller.dart';
 import 'dark_theme.dart';
@@ -40,8 +41,9 @@ class _PlayerBarState extends State<PlayerBar> {
           errorBuilder: (_, __, ___) => const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24));
     }
     if (cp.startsWith('http')) {
-      return Image.network(cp, fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24));
+      return CachedNetworkImage(imageUrl: cp, fit: BoxFit.cover,
+          placeholder: (_, __) => const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24),
+          errorWidget: (_, __, ___) => const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 24));
     }
     if (File(cp).existsSync()) {
       return Image.file(File(cp), fit: BoxFit.cover,
