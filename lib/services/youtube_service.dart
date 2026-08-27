@@ -52,25 +52,33 @@ class YoutubeService {
   }
 
   /// 根據查詢一次搞定：搜尋 → 取最佳音訊 URL。
-  /// 回傳 best match 的 URL 和元資料。
+  /// 回傳 best match 的 URL 和元資料。自動重試 1 次。
   Future<YoutubeStreamResult?> resolveStream(String query) async {
-    final results = await search(query, limit: 5)
-        .timeout(const Duration(seconds: 20), onTimeout: () => []);
-    if (results.isEmpty) return null;
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        final results = await search(query, limit: 5)
+            .timeout(const Duration(seconds: 20), onTimeout: () => []);
+        if (results.isEmpty) continue;
 
-    final best = results.first;
-    final url = await getAudioUrl(best.videoId)
-        .timeout(const Duration(seconds: 15), onTimeout: () => null);
-    if (url == null) return null;
+        final best = results.first;
+        final url = await getAudioUrl(best.videoId)
+            .timeout(const Duration(seconds: 15), onTimeout: () => null);
+        if (url == null) continue;
 
-    return YoutubeStreamResult(
-      videoId: best.videoId,
-      title: best.title,
-      author: best.author,
-      duration: best.duration,
-      thumbnailUrl: best.thumbnailUrl,
-      audioUrl: url,
-    );
+        return YoutubeStreamResult(
+          videoId: best.videoId,
+          title: best.title,
+          author: best.author,
+          duration: best.duration,
+          thumbnailUrl: best.thumbnailUrl,
+          audioUrl: url,
+        );
+      } catch (e) {
+        _log.e('YouTube resolve 失敗 (attempt ${attempt + 1}): $e');
+        if (attempt == 0) await Future.delayed(const Duration(seconds: 1));
+      }
+    }
+    return null;
   }
 
   void close() {
