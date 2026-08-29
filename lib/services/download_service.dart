@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'config_service.dart';
+import 'youtube_service.dart';
 
 class MissingFlacSong {
   final String name;
@@ -33,6 +34,9 @@ class DownloadService {
     return '';
   }
 
+  // ── 原生下載（取代 Python bridge）─────────────────────
+
+  /// 搜尋 YouTube 並下載歌曲（原生 Dart，取代 bridge download-song）。
   Future<void> downloadSong({
     required String songName,
     String? libraryPath,
@@ -40,53 +44,36 @@ class DownloadService {
     required void Function(String log) onLog,
     required void Function(double progress) onProgress,
   }) async {
-    final bridge = _bridgePath;
-    if (bridge.isEmpty) throw Exception('Base path not configured');
-
-    // Download to music library directory
     final cfg = ConfigService.instance.config;
     final effectivePath = libraryPath ?? cfg.musicPath;
+    final safeName = songName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final outPath = '$effectivePath\\$safeName.$format';
 
-    final env = Map<String, String>.from(Platform.environment);
-    env['PYTHONIOENCODING'] = 'utf-8';
-    final proc = await Process.start(
-      _pythonPath,
-      [bridge, 'download-song', songName, effectivePath, format],
-      runInShell: true,
-      workingDirectory: ConfigService.instance.config.basePath,
-      environment: env,
-    );
+    onLog('🔍 搜尋: $songName');
+    onProgress(0.05);
 
-    proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
-      (line) {
-        if (line.trim().isEmpty) return;
-        try {
-          final json = jsonDecode(line.trim()) as Map<String, dynamic>;
-          final type = json['type'] as String?;
-          if (type == 'log') {
-            onLog(json['message'] as String? ?? '');
-          } else if (type == 'progress') {
-            final pct = (json['percent'] as num?)?.toDouble() ?? 0;
-            onProgress(pct / 100);
-          } else if (type == 'complete') {
-            onLog('✅ 下載完成: ${json['path']}');
-            onProgress(1.0);
-          } else if (type == 'error') {
-            onLog('❌ ${json['message']}');
-            throw Exception(json['message'] as String? ?? 'Download failed');
-          }
-        } catch (e) {
-          onLog(line);
-        }
-      },
-    );
+    try {
+      final result = await YoutubeService.instance.downloadBySearch(
+        songName,
+        outputPath: outPath,
+        format: format,
+        onProgress: (p) => onProgress(p),
+      );
 
-    final exitCode = await proc.exitCode;
-    if (exitCode != 0) {
-      onLog('❌ Python 程序異常退出 (code: $exitCode)');
+      if (result != null) {
+        onLog('✅ 下載完成: $result');
+        onProgress(1.0);
+      } else {
+        onLog('❌ 下載失敗: $songName');
+        throw Exception('下載失敗: $songName');
+      }
+    } catch (e) {
+      onLog('❌ $e');
+      rethrow;
     }
   }
 
+  /// 從 YouTube URL 下載音訊（原生 Dart，取代 bridge download-youtube）。
   Future<void> downloadYouTube({
     required String url,
     required String outputPath,
@@ -94,48 +81,31 @@ class DownloadService {
     required void Function(String log) onLog,
     required void Function(double progress) onProgress,
   }) async {
-    final bridge = _bridgePath;
-    if (bridge.isEmpty) throw Exception('Base path not configured');
+    onLog('🔗 解析 YouTube URL...');
+    onProgress(0.1);
 
-    final env = Map<String, String>.from(Platform.environment);
-    env['PYTHONIOENCODING'] = 'utf-8';
-    final proc = await Process.start(
-      _pythonPath,
-      [bridge, 'download-youtube', url, outputPath, format],
-      runInShell: true,
-      workingDirectory: ConfigService.instance.config.basePath,
-      environment: env,
-    );
+    try {
+      final result = await YoutubeService.instance.downloadFromUrl(
+        url,
+        outputPath: outputPath,
+        format: format,
+        onProgress: (p) => onProgress(p),
+      );
 
-    proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
-      (line) {
-        if (line.trim().isEmpty) return;
-        try {
-          final json = jsonDecode(line.trim()) as Map<String, dynamic>;
-          final type = json['type'] as String?;
-          if (type == 'log') {
-            onLog(json['message'] as String? ?? '');
-          } else if (type == 'progress') {
-            final pct = (json['percent'] as num?)?.toDouble() ?? 0;
-            onProgress(pct / 100);
-          } else if (type == 'complete') {
-            onLog('✅ 下載完成: ${json['path']}');
-            onProgress(1.0);
-          } else if (type == 'error') {
-            onLog('❌ ${json['message']}');
-            throw Exception(json['message'] as String? ?? 'Download failed');
-          }
-        } catch (e) {
-          onLog(line);
-        }
-      },
-    );
-
-    final exitCode = await proc.exitCode;
-    if (exitCode != 0) {
-      onLog('❌ Python 程序異常退出 (code: $exitCode)');
+      if (result != null) {
+        onLog('✅ 下載完成: $result');
+        onProgress(1.0);
+      } else {
+        onLog('❌ 下載失敗: $url');
+        throw Exception('下載失敗: $url');
+      }
+    } catch (e) {
+      onLog('❌ $e');
+      rethrow;
     }
   }
+
+  // ── 仍需 Python bridge 的命令 ─────────────────────────
 
   Future<List<MissingFlacSong>> listMissing(String format, {
     required void Function(String log) onLog,

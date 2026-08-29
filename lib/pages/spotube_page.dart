@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/config_service.dart';
+import '../services/download_service.dart';
 import '../services/i18n.dart';
 import '../widgets/dark_theme.dart';
 
@@ -114,28 +115,18 @@ class _SpotubePageState extends State<SpotubePage> {
       return;
     }
 
-    // Download via bridge
+    // Download using native Dart
     for (final song in missing) {
       if (!_running) break;
       try {
-        final env = Map<String, String>.from(Platform.environment);
-        env['PYTHONIOENCODING'] = 'utf-8';
-        final proc = await Process.start(
-          'python',
-          [bridge, 'download-song', song, cfg.musicPath, 'mp3'],
-          runInShell: true,
-          workingDirectory: cfg.basePath,
-          environment: env,
+        await DownloadService.instance.downloadSong(
+          songName: song,
+          libraryPath: cfg.musicPath,
+          format: 'mp3',
+          onLog: _log,
+          onProgress: (_) {},
         );
-        _proc = proc;
-        proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
-          if (line.trim().isNotEmpty) _log(line);
-        });
-        proc.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
-          if (line.trim().isNotEmpty) _log(line);
-        });
-        final exitCode = await proc.exitCode;
-        if (exitCode == 0) { _ok++; } else { _fail++; }
+        _ok++;
       } catch (e) {
         _fail++;
         _log('❌ $song: $e');

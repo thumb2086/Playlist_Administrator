@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'config_service.dart';
 import 'groq_native_service.dart';
 
 class GroqService {
@@ -48,13 +47,16 @@ class GroqService {
         if (eq <= 0) continue;
         final k = l.substring(0, eq).trim();
         final v = l.substring(eq + 1).trim();
-        if (k == 'GROQ_API_KEY' && v.isNotEmpty) _keysCsv = v;
-        else if (k == 'GROQ_MODEL' && v.isNotEmpty) _model = v;
+        if (k == 'GROQ_API_KEY' && v.isNotEmpty) {
+          _keysCsv = v;
+        } else if (k == 'GROQ_MODEL' && v.isNotEmpty) {
+          _model = v;
+        }
       }
     } catch (e) { debugPrint('[Groq] .env error: $e'); }
   }
 
-  /// Native Groq transcription — no Python bridge needed.
+  /// Native Groq transcription — auto-chunks files > 20MB, no Python bridge needed.
   Future<String> transcribeFile({
     required String filePath, required String model, String? language,
     void Function(String chunk, double pct)? onChunk,
@@ -67,7 +69,10 @@ class GroqService {
     svc.setApiKey(_keysCsv);
 
     onChunk?.call('正在上傳音檔…', 0.1);
-    final text = await svc.transcribe(filePath, model: model, language: language);
+    final text = await svc.transcribeAutoChunk(
+      filePath, model: model, language: language,
+      onChunk: (msg, pct) => onChunk?.call(msg, pct),
+    );
     onChunk?.call('轉錄完成', 1.0);
     return text;
   }
