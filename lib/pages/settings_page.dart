@@ -11,7 +11,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController _basePathCtrl, _workersCtrl, _ffmpegCtrl,
-      _lyricsFolderCtrl, _discordAppIdCtrl;
+      _lyricsFolderCtrl, _discordAppIdCtrl, _groqApiKeyCtrl;
 
   void _onConfigChanged() { if (mounted) setState(() {}); }
 
@@ -24,6 +24,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _ffmpegCtrl = TextEditingController(text: c.ffmpegPath);
     _lyricsFolderCtrl = TextEditingController(text: c.lyricsFolderName);
     _discordAppIdCtrl = TextEditingController(text: c.discordApplicationId);
+    _groqApiKeyCtrl = TextEditingController(text: c.groqApiKey);
     I18N.instance.addListener(_onConfigChanged);
     ConfigService.instance.addListener(_onConfigChanged);
   }
@@ -33,7 +34,7 @@ class _SettingsPageState extends State<SettingsPage> {
     I18N.instance.removeListener(_onConfigChanged);
     ConfigService.instance.removeListener(_onConfigChanged);
     _basePathCtrl.dispose(); _workersCtrl.dispose(); _ffmpegCtrl.dispose();
-    _lyricsFolderCtrl.dispose(); _discordAppIdCtrl.dispose();
+    _lyricsFolderCtrl.dispose(); _discordAppIdCtrl.dispose(); _groqApiKeyCtrl.dispose();
     super.dispose();
   }
 
@@ -44,6 +45,7 @@ class _SettingsPageState extends State<SettingsPage> {
     c.ffmpegPath = _ffmpegCtrl.text;
     c.lyricsFolderName = _lyricsFolderCtrl.text.trim().isEmpty ? 'Lyrics' : _lyricsFolderCtrl.text.trim();
     c.discordApplicationId = _discordAppIdCtrl.text.trim();
+    c.groqApiKey = _groqApiKeyCtrl.text.trim();
     ConfigService.instance.save();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('settings.saved')), duration: const Duration(seconds: 1)));
   }
@@ -83,6 +85,15 @@ class _SettingsPageState extends State<SettingsPage> {
         const SizedBox(height: 12),
         _Section(t('settings.lyrics_section'), [
           _Field(t('settings.lyrics_folder'), _lyricsFolderCtrl, 'Lyrics'),
+        ]),
+        const SizedBox(height: 12),
+        _Section('Groq API (Podcast 轉錄)', [
+          _Field('API Key (多個用逗號分隔)', _groqApiKeyCtrl, 'gsk_xxx,gsk_yyy'),
+          const SizedBox(height: 4),
+          Text(
+            '沒有 key 也能用，Podcast 會改用 YouTube 字幕',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+          ),
         ]),
         const SizedBox(height: 12),
         _Section('Discord Rich Presence', [
