@@ -249,20 +249,37 @@ class GroqNativeService {
     final chunks = await _splitAudio(filePath);
     if (chunks.isEmpty) throw Exception('音檔分段失敗：無法產生任何分段');
 
-    onChunk?.call('共 ${chunks.length} 段，開始轉錄…', 0.1);
+    onChunk?.call('共 ${chunks.length} 段，4 並行轉錄中…', 0.1);
 
-    final texts = <String>[];
-    for (int i = 0; i < chunks.length; i++) {
-      final pct = 0.1 + (0.9 * (i / chunks.length));
-      onChunk?.call('轉錄第 ${i + 1}/${chunks.length} 段…', pct);
+    // 4 並行轉錄
+    final texts = List<String>.filled(chunks.length, '');
+    int done = 0;
+    int ok = 0;
+
+    Future<void> transcribeOne(int i) async {
       _log.i('  [chunk ${i + 1}/${chunks.length}] ${chunks[i]}');
       try {
         final text = await transcribe(chunks[i], model: model, language: language);
-        if (text.trim().isNotEmpty) texts.add(text);
+        if (text.trim().isNotEmpty) {
+          texts[i] = text;
+          ok++;
+        }
       } catch (e) {
         _log.w('  [chunk ${i + 1}] 轉錄失敗: $e');
-        // 繼續處理其他段落，不中斷
       }
+      done++;
+      final pct = 0.1 + (0.9 * (done / chunks.length));
+      onChunk?.call('轉錄中 $done/${chunks.length} 段…', pct);
+    }
+
+    // 分 4 組並行
+    const workers = 4;
+    for (int w = 0; w < workers; w++) {
+      final futures = <Future>[];
+      for (int i = w; i < chunks.length; i += workers) {
+        futures.add(transcribeOne(i));
+      }
+      await Future.wait(futures);
     }
 
     // 清理暫存分段檔案
@@ -271,7 +288,7 @@ class GroqNativeService {
     }
 
     onChunk?.call('轉錄完成', 1.0);
-    return texts.join('\n');
+    return texts.where((t) => t.isNotEmpty).join('\n');
   }
 
   // ── ffmpeg 分段邏輯 ─────────────────────────────────

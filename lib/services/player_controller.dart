@@ -594,6 +594,11 @@ class PlayerController {
   }
 
   void _pushSmtc() {
+    if (_title.isEmpty) {
+      // 無曲目時關閉 SMTC 顯示，避免 Windows 顯示 exe 路徑
+      SmtcService.instance.update(playing: false);
+      return;
+    }
     SmtcService.instance.update(
       title: _title, artist: _artist, artworkUrl: _coverPath,
       playing: _isPlaying, position: _position, duration: _duration,
