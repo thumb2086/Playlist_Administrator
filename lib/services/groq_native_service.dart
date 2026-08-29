@@ -43,6 +43,39 @@ class GroqNativeService {
     if (envKey.isNotEmpty) _keys = [envKey];
   }
 
+  /// 启动时 async 查 proxy（不堵塞第一次请求）。
+  Future<void> preloadProxy() async {
+    if (_proxyResolved) return;
+    // 先查环境变量（不阻塞）
+    for (final name in ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy']) {
+      final v = Platform.environment[name];
+      if (v != null && v.isNotEmpty) {
+        _cachedProxy = v;
+        _proxyResolved = true;
+        return;
+      }
+    }
+    // async 查 Windows Registry（不阻塞 event loop）
+    if (Platform.isWindows) {
+      try {
+        final result = await Process.run('reg', [
+          'query',
+          r'HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
+          '/v', 'ProxyServer',
+        ]);
+        if (result.exitCode == 0) {
+          final output = result.stdout.toString();
+          final match = RegExp(r'ProxyServer\s+REG_SZ\s+(.+)').firstMatch(output);
+          if (match != null) {
+            final proxy = match.group(1)!.trim();
+            _cachedProxy = proxy.contains('://') ? proxy : 'http://$proxy';
+          }
+        }
+      } catch (_) {}
+    }
+    _proxyResolved = true;
+  }
+
   // ── 常量 ──────────────────────────────────────────────
   /// Groq 免費方案音檔大小上限（bytes）
   static const int _maxFileSize = 20 * 1024 * 1024; // 20 MB
@@ -57,39 +90,42 @@ class GroqNativeService {
   static const _retryableStatuses = {0, 429, 500, 502, 503};
 
   // ── 代理 (Proxy) 支援 ────────────────────────────────
-  /// 從環境變數或 Windows Registry 讀取代理設定。
-  static String? _resolveProxy() {
+  String? _cachedProxy;
+  bool _proxyResolved = false;
+  http.Client? _cachedClient;
+
+  /// 從環境變數或 Windows Registry 讀取代理設定（只查一次，結果快取）。
+  String? _resolveProxy() {
+    if (_proxyResolved) return _cachedProxy;
     // 1. 嘗試環境變數
     for (final name in ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy']) {
       final v = Platform.environment[name];
-      if (v != null && v.isNotEmpty) return v;
+      if (v != null && v.isNotEmpty) {
+        _cachedProxy = v;
+        _proxyResolved = true;
+        return _cachedProxy;
+      }
     }
-    // 2. 嘗試 Windows Registry
-    if (Platform.isWindows) {
-      try {
-        final result = Process.runSync('reg', [
-          'query',
-          r'HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-          '/v', 'ProxyServer',
-        ]);
-        if (result.exitCode == 0) {
-          final output = result.stdout.toString();
-          // 格式: ProxyServer    REG_SZ    http://proxy:8080
-          final match = RegExp(r'ProxyServer\s+REG_SZ\s+(.+)').firstMatch(output);
-          if (match != null) {
-            final proxy = match.group(1)!.trim();
-            return proxy.contains('://') ? proxy : 'http://$proxy';
-          }
-        }
-      } catch (_) {}
-    }
-    return null;
+    // 2. 嘗試 Windows Registry（async，不堵塞 event loop）
+    _proxyResolved = true;
+    _cachedProxy = null;
+    return _cachedProxy;
   }
 
-  /// 建立支援代理的 HTTP Client。
+  /// 設定代理 URL（從外部 async 查好後傳入）。
+  void setProxy(String? proxy) {
+    _cachedProxy = proxy;
+    _proxyResolved = true;
+  }
+
+  /// 建立支援代理的 HTTP Client（快取，不重複建立）。
   http.Client _createClient() {
+    if (_cachedClient != null) return _cachedClient!;
     final proxy = _resolveProxy();
-    if (proxy == null) return http.Client();
+    if (proxy == null) {
+      _cachedClient = http.Client();
+      return _cachedClient!;
+    }
 
     try {
       final proxyUri = Uri.parse(proxy);
@@ -101,11 +137,12 @@ class GroqNativeService {
       };
       // 忽略 SSL 憑證錯誤（代理常見問題）
       httpClient.badCertificateCallback = (cert, host, port) => true;
-      return IOClient(httpClient);
+      _cachedClient = IOClient(httpClient);
     } catch (e) {
       _log.w('[Groq] 代理設定解析失敗: $e，使用直接連線');
-      return http.Client();
+      _cachedClient = http.Client();
     }
+    return _cachedClient!;
   }
 
   // ── 錯誤日誌 ─────────────────────────────────────────
@@ -210,7 +247,7 @@ class GroqNativeService {
         }
         rethrow;
       } finally {
-        client?.close();
+        // cached client stays alive; do not close
       }
     }
 
@@ -472,7 +509,7 @@ class GroqNativeService {
         }
         rethrow;
       } finally {
-        client?.close();
+        // cached client stays alive; do not close
       }
     }
 

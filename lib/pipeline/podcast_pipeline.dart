@@ -6,6 +6,7 @@ import '../models/pipeline_step.dart';
 import '../services/config_service.dart';
 import '../services/podcast_service.dart';
 import '../services/groq_service.dart';
+import '../services/groq_native_service.dart';
 import '../services/chinese_converter.dart';
 import '../services/rag_service.dart';
 import '../version.dart';
@@ -61,6 +62,11 @@ class PodcastPipeline {
     }
     final hasGroq = GroqService.instance.apiKey != null &&
         GroqService.instance.apiKey!.isNotEmpty;
+
+    // Async preload proxy (non-blocking)
+    if (hasGroq) {
+      GroqNativeService.instance.preloadProxy();
+    }
 
     onLog('Podcast 訂閱數: ${subs.length}');
     int stepIndex = 0;
