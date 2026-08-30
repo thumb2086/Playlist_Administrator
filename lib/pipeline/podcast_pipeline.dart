@@ -122,8 +122,9 @@ class PodcastPipeline {
     // reset to false so the episode gets re-processed.
     int staleCount = 0;
     final prefix = '$podcastName|';
-    for (final key in cache.keys.toList()) {
-      if (!key.startsWith(prefix)) continue;
+    final keysToCheck = cache.keys.where((k) => k.startsWith(prefix)).toList();
+    for (int ci = 0; ci < keysToCheck.length; ci++) {
+      final key = keysToCheck[ci];
       final entry = cache[key];
       if (entry == null) continue;
       final epTitle = key.substring(prefix.length);
@@ -141,6 +142,8 @@ class PodcastPipeline {
         entry['status'] = '';
         staleCount++;
       }
+      // Yield every 100 entries to keep UI responsive
+      if (ci % 100 == 0) await Future<void>.delayed(Duration.zero);
     }
     if (staleCount > 0) {
       onLog('  ⚠️ 修正 $staleCount 筆過期 cache（檔案已消失）');
@@ -174,6 +177,8 @@ class PodcastPipeline {
 
     for (int i = 0; i < episodes.length; i++) {
       if (state.isCancelled) break;
+      // Yield every 50 episodes to keep UI responsive
+      if (i % 50 == 0 && i > 0) await Future<void>.delayed(Duration.zero);
       final ep = episodes[i];
       final key = '$podcastName|${ep.title}';
       final name = PodcastService.normalizeFileName(ep.title);
