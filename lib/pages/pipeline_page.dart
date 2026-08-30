@@ -130,12 +130,12 @@ class _PipelinePageState extends State<PipelinePage> {
   Future<void> _runRagOnly() async {
     if (_ragRunning || _musicRunning) return;
     setState(() { _ragRunning = true; _ragProgress = 0; });
-    _musicLog('RAG 索引更新啟動中…');
+    _podcastLog('RAG 索引更新啟動中…');
     await Future<void>.delayed(const Duration(milliseconds: 50));
     try {
       final ragStart = DateTime.now();
       await RagService.instance.build((line) {
-        _musicLog(line);
+        _podcastLog(line);
         // Parse progress: [50/1668] 3.0% ...
         final match = RegExp(r'\[(\d+)/(\d+)\]\s+([\d.]+)%').firstMatch(line);
         if (match != null) {
@@ -144,9 +144,9 @@ class _PipelinePageState extends State<PipelinePage> {
         }
       });
       final elapsed = DateTime.now().difference(ragStart).inMinutes;
-      _musicLog('RAG 完成 (${elapsed}分)');
+      _podcastLog('RAG 完成 (${elapsed}分)');
     } catch (e) {
-      _musicLog('  ❌ RAG 更新錯誤: $e');
+      _podcastLog('  ❌ RAG 更新錯誤: $e');
     } finally {
       if (mounted) setState(() { _ragRunning = false; _ragProgress = 0; });
     }

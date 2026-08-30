@@ -117,6 +117,36 @@ class PodcastPipeline {
     final podDir = PodcastService.instance.podcastDir(podcastName);
     final ext = 'mp3';
 
+    // ── Cache validation: purge stale entries ─────────────────────
+    // If cache says txt/srt=true but the file doesn't exist on disk,
+    // reset to false so the episode gets re-processed.
+    int staleCount = 0;
+    final prefix = '$podcastName|';
+    for (final key in cache.keys.toList()) {
+      if (!key.startsWith(prefix)) continue;
+      final entry = cache[key];
+      if (entry == null) continue;
+      final epTitle = key.substring(prefix.length);
+      final name = PodcastService.normalizeFileName(epTitle);
+      final txtPath = '$podDir\\$name.txt';
+      final txtExists = File(txtPath).existsSync();
+      final srtExists = _findSrt(podDir, name) != null;
+      if (entry['txt'] == true && !txtExists) {
+        entry['txt'] = false;
+        entry['status'] = '';
+        staleCount++;
+      }
+      if (entry['srt'] == true && !srtExists) {
+        entry['srt'] = false;
+        entry['status'] = '';
+        staleCount++;
+      }
+    }
+    if (staleCount > 0) {
+      onLog('  ⚠️ 修正 $staleCount 筆過期 cache（檔案已消失）');
+      _saveCache(cache);
+    }
+
     onLog('  讀取 RSS Feed...');
     final result = await PodcastService.instance.fetchEpisodes(rssUrl);
     final episodes = result.episodes;
