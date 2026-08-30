@@ -46,7 +46,7 @@ class GroqNativeService {
   /// 启动时 async 查 proxy（不堵塞第一次请求）。
   Future<void> preloadProxy() async {
     if (_proxyResolved) return;
-    // 先查环境变量（不阻塞）
+    // 只從環境變數讀 proxy（不讀 Windows Registry，因為不可靠）
     for (final name in ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy']) {
       final v = Platform.environment[name];
       if (v != null && v.isNotEmpty) {
@@ -54,24 +54,6 @@ class GroqNativeService {
         _proxyResolved = true;
         return;
       }
-    }
-    // async 查 Windows Registry（不阻塞 event loop）
-    if (Platform.isWindows) {
-      try {
-        final result = await Process.run('reg', [
-          'query',
-          r'HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-          '/v', 'ProxyServer',
-        ]);
-        if (result.exitCode == 0) {
-          final output = result.stdout.toString();
-          final match = RegExp(r'ProxyServer\s+REG_SZ\s+(.+)').firstMatch(output);
-          if (match != null) {
-            final proxy = match.group(1)!.trim();
-            _cachedProxy = proxy.contains('://') ? proxy : 'http://$proxy';
-          }
-        }
-      } catch (_) {}
     }
     _proxyResolved = true;
   }
