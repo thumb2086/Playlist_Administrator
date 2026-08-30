@@ -189,7 +189,6 @@ class PodcastPipeline {
           hasTxt = File('$podDir\\$match.txt').existsSync();
           hasSrt = File('$podDir\\$match.srt').existsSync() || _findSrt(podDir, match) != null;
           if (hasSrt) srtPath = _findSrt(podDir, match);
-          if (hasTxt || hasSrt) onLog('    ⚠️ [debug-canonical] "$name" → matched "$match"');
         }
       }
       // EP number fallback.
@@ -199,7 +198,6 @@ class PodcastPipeline {
           hasSrt = fuzzy.endsWith('.srt');
           hasTxt = File('$podDir\\$fuzzy.txt').existsSync();
           if (hasSrt) srtPath = '$podDir\\$fuzzy.srt';
-          if (hasTxt || hasSrt) onLog('    ⚠️ [debug-fuzzy] "$name" → matched "$fuzzy"');
         }
       }
       if (hasSrt || hasTxt) {
@@ -211,10 +209,6 @@ class PodcastPipeline {
           srtPath = _findSrt(podDir, name);
           hasSrt = srtPath != null;
           hasTxt = File(txtPath).existsSync();
-        }
-        // Debug: log when episode is matched via canonical/fuzzy (not direct file)
-        if (!File(txtPath).existsSync() && hasTxt) {
-          onLog('    ⚠️ [debug] $name → txt matched via canonical/fuzzy, not direct');
         }
         cache[key] = {
           'srt': hasSrt,
@@ -340,16 +334,17 @@ class PodcastPipeline {
       }
     }
 
-    // 3. Longest common substring (8+ chars).
+    // 3. Longest common substring (12+ chars to avoid date-prefix false positives
+    //    like "2026_8_20..." matching "2026_8_27..." which share "2026_8_2" = 8 chars).
     final stripped = lowerName.replaceAll(RegExp(r'[^\w\u4e00-\u9fff]'), '');
-    if (stripped.length >= 8) {
+    if (stripped.length >= 12) {
       String best = '';
       String? bestStem;
       for (final stem in existingStems) {
         final stemStripped = stem.replaceAll(RegExp(r'[^\w\u4e00-\u9fff]'), '');
-        // Check if stripped name starts with same 8+ chars as stem.
+        // Check if stripped name starts with same 12+ chars as stem.
         final commonLen = _commonPrefixLen(stripped, stemStripped);
-        if (commonLen >= 8 && commonLen > best.length) {
+        if (commonLen >= 12 && commonLen > best.length) {
           best = stripped.substring(0, commonLen);
           bestStem = stem;
         }
