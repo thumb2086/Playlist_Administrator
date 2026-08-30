@@ -189,6 +189,7 @@ class PodcastPipeline {
           hasTxt = File('$podDir\\$match.txt').existsSync();
           hasSrt = File('$podDir\\$match.srt').existsSync() || _findSrt(podDir, match) != null;
           if (hasSrt) srtPath = _findSrt(podDir, match);
+          if (hasTxt || hasSrt) onLog('    ⚠️ [debug-canonical] "$name" → matched "$match"');
         }
       }
       // EP number fallback.
@@ -198,6 +199,7 @@ class PodcastPipeline {
           hasSrt = fuzzy.endsWith('.srt');
           hasTxt = File('$podDir\\$fuzzy.txt').existsSync();
           if (hasSrt) srtPath = '$podDir\\$fuzzy.srt';
+          if (hasTxt || hasSrt) onLog('    ⚠️ [debug-fuzzy] "$name" → matched "$fuzzy"');
         }
       }
       if (hasSrt || hasTxt) {
@@ -209,6 +211,10 @@ class PodcastPipeline {
           srtPath = _findSrt(podDir, name);
           hasSrt = srtPath != null;
           hasTxt = File(txtPath).existsSync();
+        }
+        // Debug: log when episode is matched via canonical/fuzzy (not direct file)
+        if (!File(txtPath).existsSync() && hasTxt) {
+          onLog('    ⚠️ [debug] $name → txt matched via canonical/fuzzy, not direct');
         }
         cache[key] = {
           'srt': hasSrt,
