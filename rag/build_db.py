@@ -145,6 +145,28 @@ def main() -> None:
         metadata={"hnsw:space": "cosine"},
     )
 
+    # ── Dedup: remove duplicate sig entries, keep first only ──────
+    total = col.count()
+    if total > 0:
+        sig_to_ids: dict[str, list[str]] = {}
+        offset = 0
+        while offset < total:
+            batch = col.get(limit=5000, offset=offset, include=["metadatas"])
+            ids = batch["ids"]
+            metas = batch["metadatas"]
+            for rid, m in zip(ids, metas):
+                sig = (m or {}).get("sig", "")
+                if sig:
+                    sig_to_ids.setdefault(sig, []).append(rid)
+            offset += 5000
+        to_delete = [ids[1:] for ids in sig_to_ids.values() if len(ids) > 1]
+        flat_delete = [item for sublist in to_delete for item in sublist]
+        if flat_delete:
+            print(f"Dedup: removing {len(flat_delete)} duplicate records...")
+            for i in range(0, len(flat_delete), 4500):
+                col.delete(ids=flat_delete[i:i+4500])
+            print(f"Dedup done. New count: {col.count()}")
+
     # 已索引內容 hash 去重 - 分段讀取避免 SQL 變數超限
     done_sigs: set[str] = set()
     offset = 0
@@ -162,7 +184,11 @@ def main() -> None:
     # 一次性遷移: 舊版 chunks 沒有 sig — 從 metadata 的 path 讀檔補上，
     # 避免 1662 篇全部被當新的重嵌入。
     def file_sig(path: Path) -> str:
-        return hashlib.md5(path.read_bytes()).hexdigest()
+        raw = path.read_bytes()
+        # Strip BOM and normalize whitespace to avoid false re-embeds
+        if raw.startswith(b'\xef\xbb\xbf'):
+            raw = raw[3:]
+        return hashlib.md5(raw).hexdigest()
 
     migrated = 0
     offset = 0
