@@ -143,8 +143,13 @@ class PipelineOrchestrator {
       final safeName = song.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       final outPath = '${musicDir.path}\\$safeName.mp3';
 
+      onLog('  [$done/$total] $song');
+
       try {
-        final result = await yt.resolveStream(song);
+        final result = await yt.resolveStream(song).timeout(
+          const Duration(seconds: 45),
+          onTimeout: () { onLog('  ⏰ 搜尋超時: $song'); return null; },
+        );
         if (result == null) {
           onLog('  ❌ 找不到: $song');
           fail++;
@@ -159,7 +164,7 @@ class PipelineOrchestrator {
           runInShell: true,
         );
         final code = await proc.exitCode.timeout(
-          const Duration(seconds: 90),
+          const Duration(seconds: 120),
           onTimeout: () { proc.kill(); return -1; },
         );
         if (code == 0 && File(tmpPath).existsSync()) {
@@ -170,6 +175,7 @@ class PipelineOrchestrator {
           fail++;
         }
       } catch (e) {
+        onLog('  ❌ 異常: $song → $e');
         fail++;
       }
       done++;
