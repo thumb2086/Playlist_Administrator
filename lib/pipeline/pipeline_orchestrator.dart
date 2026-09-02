@@ -29,9 +29,9 @@ class PipelineOrchestrator {
 
   Future<void> run({int fromStep = 0, int? toStep}) async {
     final steps = <(String, double, Future<void> Function(void Function(double)))>[
-      ('Scrape Spotify playlists', 25.0, _stepScrape),
+      ('Scrape Spotify playlists', 20.0, _stepScrape),
       ('Download missing tracks', 30.0, _stepDownload),
-      ('Prune missing tracks', 15.0, _stepPrune),
+      ('Build playlist M3U8 files', 10.0, _stepBuildM3u8),
       ('Organize unsorted songs', 10.0, _stepUnsorted),
       ('Enrich metadata', 10.0, _stepMetadata),
       ('Measure LUFS', 10.0, _stepMeasureLufs),
@@ -206,7 +206,7 @@ class PipelineOrchestrator {
     await Directory(config.playlistsPath).create(recursive: true);
 
     final scraper = SpotifyScraper(log: onLog, playlistsPath: config.playlistsPath, libraryPath: config.libraryPath);
-    final plResults = await scraper.scrapeAll(urls);
+    final plResults = await scraper.scrapeAll(urls, writeM3u8: false);
 
     // Snapshot: save ALL track names from scraper (not just resolved ones from m3u8).
     int totalRemoved = 0;
@@ -225,115 +225,88 @@ class PipelineOrchestrator {
     progress(100);
   }
 
-  Future<void> _stepPrune(void Function(double) progress) async {
+  Future<void> _stepBuildM3u8(void Function(double) progress) async {
     final plDir = Directory(config.playlistsPath);
     if (!await plDir.exists()) {
       onLog('播放清單資料夾不存在');
       progress(100); return;
     }
 
-    final files = <String>[];
-    await for (final e in plDir.list()) {
-      if (e is File) {
-        final low = e.path.toLowerCase();
-        if (low.endsWith('.m3u8') || low.endsWith('.m3u')) {
-          files.add(e.path);
+    // Load snapshot (built by Step 1).
+    final snapFile = File('${config.basePath}\\snapshot_cache.json');
+    if (!await snapFile.exists()) {
+      onLog('找不到 snapshot_cache.json，跳過 M3U8 產生');
+      progress(100); return;
+    }
+    final snap = jsonDecode(await snapFile.readAsString()) as Map<String, dynamic>;
+    final playlists = snap['playlists'] as Map<String, dynamic>? ?? {};
+
+    if (playlists.isEmpty) {
+      onLog('無歌單資料');
+      progress(100); return;
+    }
+
+    // Build audio index: scan musicPath for existing files.
+    final musicDir = Directory(config.musicPath);
+    final audioIndex = <String, String>{}; // lowerCase_stem -> full path
+    if (await musicDir.exists()) {
+      await for (final f in musicDir.list()) {
+        if (f is File) {
+          final low = f.path.toLowerCase();
+          if (low.endsWith('.mp3') || low.endsWith('.m4a') || low.endsWith('.flac') || low.endsWith('.wav')) {
+            final stem = File(f.path).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+            audioIndex[stem.toLowerCase()] = f.path;
+          }
         }
       }
     }
 
-    totalRemoved = 0;
-    int totalFiles = files.length;
+    await Directory(config.playlistsPath).create(recursive: true);
+    int totalPl = playlists.length;
+    int idx = 0;
+    int totalResolved = 0;
+    int totalTracks = 0;
 
-    for (int i = 0; i < files.length; i++) {
-      if (state.isCancelled) return;
+    for (final entry in playlists.entries) {
+      idx++;
+      if (state.isCancelled) break;
       await state.waitIfPaused();
+      if (state.isCancelled) break;
 
-      final f = files[i];
-      final baseName = File(f).uri.pathSegments.last;
-      if (PlaylistParser.isInternalPlaylist(baseName)) {
-        onLog('  跳過內部歌單: $baseName');
-        progress((i + 1) / totalFiles * 100);
-        continue;
+      final plName = entry.key;
+      final plData = entry.value as Map<String, dynamic>;
+      final tracks = (plData['tracks'] as List<dynamic>?)?.cast<String>() ?? [];
+      if (tracks.isEmpty) continue;
+
+      final buffer = StringBuffer('#EXTM3U\n');
+      int resolved = 0;
+
+      for (final t in tracks) {
+        final match = audioIndex[t.toLowerCase()];
+        if (match != null) {
+          final localName = File(match).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+          buffer.writeln('#EXTINF:-1,$localName');
+          final absPath = File(match).absolute.path;
+          final absPl = Directory('${config.playlistsPath}\\$plName.m3u8').parent.absolute.path;
+          String relPath;
+          try { relPath = _relativePath(absPath, absPl); } catch (_) { relPath = match; }
+          buffer.writeln(relPath);
+          resolved++;
+        }
+        // Skip tracks not on disk (prune effect)
       }
 
-      try {
-        final content = await File(f).readAsLines();
-        final newLines = <String>[];
-        int removed = 0;
+      final m3uPath = '${config.playlistsPath}\\$plName.m3u8';
+      await File(m3uPath).writeAsString(buffer.toString(), flush: true);
 
-        final isM3u = content.any((l) => l.contains('#EXTM3U'));
-
-        int j = 0;
-        while (j < content.length) {
-          final line = content[j];
-          if (line.isEmpty) { j++; continue; }
-
-          if (isM3u && line.startsWith('#EXTINF:')) {
-            int k = j + 1;
-            while (k < content.length && (content[k].trim().isEmpty || content[k].startsWith('#'))) {
-              k++;
-            }
-            if (k < content.length) {
-              final pathLine = content[k].trim();
-              if (_trackFileExists(pathLine)) {
-                newLines.add(line);
-                newLines.add(content[k]);
-              } else {
-                removed++;
-              }
-              j = k + 1;
-            } else {
-              newLines.add(line);
-              j++;
-            }
-            continue;
-          }
-
-          if (line.startsWith('#') || line.trim().isEmpty) {
-            newLines.add(line);
-          } else {
-            if (_trackFileExists(line.trim())) {
-              newLines.add(line);
-            } else {
-              removed++;
-            }
-          }
-          j++;
-        }
-
-        if (removed > 0) {
-          await File(f).writeAsString('${newLines.join('\n')}\n');
-          totalRemoved += removed;
-          onLog('  $baseName: 移除 $removed 首');
-        }
-      } catch (e) {
-        onLog('  ⚠️ 無法處理 $baseName: $e');
-      }
-      progress((i + 1) / totalFiles * 100);
+      totalResolved += resolved;
+      totalTracks += tracks.length;
+      onLog('  $plName.m3u8 ($resolved/${tracks.length})');
+      progress((idx / totalPl * 100).toDouble());
     }
-    onLog('Prune 完成，共移除 $totalRemoved 首');
-  }
 
-  int totalRemoved = 0;
-
-  bool _trackFileExists(String entry) {
-    String decodePath(String s) {
-      try { return Uri.decodeComponent(s); } catch (_) { return s; }
-    }
-    entry = decodePath(entry);
-    if (!entry.contains('.') && !entry.contains('\\')) return true;
-    // Resolve relative to playlists dir first
-    final relToPl = '${config.playlistsPath}\\$entry';
-    if (File(relToPl).existsSync()) return true;
-    // Try as absolute or CWD-relative
-    if (File(entry).existsSync()) return true;
-    // Try basePath/libraryPath with just the filename
-    for (final base in [config.basePath, config.libraryPath, config.playlistsPath]) {
-      final resolved = '$base\\${File(entry).uri.pathSegments.last}';
-      if (File(resolved).existsSync()) return true;
-    }
-    return false;
+    onLog('M3U8 產生完成: $totalResolved/$totalTracks 首已解析路徑');
+    progress(100);
   }
 
   Future<void> _stepUnsorted(void Function(double) progress) async {

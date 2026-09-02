@@ -104,14 +104,14 @@ class SpotifyScraper {
     return null;
   }
 
-  Future<Map<String, List<String>>> scrapeAll(List<String> urls) async {
+  Future<Map<String, List<String>>> scrapeAll(List<String> urls, {bool writeM3u8 = true}) async {
     final results = <String, List<String>>{};
     int processed = 0;
     for (final url in urls) {
       processed++;
       log('[$processed/${urls.length}] 處理: $url');
       try {
-        final result = await _scrapeOne(url);
+        final result = await _scrapeOne(url, writeM3u8: writeM3u8);
         if (result != null) results[result.$1] = result.$2;
       } catch (e) {
         log('  錯誤: $e');
@@ -132,7 +132,7 @@ class SpotifyScraper {
     return current;
   }
 
-  Future<(String, List<String>)?> _scrapeOne(String url) async {
+  Future<(String, List<String>)?> _scrapeOne(String url, {bool writeM3u8 = true}) async {
     final spId = url.split('playlist/').last.split('?').first;
     final embedUrl = 'https://open.spotify.com/embed/playlist/$spId';
 
@@ -229,50 +229,52 @@ class SpotifyScraper {
 
     log('  歌單: $plName, ${tracks.length} 首');
 
-    // Build audio index to resolve track names to file paths
-    await _buildIndex();
+    if (writeM3u8) {
+      // Build audio index to resolve track names to file paths
+      await _buildIndex();
 
-    final m3uPath = '$playlistsPath\\$plName.m3u8';
-    await Directory(playlistsPath).create(recursive: true);
+      final m3uPath = '$playlistsPath\\$plName.m3u8';
+      await Directory(playlistsPath).create(recursive: true);
 
-    // Clean up old M3U8 file if playlist was renamed
-    final oldName = ConfigService.instance.config.urlNames[url];
-    if (oldName != null && oldName != plName) {
-      final oldFile = File('$playlistsPath\\$oldName.m3u8');
-      if (await oldFile.exists()) {
-        await oldFile.delete();
-        log('  已清理舊歌單檔: $oldName.m3u8');
-      }
-    }
-
-    final buffer = StringBuffer('#EXTM3U\n');
-    int resolved = 0;
-    for (final t in tracks) {
-      final matched = _findAudioFile(t);
-      if (matched != null) {
-        // Use local filename (no ext) as EXTINF title — avoids commas & encoding issues
-        final localName = File(matched).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-        buffer.writeln('#EXTINF:-1,$localName');
-        // Write raw relative path from Playlists dir — Echo Nightly does NOT
-        // decode %XX escapes, so percent-encoding breaks playback.
-        final absPath = File(matched).absolute.path;
-        final absPl = File(m3uPath).parent.absolute.path;
-        String relPath;
-        try {
-          relPath = _relativePath(absPath, absPl);
-        } catch (_) {
-          relPath = matched;
+      // Clean up old M3U8 file if playlist was renamed
+      final oldName = ConfigService.instance.config.urlNames[url];
+      if (oldName != null && oldName != plName) {
+        final oldFile = File('$playlistsPath\\$oldName.m3u8');
+        if (await oldFile.exists()) {
+          await oldFile.delete();
+          log('  已清理舊歌單檔: $oldName.m3u8');
         }
-        buffer.writeln(relPath);
-        resolved++;
-      } else {
-        // Write unmatched track too — snapshot needs full track list for download step.
-        buffer.writeln('#EXTINF:-1,$t');
-        buffer.writeln('#NEEDS_DOWNLOAD:$t');
       }
+
+      final buffer = StringBuffer('#EXTM3U\n');
+      int resolved = 0;
+      for (final t in tracks) {
+        final matched = _findAudioFile(t);
+        if (matched != null) {
+          // Use local filename (no ext) as EXTINF title — avoids commas & encoding issues
+          final localName = File(matched).uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+          buffer.writeln('#EXTINF:-1,$localName');
+          // Write raw relative path from Playlists dir — Echo Nightly does NOT
+          // decode %XX escapes, so percent-encoding breaks playback.
+          final absPath = File(matched).absolute.path;
+          final absPl = File(m3uPath).parent.absolute.path;
+          String relPath;
+          try {
+            relPath = _relativePath(absPath, absPl);
+          } catch (_) {
+            relPath = matched;
+          }
+          buffer.writeln(relPath);
+          resolved++;
+        } else {
+          // Write unmatched track too — snapshot needs full track list for download step.
+          buffer.writeln('#EXTINF:-1,$t');
+          buffer.writeln('#NEEDS_DOWNLOAD:$t');
+        }
+      }
+      await File(m3uPath).writeAsString(buffer.toString(), flush: true);
+      log('  已儲存: $plName.m3u8 (已解析路徑: $resolved/${tracks.length})');
     }
-    await File(m3uPath).writeAsString(buffer.toString(), flush: true);
-    log('  已儲存: $plName.m3u8 (已解析路徑: $resolved/${tracks.length})');
 
     // Update config with the real playlist name
     ConfigService.instance.config.urlNames[url] = plName;
