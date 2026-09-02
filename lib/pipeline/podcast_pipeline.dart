@@ -121,6 +121,7 @@ class PodcastPipeline {
     // If cache says txt/srt=true but the file doesn't exist on disk,
     // reset to false so the episode gets re-processed.
     int staleCount = 0;
+    final staleKeys = <String>{};
     final prefix = '$podcastName|';
     final keysToCheck = cache.keys.where((k) => k.startsWith(prefix)).toList();
     for (int ci = 0; ci < keysToCheck.length; ci++) {
@@ -136,11 +137,13 @@ class PodcastPipeline {
         entry['txt'] = false;
         entry['status'] = '';
         staleCount++;
+        staleKeys.add(key);
       }
       if (entry['srt'] == true && !srtExists) {
         entry['srt'] = false;
         entry['status'] = '';
         staleCount++;
+        staleKeys.add(key);
       }
       // Yield every 100 entries to keep UI responsive
       if (ci % 100 == 0) await Future<void>.delayed(Duration.zero);
@@ -187,7 +190,8 @@ class PodcastPipeline {
       var hasSrt = srtPath != null;
       var hasTxt = File(txtPath).existsSync();
       // Canonical match: strip all formatting, compare content characters.
-      if (!hasSrt && !hasTxt) {
+      // Skip for stale-cache keys — we know their files are truly gone.
+      if (!hasSrt && !hasTxt && !staleKeys.contains(key)) {
         final canonical = _canonicalize(ep.title);
         final match = canonicalToStem[canonical];
         if (match != null) {
@@ -197,7 +201,7 @@ class PodcastPipeline {
         }
       }
       // EP number fallback.
-      if (!hasSrt && !hasTxt) {
+      if (!hasSrt && !hasTxt && !staleKeys.contains(key)) {
         final fuzzy = _fuzzyFindFile(canonicalToStem.values.toSet(), name, ep.title);
         if (fuzzy != null) {
           hasSrt = fuzzy.endsWith('.srt');
