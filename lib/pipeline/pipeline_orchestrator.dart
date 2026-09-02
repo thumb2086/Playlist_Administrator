@@ -160,7 +160,10 @@ class PipelineOrchestrator {
         final tmpPath = '${musicDir.path}\\dl_${safeName.hashCode.toRadixString(16)}.mp3';
         final proc = await Process.start(
           ffmpeg,
-          ['-y', '-i', result.audioUrl, '-vn', '-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2', tmpPath],
+          ['-y',
+           '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+           '-i', result.audioUrl,
+           '-vn', '-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2', tmpPath],
           runInShell: true,
         );
         final code = await proc.exitCode.timeout(

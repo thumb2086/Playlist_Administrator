@@ -217,7 +217,9 @@ class YoutubeService {
     try {
       // 根據格式選擇 ffmpeg 參數
       final args = <String>[
-        '-y', '-i', audioUrl,
+        '-y',
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        '-i', audioUrl,
         '-vn',  // 不含影片
       ];
 

@@ -167,14 +167,19 @@ class PodcastPipeline {
     // Canonical form: lowercase, strip all non-alphanumeric/CJK chars.
     final canonicalToStem = <String, String>{};
     try {
-      for (final f in Directory(podDir).listSync().whereType<File>()) {
-        final stem = f.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
-        if (stem.length < 5) continue;
-        final canonical = _canonicalize(stem);
-        if (canonical.isNotEmpty) canonicalToStem[canonical] = stem;
-        // Also store without CJK for cross-encoding matches.
-        final alphaOnly = stem.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-        if (alphaOnly.length >= 8) canonicalToStem[alphaOnly] = stem;
+      final dir = Directory(podDir);
+      if (dir.existsSync()) {
+        await for (final f in dir.list()) {
+          if (f is File) {
+            final stem = f.uri.pathSegments.last.replaceAll(RegExp(r'\.\w+$'), '');
+            if (stem.length < 5) continue;
+            final canonical = _canonicalize(stem);
+            if (canonical.isNotEmpty) canonicalToStem[canonical] = stem;
+            // Also store without CJK for cross-encoding matches.
+            final alphaOnly = stem.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+            if (alphaOnly.length >= 8) canonicalToStem[alphaOnly] = stem;
+          }
+        }
       }
     } catch (_) {}
 
