@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:logger/logger.dart';
@@ -156,13 +155,14 @@ class YoutubeService {
       return null;
     }
 
-    // 用 ffmpeg 下載 + 轉碼
-    onProgress?.call(0.3);
+    // 用 YoutubeExplode 下載 + 本地 ffmpeg 轉碼
+    onProgress?.call(0.1);
     final result = await downloadAudio(
       audioUrl,
       outputPath: outputPath,
       format: format,
       onProgress: onProgress,
+      videoId: videoId.value,
     );
 
     return result;
@@ -187,13 +187,14 @@ class YoutubeService {
       return null;
     }
 
-    // 用 ffmpeg 下載 + 轉碼
-    onProgress?.call(0.3);
+    // 用 YoutubeExplode 下載 + 本地 ffmpeg 轉碼
+    onProgress?.call(0.1);
     final savedPath = await downloadAudio(
       result.audioUrl,
       outputPath: outputPath,
       format: format,
       onProgress: onProgress,
+      videoId: result.videoId,
     );
 
     if (savedPath != null) {
@@ -203,86 +204,90 @@ class YoutubeService {
   }
 
   // ── 底層下載 ─────────────────────────────────────────
-  /// 用 ffmpeg 從 HTTP URL 下載音訊並轉碼。
-  /// 回傳實際儲存的檔案路徑，失敗回傳 null。
+  /// 用 YoutubeExplode 內建串流下載音訊，再用 ffmpeg 本地轉碼。
+  /// 繞過 YouTube CDN header 檢查問題。
   Future<String?> downloadAudio(
     String audioUrl, {
     required String outputPath,
     String format = 'mp3',
     void Function(double progress)? onProgress,
+    String? videoId,
   }) async {
     final ffmpeg = _ffmpeg;
-    final tmpPath = '$outputPath.tmp.$format';
+
+    // Step 1: Download raw audio via YoutubeExplode (handles headers properly)
+    final tmpRaw = '$outputPath.raw.tmp';
+    try {
+      final yt = _fresh();
+      if (videoId == null) {
+        _log.e('downloadAudio 需要 videoId');
+        return null;
+      }
+      final manifest = await yt.videos.streams.getManifest(VideoId(videoId));
+      final audioOnly = manifest.audioOnly.sortByBitrate();
+      if (audioOnly.isEmpty) { yt.close(); return null; }
+      final best = audioOnly.last;
+
+      onProgress?.call(0.1);
+      final stream = yt.videos.streams.get(best);
+      final fileSink = File(tmpRaw).openWrite();
+      int downloaded = 0;
+      final totalBytes = best.size.totalBytes;
+      await for (final chunk in stream) {
+        fileSink.add(chunk);
+        downloaded += chunk.length;
+        if (totalBytes > 0) {
+          onProgress?.call(0.1 + 0.6 * (downloaded / totalBytes));
+        }
+      }
+      await fileSink.flush();
+      await fileSink.close();
+      yt.close();
+      onProgress?.call(0.7);
+    } catch (e) {
+      _log.e('YouTube 串流下載失敗: $e');
+      try { await File(tmpRaw).delete(); } catch (_) {}
+      return null;
+    }
+
+    // Step 2: Convert raw audio to target format via ffmpeg (local file, no network)
+    final args = <String>[
+      '-y', '-i', tmpRaw,
+      '-vn',
+    ];
+    switch (format) {
+      case 'mp3':
+        args.addAll(['-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2']);
+      case 'flac':
+        args.addAll(['-c:a', 'flac']);
+      case 'm4a':
+        args.addAll(['-c:a', 'aac', '-b:a', '192k']);
+      case 'wav':
+        args.addAll(['-c:a', 'pcm_s16le', '-ar', '44100']);
+      default:
+        args.addAll(['-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2']);
+    }
+    args.add(outputPath);
 
     try {
-      // 根據格式選擇 ffmpeg 參數
-      final args = <String>[
-        '-y',
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        '-i', audioUrl,
-        '-vn',  // 不含影片
-      ];
-
-      switch (format) {
-        case 'mp3':
-          args.addAll(['-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2']);
-        case 'flac':
-          args.addAll(['-c:a', 'flac']);
-        case 'm4a':
-          args.addAll(['-c:a', 'aac', '-b:a', '192k']);
-        case 'wav':
-          args.addAll(['-c:a', 'pcm_s16le', '-ar', '44100']);
-        default:
-          args.addAll(['-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2']);
-      }
-
-      args.add(tmpPath);
-
-      onProgress?.call(0.5);
+      onProgress?.call(0.8);
       final proc = await Process.start(ffmpeg, args, runInShell: true);
-
-      // 監聽 stderr 取得進度（ffmpeg 輸出到 stderr）
-      String lastLine = '';
-      proc.stderr.transform(const SystemEncoding().decoder).transform(const LineSplitter()).listen(
-        (line) {
-          lastLine = line;
-          // 解析時間進度: time=00:01:23.45
-          final timeMatch = RegExp(r'time=(\d+):(\d+):(\d+)\.(\d+)').firstMatch(line);
-          if (timeMatch != null) {
-            final h = int.parse(timeMatch.group(1)!);
-            final m = int.parse(timeMatch.group(2)!);
-            final s = int.parse(timeMatch.group(3)!);
-            final totalSec = h * 3600 + m * 60 + s;
-            // 估算進度（假設音檔不超過 10 分鐘）
-            final pct = (totalSec / 600).clamp(0.0, 0.95);
-            onProgress?.call(pct);
-          }
-        },
-      );
-
       final code = await proc.exitCode.timeout(
-        const Duration(seconds: 300),
+        const Duration(seconds: 120),
         onTimeout: () { proc.kill(); return -1; },
       );
+      try { await File(tmpRaw).delete(); } catch (_) {}
 
-      if (code == 0 && await File(tmpPath).exists()) {
-        // 確保目標目錄存在
-        final dir = Directory(File(outputPath).parent.path);
-        if (!await dir.exists()) await dir.create(recursive: true);
-
-        // 移動暫存檔到目標路徑
-        if (await File(outputPath).exists()) await File(outputPath).delete();
-        await File(tmpPath).rename(outputPath);
+      if (code == 0 && await File(outputPath).exists()) {
         onProgress?.call(1.0);
         return outputPath;
       } else {
-        _log.w('ffmpeg 下載失敗 (exit $code): $lastLine');
-        try { await File(tmpPath).delete(); } catch (_) {}
+        _log.w('ffmpeg 轉碼失敗 (exit $code)');
         return null;
       }
     } catch (e) {
-      _log.e('下載異常: $e');
-      try { await File(tmpPath).delete(); } catch (_) {}
+      _log.e('ffmpeg 異常: $e');
+      try { await File(tmpRaw).delete(); } catch (_) {}
       return null;
     }
   }

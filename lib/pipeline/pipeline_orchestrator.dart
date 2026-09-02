@@ -132,7 +132,6 @@ class PipelineOrchestrator {
     int ok = 0;
     int fail = 0;
     final total = missing.length;
-    final ffmpeg = config.resolvedFfmpegPath;
     final yt = YoutubeService.instance;
     const workers = 4;
 
@@ -158,18 +157,12 @@ class PipelineOrchestrator {
         }
         onLog('    ⬇️ 下載中: ${result.title}');
         final tmpPath = '${musicDir.path}\\dl_${safeName.hashCode.toRadixString(16)}.mp3';
-        final proc = await Process.start(
-          ffmpeg,
-          ['-y',
-           '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-           '-i', result.audioUrl,
-           '-vn', '-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2', tmpPath],
-          runInShell: true,
+        final savedPath = await yt.downloadAudio(
+          result.audioUrl,
+          outputPath: tmpPath,
+          videoId: result.videoId,
         );
-        final code = await proc.exitCode.timeout(
-          const Duration(seconds: 120),
-          onTimeout: () { proc.kill(); return -1; },
-        );
+        final code = savedPath != null ? 0 : -1;
         if (code == 0 && File(tmpPath).existsSync()) {
           if (File(outPath).existsSync()) await File(outPath).delete();
           await File(tmpPath).rename(outPath);
