@@ -139,6 +139,8 @@ class PipelineOrchestrator {
       if (state.isCancelled) return;
       await state.waitIfPaused();
       if (state.isCancelled) return;
+      // Yield to keep UI responsive
+      await Future<void>.delayed(Duration.zero);
 
       final safeName = song.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       final outPath = '${musicDir.path}\\$safeName.mp3';
@@ -146,6 +148,7 @@ class PipelineOrchestrator {
       onLog('  [$done/$total] $song');
 
       try {
+        onLog('    🔍 搜尋 YouTube…');
         final result = await yt.resolveStream(song).timeout(
           const Duration(seconds: 45),
           onTimeout: () { onLog('  ⏰ 搜尋超時: $song'); return null; },
@@ -157,6 +160,7 @@ class PipelineOrchestrator {
           progress((done / total * 100).toDouble());
           continue;
         }
+        onLog('    ⬇️ 下載中: ${result.title}');
         final tmpPath = '${musicDir.path}\\dl_${safeName.hashCode.toRadixString(16)}.mp3';
         final proc = await Process.start(
           ffmpeg,
@@ -170,8 +174,10 @@ class PipelineOrchestrator {
         if (code == 0 && File(tmpPath).existsSync()) {
           if (File(outPath).existsSync()) await File(outPath).delete();
           await File(tmpPath).rename(outPath);
+          onLog('    ✅ 完成');
           ok++;
         } else {
+          onLog('    ❌ ffmpeg 失敗 (exit $code)');
           fail++;
         }
       } catch (e) {
