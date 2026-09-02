@@ -127,21 +127,17 @@ class PipelineOrchestrator {
       progress(100); return;
     }
 
-    // Download missing songs using native YoutubeService + ffmpeg.
+    // Download missing songs using native YoutubeService + ffmpeg — 4-way parallel.
     int done = 0;
     int ok = 0;
     int fail = 0;
     final total = missing.length;
-        final ffmpeg = config.resolvedFfmpegPath;
+    final ffmpeg = config.resolvedFfmpegPath;
     final yt = YoutubeService.instance;
+    const workers = 4;
 
-    for (final song in missing) {
-      if (state.isCancelled) return;
-      await state.waitIfPaused();
-      if (state.isCancelled) return;
-      // Yield to keep UI responsive
-      await Future<void>.delayed(Duration.zero);
-
+    Future<void> downloadOne(int idx) async {
+      final song = missing[idx];
       final safeName = song.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       final outPath = '${musicDir.path}\\$safeName.mp3';
 
@@ -158,7 +154,7 @@ class PipelineOrchestrator {
           fail++;
           done++;
           progress((done / total * 100).toDouble());
-          continue;
+          return;
         }
         onLog('    ⬇️ 下載中: ${result.title}');
         final tmpPath = '${musicDir.path}\\dl_${safeName.hashCode.toRadixString(16)}.mp3';
@@ -186,6 +182,19 @@ class PipelineOrchestrator {
       }
       done++;
       progress((done / total * 100).toDouble());
+    }
+
+    // Run downloads in parallel batches
+    for (int i = 0; i < missing.length; i += workers) {
+      if (state.isCancelled) break;
+      await state.waitIfPaused();
+      if (state.isCancelled) break;
+      final batchEnd = (i + workers < missing.length) ? i + workers : missing.length;
+      final futures = <Future>[];
+      for (int j = i; j < batchEnd; j++) {
+        futures.add(downloadOne(j));
+      }
+      await Future.wait(futures);
     }
 
     onLog('下載完成: $ok 成功, $fail 失敗 (共 $total 首)');
