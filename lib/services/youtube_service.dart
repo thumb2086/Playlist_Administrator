@@ -204,8 +204,8 @@ class YoutubeService {
   }
 
   // ── 底層下載 ─────────────────────────────────────────
-  /// 用 YoutubeExplode 內建串流下載音訊，再用 ffmpeg 本地轉碼。
-  /// 繞過 YouTube CDN header 檢查問題。
+  /// 用 yt-dlp CLI 下載 YouTube 音訊，再用 ffmpeg 本地轉碼。
+  /// yt-dlp 有完整的 YouTube 反爬處理（cookies、簽名解碼等）。
   Future<String?> downloadAudio(
     String audioUrl, {
     required String outputPath,
@@ -214,47 +214,58 @@ class YoutubeService {
     String? videoId,
   }) async {
     final ffmpeg = _ffmpeg;
-
-    // Step 1: Download raw audio via YoutubeExplode (handles headers properly)
     final tmpRaw = '$outputPath.raw.tmp';
-    try {
-      final yt = _fresh();
-      if (videoId == null) {
-        _log.e('downloadAudio 需要 videoId');
-        return null;
-      }
-      final manifest = await yt.videos.streams.getManifest(VideoId(videoId));
-      final audioOnly = manifest.audioOnly.sortByBitrate();
-      if (audioOnly.isEmpty) { yt.close(); return null; }
-      final best = audioOnly.last;
 
-      onProgress?.call(0.1);
-      final stream = yt.videos.streams.get(best);
-      final fileSink = File(tmpRaw).openWrite();
-      int downloaded = 0;
-      final totalBytes = best.size.totalBytes;
-      await for (final chunk in stream) {
-        fileSink.add(chunk);
-        downloaded += chunk.length;
-        if (totalBytes > 0) {
-          onProgress?.call(0.1 + 0.6 * (downloaded / totalBytes));
+    // Step 1: 用 yt-dlp 下載 raw audio
+    onProgress?.call(0.1);
+    try {
+      final ytUrl = videoId != null ? 'https://www.youtube.com/watch?v=$videoId' : audioUrl;
+      final proc = await Process.start(
+        'yt-dlp',
+        [
+          '-x', '--audio-format', 'best',
+          '--no-playlist',
+          '-o', tmpRaw,
+          '--no-overwrites',
+          '--no-check-certificates',
+          ytUrl,
+        ],
+        runInShell: true,
+      );
+      final code = await proc.exitCode.timeout(
+        const Duration(seconds: 120),
+        onTimeout: () { proc.kill(); return -1; },
+      );
+
+      if (code != 0 || !await File(tmpRaw).exists()) {
+        // yt-dlp may save with different extension — find it
+        final dir = File(tmpRaw).parent;
+        String? found;
+        await for (final f in dir.list()) {
+          if (f is File && f.path.startsWith(tmpRaw)) {
+            found = f.path;
+            break;
+          }
+        }
+        if (found == null) {
+          _log.w('yt-dlp 下載失敗 (exit $code)');
+          onProgress?.call(0.0);
+          return null;
+        }
+        // Rename found to tmpRaw
+        if (found != tmpRaw) {
+          await File(found).rename(tmpRaw);
         }
       }
-      await fileSink.flush();
-      await fileSink.close();
-      yt.close();
-      onProgress?.call(0.7);
+      onProgress?.call(0.6);
     } catch (e) {
-      _log.e('YouTube 串流下載失敗: $e');
+      _log.e('yt-dlp 異常: $e');
       try { await File(tmpRaw).delete(); } catch (_) {}
       return null;
     }
 
-    // Step 2: Convert raw audio to target format via ffmpeg (local file, no network)
-    final args = <String>[
-      '-y', '-i', tmpRaw,
-      '-vn',
-    ];
+    // Step 2: 用 ffmpeg 本地轉碼（無網路連線）
+    final args = <String>['-y', '-i', tmpRaw, '-vn'];
     switch (format) {
       case 'mp3':
         args.addAll(['-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2']);
@@ -270,7 +281,7 @@ class YoutubeService {
     args.add(outputPath);
 
     try {
-      onProgress?.call(0.8);
+      onProgress?.call(0.7);
       final proc = await Process.start(ffmpeg, args, runInShell: true);
       final code = await proc.exitCode.timeout(
         const Duration(seconds: 120),
