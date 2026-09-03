@@ -169,7 +169,7 @@ class PipelineOrchestrator {
           onLog('    ✅ 完成');
           ok++;
         } else {
-          onLog('    ❌ ffmpeg 失敗 (exit $code)');
+          onLog('    ❌ 下載失敗');
           fail++;
         }
       } catch (e) {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:logger/logger.dart';
@@ -204,8 +205,8 @@ class YoutubeService {
   }
 
   // ── 底層下載 ─────────────────────────────────────────
-  /// 用 yt-dlp CLI 下載並轉碼 YouTube 音訊。
-  /// yt-dlp -x --audio-format mp3 一步搞定（下載 + 轉碼）。
+  /// 用 yt-dlp CLI 下載 YouTube 音訊。
+  /// 使用 temp 目錄避免路徑問題，完成後移到 outputPath。
   Future<String?> downloadAudio(
     String audioUrl, {
     required String outputPath,
@@ -216,9 +217,11 @@ class YoutubeService {
     final ytUrl = videoId != null ? 'https://www.youtube.com/watch?v=$videoId' : audioUrl;
     onProgress?.call(0.1);
 
+    // 用 temp 目錄避免路徑/副檔名問題
+    final dlDir = Directory.systemTemp.createTempSync('yt_dl_');
+    final dlTemp = '${dlDir.path}\\audio';
+
     try {
-      // yt-dlp -x extracts audio, --audio-format converts, -o sets output
-      // 使用 mweb client 繞過 PO Token 要求（ios/web 需要 PO Token）
       final proc = await Process.start(
         'yt-dlp',
         [
@@ -228,56 +231,69 @@ class YoutubeService {
           '--no-overwrites',
           '--no-check-certificates',
           '--extractor-args', 'youtube:player_client=mweb',
-          '-o', outputPath,
+          '-o', '$dlTemp.%(ext)s',
           ytUrl,
         ],
         runInShell: true,
       );
+
+      // Capture stderr for debugging
+      String lastErr = '';
+      proc.stderr.transform(SystemEncoding().decoder).transform(const LineSplitter()).listen((line) {
+        lastErr = line;
+      });
+
       final code = await proc.exitCode.timeout(
         const Duration(seconds: 180),
         onTimeout: () { proc.kill(); return -1; },
       );
 
+      onProgress?.call(0.9);
+
       if (code != 0) {
-        _log.w('yt-dlp 失敗 (exit $code)');
-        onProgress?.call(0.0);
+        _log.w('yt-dlp 失敗 (exit $code): $lastErr');
+        dlDir.deleteSync(recursive: true);
         return null;
       }
 
-      // yt-dlp may append extension — find the actual output file
-      final expectedPath = outputPath;
-      if (await File(expectedPath).exists()) {
-        onProgress?.call(1.0);
-        return expectedPath;
-      }
-      // Try with format extension appended
-      final withExt = '$outputPath.$format';
-      if (await File(withExt).exists()) {
-        if (await File(expectedPath).exists()) await File(expectedPath).delete();
-        await File(withExt).rename(expectedPath);
-        onProgress?.call(1.0);
-        return expectedPath;
-      }
-      // Search for any file matching the output prefix
-      final dir = File(outputPath).parent;
-      final prefix = File(outputPath).uri.pathSegments.last;
-      await for (final f in dir.list()) {
-        if (f is File && f.path.contains(prefix)) {
-          if (f.path != expectedPath) {
-            await File(expectedPath).delete();
-            await f.rename(expectedPath);
-          }
-          onProgress?.call(1.0);
-          return expectedPath;
+      // 找到 yt-dlp 輸出的檔案（副檔名可能不同）
+      File? found;
+      await for (final f in dlDir.list()) {
+        if (f is File && !f.path.endsWith('.part') && !f.path.endsWith('.temp')) {
+          found = f;
+          break;
         }
       }
 
-      _log.w('yt-dlp 找不到輸出檔案');
-      onProgress?.call(0.0);
-      return null;
+      if (found == null || !await found.exists()) {
+        _log.w('yt-dlp 找不到輸出檔案');
+        dlDir.deleteSync(recursive: true);
+        return null;
+      }
+
+      final fileSize = await found.length();
+      if (fileSize < 1024) {
+        _log.w('yt-dlp 輸出檔案太小 (${fileSize}B)，可能下載失敗');
+        dlDir.deleteSync(recursive: true);
+        return null;
+      }
+
+      // 確保目標目錄存在
+      final outDir = Directory(File(outputPath).parent.path);
+      if (!await outDir.exists()) await outDir.create(recursive: true);
+
+      // 移動到目標路徑
+      if (await File(outputPath).exists()) await File(outputPath).delete();
+      await found.rename(outputPath);
+
+      onProgress?.call(1.0);
+      _log.i('yt-dlp 下載完成: ${outputPath.split('\\').last} (${fileSize ~/ 1024}KB)');
+      return outputPath;
     } catch (e) {
       _log.e('yt-dlp 異常: $e');
       return null;
+    } finally {
+      try { dlDir.deleteSync(recursive: true); } catch (_) {}
     }
   }
 
