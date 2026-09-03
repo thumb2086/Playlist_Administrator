@@ -204,8 +204,8 @@ class YoutubeService {
   }
 
   // ── 底層下載 ─────────────────────────────────────────
-  /// 用 yt-dlp CLI 下載 YouTube 音訊，再用 ffmpeg 本地轉碼。
-  /// yt-dlp 有完整的 YouTube 反爬處理（cookies、簽名解碼等）。
+  /// 用 yt-dlp CLI 下載並轉碼 YouTube 音訊。
+  /// yt-dlp -x --audio-format mp3 一步搞定（下載 + 轉碼）。
   Future<String?> downloadAudio(
     String audioUrl, {
     required String outputPath,
@@ -213,92 +213,70 @@ class YoutubeService {
     void Function(double progress)? onProgress,
     String? videoId,
   }) async {
-    final ffmpeg = _ffmpeg;
-    final tmpRaw = '$outputPath.raw.tmp';
-
-    // Step 1: 用 yt-dlp 下載 raw audio
+    final ytUrl = videoId != null ? 'https://www.youtube.com/watch?v=$videoId' : audioUrl;
     onProgress?.call(0.1);
+
     try {
-      final ytUrl = videoId != null ? 'https://www.youtube.com/watch?v=$videoId' : audioUrl;
+      // yt-dlp -x extracts audio, --audio-format converts, -o sets output
+      // 使用 mweb client 繞過 PO Token 要求（ios/web 需要 PO Token）
       final proc = await Process.start(
         'yt-dlp',
         [
-          '-x', '--audio-format', 'best',
+          '-x',
+          '--audio-format', format,
           '--no-playlist',
-          '-o', tmpRaw,
           '--no-overwrites',
           '--no-check-certificates',
+          '--extractor-args', 'youtube:player_client=mweb',
+          '-o', outputPath,
           ytUrl,
         ],
         runInShell: true,
       );
       final code = await proc.exitCode.timeout(
-        const Duration(seconds: 120),
+        const Duration(seconds: 180),
         onTimeout: () { proc.kill(); return -1; },
       );
 
-      if (code != 0 || !await File(tmpRaw).exists()) {
-        // yt-dlp may save with different extension — find it
-        final dir = File(tmpRaw).parent;
-        String? found;
-        await for (final f in dir.list()) {
-          if (f is File && f.path.startsWith(tmpRaw)) {
-            found = f.path;
-            break;
-          }
-        }
-        if (found == null) {
-          _log.w('yt-dlp 下載失敗 (exit $code)');
-          onProgress?.call(0.0);
-          return null;
-        }
-        // Rename found to tmpRaw
-        if (found != tmpRaw) {
-          await File(found).rename(tmpRaw);
-        }
-      }
-      onProgress?.call(0.6);
-    } catch (e) {
-      _log.e('yt-dlp 異常: $e');
-      try { await File(tmpRaw).delete(); } catch (_) {}
-      return null;
-    }
-
-    // Step 2: 用 ffmpeg 本地轉碼（無網路連線）
-    final args = <String>['-y', '-i', tmpRaw, '-vn'];
-    switch (format) {
-      case 'mp3':
-        args.addAll(['-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2']);
-      case 'flac':
-        args.addAll(['-c:a', 'flac']);
-      case 'm4a':
-        args.addAll(['-c:a', 'aac', '-b:a', '192k']);
-      case 'wav':
-        args.addAll(['-c:a', 'pcm_s16le', '-ar', '44100']);
-      default:
-        args.addAll(['-acodec', 'libmp3lame', '-q:a', '0', '-ac', '2']);
-    }
-    args.add(outputPath);
-
-    try {
-      onProgress?.call(0.7);
-      final proc = await Process.start(ffmpeg, args, runInShell: true);
-      final code = await proc.exitCode.timeout(
-        const Duration(seconds: 120),
-        onTimeout: () { proc.kill(); return -1; },
-      );
-      try { await File(tmpRaw).delete(); } catch (_) {}
-
-      if (code == 0 && await File(outputPath).exists()) {
-        onProgress?.call(1.0);
-        return outputPath;
-      } else {
-        _log.w('ffmpeg 轉碼失敗 (exit $code)');
+      if (code != 0) {
+        _log.w('yt-dlp 失敗 (exit $code)');
+        onProgress?.call(0.0);
         return null;
       }
+
+      // yt-dlp may append extension — find the actual output file
+      final expectedPath = outputPath;
+      if (await File(expectedPath).exists()) {
+        onProgress?.call(1.0);
+        return expectedPath;
+      }
+      // Try with format extension appended
+      final withExt = '$outputPath.$format';
+      if (await File(withExt).exists()) {
+        if (await File(expectedPath).exists()) await File(expectedPath).delete();
+        await File(withExt).rename(expectedPath);
+        onProgress?.call(1.0);
+        return expectedPath;
+      }
+      // Search for any file matching the output prefix
+      final dir = File(outputPath).parent;
+      final prefix = File(outputPath).uri.pathSegments.last;
+      await for (final f in dir.list()) {
+        if (f is File && f.path.contains(prefix)) {
+          if (f.path != expectedPath) {
+            await File(expectedPath).delete();
+            await f.rename(expectedPath);
+          }
+          onProgress?.call(1.0);
+          return expectedPath;
+        }
+      }
+
+      _log.w('yt-dlp 找不到輸出檔案');
+      onProgress?.call(0.0);
+      return null;
     } catch (e) {
-      _log.e('ffmpeg 異常: $e');
-      try { await File(tmpRaw).delete(); } catch (_) {}
+      _log.e('yt-dlp 異常: $e');
       return null;
     }
   }
