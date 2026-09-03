@@ -127,16 +127,19 @@ class PipelineOrchestrator {
       progress(100); return;
     }
 
-    // Download missing songs using native YoutubeService + yt-dlp — 2-way parallel.
+    // Download missing songs using yt-dlp — serial (YouTube rate-limits concurrent connections).
     int done = 0;
     int ok = 0;
     int fail = 0;
     final total = missing.length;
     final yt = YoutubeService.instance;
-    const workers = 2;
 
-    Future<void> downloadOne(int idx) async {
-      final song = missing[idx];
+    for (final song in missing) {
+      if (state.isCancelled) return;
+      await state.waitIfPaused();
+      if (state.isCancelled) return;
+      await Future<void>.delayed(Duration.zero);
+
       final safeName = song.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       final outPath = '${musicDir.path}\\$safeName.mp3';
 
@@ -153,7 +156,7 @@ class PipelineOrchestrator {
           fail++;
           done++;
           progress((done / total * 100).toDouble());
-          return;
+          continue;
         }
         onLog('    ⬇️ 下載中: ${result.title}');
         final tmpPath = '${musicDir.path}\\dl_${safeName.hashCode.toRadixString(16)}.mp3';
@@ -162,8 +165,7 @@ class PipelineOrchestrator {
           outputPath: tmpPath,
           videoId: result.videoId,
         );
-        final code = savedPath != null ? 0 : -1;
-        if (code == 0 && File(tmpPath).existsSync()) {
+        if (savedPath != null && File(tmpPath).existsSync()) {
           if (File(outPath).existsSync()) await File(outPath).delete();
           await File(tmpPath).rename(outPath);
           onLog('    ✅ 完成');
@@ -178,23 +180,6 @@ class PipelineOrchestrator {
       }
       done++;
       progress((done / total * 100).toDouble());
-    }
-
-    // Run downloads in parallel batches
-    for (int i = 0; i < missing.length; i += workers) {
-      if (state.isCancelled) break;
-      await state.waitIfPaused();
-      if (state.isCancelled) break;
-      final batchEnd = (i + workers < missing.length) ? i + workers : missing.length;
-      final futures = <Future>[];
-      for (int j = i; j < batchEnd; j++) {
-        futures.add(downloadOne(j));
-      }
-      await Future.wait(futures);
-      // Delay between batches to avoid YouTube rate limiting
-      if (i + workers < missing.length) {
-        await Future<void>.delayed(const Duration(seconds: 3));
-      }
     }
 
     onLog('下載完成: $ok 成功, $fail 失敗 (共 $total 首)');
