@@ -127,13 +127,13 @@ class PipelineOrchestrator {
       progress(100); return;
     }
 
-    // Download missing songs using native YoutubeService + ffmpeg — 4-way parallel.
+    // Download missing songs using native YoutubeService + yt-dlp — 2-way parallel.
     int done = 0;
     int ok = 0;
     int fail = 0;
     final total = missing.length;
     final yt = YoutubeService.instance;
-    const workers = 4;
+    const workers = 2;
 
     Future<void> downloadOne(int idx) async {
       final song = missing[idx];
@@ -191,6 +191,10 @@ class PipelineOrchestrator {
         futures.add(downloadOne(j));
       }
       await Future.wait(futures);
+      // Delay between batches to avoid YouTube rate limiting
+      if (i + workers < missing.length) {
+        await Future<void>.delayed(const Duration(seconds: 3));
+      }
     }
 
     onLog('下載完成: $ok 成功, $fail 失敗 (共 $total 首)');
