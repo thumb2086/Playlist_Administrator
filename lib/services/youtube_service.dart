@@ -221,32 +221,69 @@ class YoutubeService {
     final dlDir = Directory.systemTemp.createTempSync('yt_dl_');
     final dlTemp = '${dlDir.path}\\audio';
 
+    // 複製 Python bridge 的完整 yt-dlp 設定
+    // player_client: tv, web_embedded, android (避開 PO Token)
+    // player_skip: webpage, configs (減少 HTTP 請求)
+    // 完整 headers + retries + format fallback
+    final baseArgs = [
+      '-x',
+      '--audio-format', format,
+      '--no-playlist',
+      '--no-overwrites',
+      '--no-check-certificates',
+      '--extractor-args', 'youtube:player_client=tv,web_embedded,android;player_skip=webpage,configs',
+      '-o', '$dlTemp.%(ext)s',
+      '--sleep-interval', '3',
+      '--max-sleep-interval', '8',
+      '--retries', '3',
+      '--fragment-retries', '5',
+      '--socket-timeout', '60',
+      '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      '--add-header', 'Accept-Language:zh-TW,zh;q=0.9,en;q=0.5',
+    ];
+
     try {
-      final proc = await Process.start(
-        'yt-dlp',
-        [
+      // 第一輪：標準下載
+      var proc = await Process.start(
+        'yt-dlp', [...baseArgs, ytUrl],
+        runInShell: true,
+      );
+      String lastErr = '';
+      proc.stderr.transform(SystemEncoding().decoder).transform(const LineSplitter()).listen((line) {
+        lastErr = line;
+      });
+      var code = await proc.exitCode.timeout(
+        const Duration(seconds: 180),
+        onTimeout: () { proc.kill(); return -1; },
+      );
+
+      // 第一輪失敗 → 降級 fallback（worstvideo+worstaudio）
+      if (code != 0 && lastErr.contains('requested format is not available')) {
+        _log.w('yt-dlp 格式不可用，嘗試 fallback');
+        final fallbackArgs = [
           '-x',
           '--audio-format', format,
           '--no-playlist',
           '--no-overwrites',
           '--no-check-certificates',
-          '--extractor-args', 'youtube:player_client=mweb',
+      '--extractor-args', 'youtube:player_client=tv,web_embedded,android;player_skip=webpage,configs',
+          '-f', 'worstvideo[ext=mp4]+worstaudio/best',
           '-o', '$dlTemp.%(ext)s',
-          ytUrl,
-        ],
-        runInShell: true,
-      );
-
-      // Capture stderr for debugging
-      String lastErr = '';
-      proc.stderr.transform(SystemEncoding().decoder).transform(const LineSplitter()).listen((line) {
-        lastErr = line;
-      });
-
-      final code = await proc.exitCode.timeout(
-        const Duration(seconds: 180),
-        onTimeout: () { proc.kill(); return -1; },
-      );
+          '--sleep-interval', '3',
+          '--max-sleep-interval', '8',
+          '--retries', '3',
+          '--fragment-retries', '5',
+          '--socket-timeout', '60',
+        ];
+        proc = await Process.start('yt-dlp', [...fallbackArgs, ytUrl], runInShell: true);
+        proc.stderr.transform(SystemEncoding().decoder).transform(const LineSplitter()).listen((line) {
+          lastErr = line;
+        });
+        code = await proc.exitCode.timeout(
+          const Duration(seconds: 180),
+          onTimeout: () { proc.kill(); return -1; },
+        );
+      }
 
       onProgress?.call(0.9);
 
