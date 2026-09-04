@@ -146,24 +146,12 @@ class PipelineOrchestrator {
       onLog('  [$done/$total] $song');
 
       try {
-        onLog('    🔍 搜尋 YouTube…');
-        final result = await yt.resolveStream(song).timeout(
-          const Duration(seconds: 45),
-          onTimeout: () { onLog('  ⏰ 搜尋超時: $song'); return null; },
-        );
-        if (result == null) {
-          onLog('  ❌ 找不到: $song');
-          fail++;
-          done++;
-          progress((done / total * 100).toDouble());
-          continue;
-        }
-        onLog('    ⬇️ 下載中: ${result.title}');
+        onLog('    ⬇️ 搜尋+下載中…');
         final tmpPath = '${musicDir.path}\\dl_${safeName.hashCode.toRadixString(16)}.mp3';
-        final savedPath = await yt.downloadAudio(
-          result.audioUrl,
+        final savedPath = await yt.searchAndDownload(
+          song,
           outputPath: tmpPath,
-          videoId: result.videoId,
+          onTitle: (title) { if (title != null) onLog('    ⬇️ $title'); },
         );
         if (savedPath != null && File(tmpPath).existsSync()) {
           if (File(outPath).existsSync()) await File(outPath).delete();

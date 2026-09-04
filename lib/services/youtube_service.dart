@@ -204,6 +204,121 @@ class YoutubeService {
     return savedPath;
   }
 
+  // ── 搜尋 + 下載一步到位（取代 resolveStream + downloadAudio） ──
+  /// 用 yt-dlp 的 ytsearch: 一次搞定搜尋+下載，避免雙重 HTTP 被 YouTube bot 偵測。
+  Future<String?> searchAndDownload(
+    String query, {
+    required String outputPath,
+    String format = 'mp3',
+    void Function(String? title)? onTitle,
+    void Function(double progress)? onProgress,
+  }) async {
+    onProgress?.call(0.05);
+    final dlDir = Directory.systemTemp.createTempSync('yt_dl_');
+    final dlTemp = '${dlDir.path}\\audio';
+
+    final baseArgs = [
+      '-x',
+      '--audio-format', format,
+      '-f', 'ba/b',
+      '--no-playlist',
+      '--no-overwrites',
+      '--no-check-certificates',
+      '--extractor-args', 'youtube:player_client=tv,web_embedded,android;player_skip=webpage,configs',
+      '-o', '$dlTemp.%(ext)s',
+      '--retries', '3',
+      '--fragment-retries', '10',
+      '--socket-timeout', '60',
+      '--skip-unavailable-fragments',
+      '--ignore-errors',
+      '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      '--add-header', 'Accept-Language:zh-TW,zh;q=0.9,en;q=0.5',
+      '--print', 'after_move:filepath',  // 輸出最終檔案路徑
+    ];
+
+    try {
+      // 用 ytsearch1: 讓 yt-dlp 搜尋+下載一步到位
+      final proc = await Process.start(
+        'yt-dlp',
+        [...baseArgs, 'ytsearch1:$query'],
+        runInShell: true,
+      );
+
+      String lastErr = '';
+      String? finalPath;
+      proc.stdout.transform(SystemEncoding().decoder).transform(const LineSplitter()).listen((line) {
+        // --print after_move:filepath 會輸出最終路徑
+        if (line.contains('\\') || line.contains('/')) {
+          finalPath = line.trim();
+        }
+      });
+      proc.stderr.transform(SystemEncoding().decoder).transform(const LineSplitter()).listen((line) {
+        lastErr = line;
+        // 從 stderr 解析標題
+        if (line.contains('[download] Destination:')) {
+          final titleMatch = RegExp(r'Destination: .+\\(.+)$').firstMatch(line);
+          if (titleMatch != null) {
+            onTitle?.call(titleMatch.group(1)?.replaceAll(RegExp(r'\.\w+$'), ''));
+          }
+        }
+      });
+
+      final code = await proc.exitCode.timeout(
+        const Duration(seconds: 180),
+        onTimeout: () { proc.kill(); return -1; },
+      );
+
+      onProgress?.call(0.9);
+
+      if (code != 0) {
+        _log.w('yt-dlp 搜尋下載失敗 (exit $code): $lastErr');
+        dlDir.deleteSync(recursive: true);
+        return null;
+      }
+
+      // 找到輸出檔案
+      File? found;
+      if (finalPath != null && await File(finalPath!).exists()) {
+        found = File(finalPath!);
+      } else {
+        // fallback: 掃描 temp 目錄
+        await for (final f in dlDir.list()) {
+          if (f is File && !f.path.endsWith('.part') && !f.path.endsWith('.temp')) {
+            found = f;
+            break;
+          }
+        }
+      }
+
+      if (found == null || !await found.exists()) {
+        _log.w('yt-dlp 找不到輸出檔案');
+        dlDir.deleteSync(recursive: true);
+        return null;
+      }
+
+      final fileSize = await found.length();
+      if (fileSize < 1024) {
+        _log.w('yt-dlp 輸出檔案太小 (${fileSize}B)');
+        dlDir.deleteSync(recursive: true);
+        return null;
+      }
+
+      final outDir = Directory(File(outputPath).parent.path);
+      if (!await outDir.exists()) await outDir.create(recursive: true);
+      if (await File(outputPath).exists()) await File(outputPath).delete();
+      await found.rename(outputPath);
+
+      onProgress?.call(1.0);
+      _log.i('yt-dlp 下載完成: ${outputPath.split('\\').last} (${fileSize ~/ 1024}KB)');
+      return outputPath;
+    } catch (e) {
+      _log.e('yt-dlp 異常: $e');
+      return null;
+    } finally {
+      try { dlDir.deleteSync(recursive: true); } catch (_) {}
+    }
+  }
+
   // ── 底層下載 ─────────────────────────────────────────
   /// 用 yt-dlp CLI 下載 YouTube 音訊。
   /// 使用 temp 目錄避免路徑問題，完成後移到 outputPath。
