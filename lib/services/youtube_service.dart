@@ -236,6 +236,12 @@ class YoutubeService {
       '--print', 'after_move:filepath',  // 輸出最終檔案路徑
     ];
 
+    // 加入餅乾（如果有的話）
+    final searchCookies = _findCookies();
+    if (searchCookies != null) {
+      baseArgs.addAll(['--cookies', searchCookies]);
+    }
+
     try {
       // 用 ytsearch1: 讓 yt-dlp 搜尋+下載一步到位
       final proc = await Process.start(
@@ -320,6 +326,20 @@ class YoutubeService {
   }
 
   // ── 底層下載 ─────────────────────────────────────────
+  /// 搜尋餅乾檔案（桌面上的 yt_cookies.txt）。
+  static String? _cookiesPath;
+  static String? _findCookies() {
+    if (_cookiesPath != null) return _cookiesPath;
+    final paths = [
+      '${Platform.environment['USERPROFILE']}\\Desktop\\yt_cookies.txt',
+      '${Platform.environment['USERPROFILE']}\\Documents\\yt_cookies.txt',
+    ];
+    for (final p in paths) {
+      if (File(p).existsSync()) { _cookiesPath = p; return p; }
+    }
+    return null;
+  }
+
   /// 用 yt-dlp CLI 下載 YouTube 音訊。
   /// 使用 temp 目錄避免路徑問題，完成後移到 outputPath。
   Future<String?> downloadAudio(
@@ -357,6 +377,18 @@ class YoutubeService {
       '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       '--add-header', 'Accept-Language:zh-TW,zh;q=0.9,en;q=0.5',
     ];
+
+    // 加入餅乾（如果有的話）
+    final cookies2 = _findCookies();
+    if (cookies2 != null) {
+      baseArgs.addAll(['--cookies', cookies2]);
+    }
+
+    // 加入餅乾（如果有的話）
+    final cookies = _findCookies();
+    if (cookies != null) {
+      baseArgs.addAll(['--cookies', cookies]);
+    }
 
     try {
       // 第一輪：標準下載

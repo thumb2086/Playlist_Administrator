@@ -127,10 +127,11 @@ class PipelineOrchestrator {
       progress(100); return;
     }
 
-    // Download missing songs using yt-dlp — serial (YouTube rate-limits concurrent connections).
+    // Download missing songs using yt-dlp — serial with retry.
     int done = 0;
     int ok = 0;
     int fail = 0;
+    int consecutiveFails = 0;
     final total = missing.length;
     final yt = YoutubeService.instance;
 
@@ -138,7 +139,13 @@ class PipelineOrchestrator {
       if (state.isCancelled) return;
       await state.waitIfPaused();
       if (state.isCancelled) return;
-      await Future<void>.delayed(Duration.zero);
+
+      // 如果連續失敗太多次，等待較久（YouTube rate limit）
+      if (consecutiveFails >= 3) {
+        final waitSec = (consecutiveFails - 2) * 15;
+        onLog('  ⏳ 連續失敗 $consecutiveFails 次，等待 ${waitSec}s 後重試…');
+        await Future<void>.delayed(Duration(seconds: waitSec));
+      }
 
       final safeName = song.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       final outPath = '${musicDir.path}\\$safeName.mp3';
@@ -158,13 +165,16 @@ class PipelineOrchestrator {
           await File(tmpPath).rename(outPath);
           onLog('    ✅ 完成');
           ok++;
+          consecutiveFails = 0;
         } else {
           onLog('    ❌ 下載失敗');
           fail++;
+          consecutiveFails++;
         }
       } catch (e) {
         onLog('  ❌ 異常: $song → $e');
         fail++;
+        consecutiveFails++;
       }
       done++;
       progress((done / total * 100).toDouble());
