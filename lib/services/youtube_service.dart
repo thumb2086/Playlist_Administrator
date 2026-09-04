@@ -221,23 +221,24 @@ class YoutubeService {
     final dlDir = Directory.systemTemp.createTempSync('yt_dl_');
     final dlTemp = '${dlDir.path}\\audio';
 
-    // 複製 Python bridge 的完整 yt-dlp 設定
+    // 複製 Python bridge 的完整 yt-dlp 設定（對齊 core/downloader.py）
     // player_client: tv, web_embedded, android (避開 PO Token)
     // player_skip: webpage, configs (減少 HTTP 請求)
-    // 完整 headers + retries + format fallback
+    // format: ba/b (bestaudio first, fallback to best)
     final baseArgs = [
       '-x',
       '--audio-format', format,
+      '-f', 'ba/b',
       '--no-playlist',
       '--no-overwrites',
       '--no-check-certificates',
       '--extractor-args', 'youtube:player_client=tv,web_embedded,android;player_skip=webpage,configs',
       '-o', '$dlTemp.%(ext)s',
-      '--sleep-interval', '3',
-      '--max-sleep-interval', '8',
       '--retries', '3',
-      '--fragment-retries', '5',
+      '--fragment-retries', '10',
       '--socket-timeout', '60',
+      '--skip-unavailable-fragments',
+      '--ignore-errors',
       '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       '--add-header', 'Accept-Language:zh-TW,zh;q=0.9,en;q=0.5',
     ];
@@ -263,17 +264,17 @@ class YoutubeService {
         final fallbackArgs = [
           '-x',
           '--audio-format', format,
+          '-f', 'worstvideo[ext=mp4]+worstaudio/best',
           '--no-playlist',
           '--no-overwrites',
           '--no-check-certificates',
-      '--extractor-args', 'youtube:player_client=tv,web_embedded,android;player_skip=webpage,configs',
-          '-f', 'worstvideo[ext=mp4]+worstaudio/best',
+          '--extractor-args', 'youtube:player_client=tv,web_embedded,android;player_skip=webpage,configs',
           '-o', '$dlTemp.%(ext)s',
-          '--sleep-interval', '3',
-          '--max-sleep-interval', '8',
           '--retries', '3',
-          '--fragment-retries', '5',
+          '--fragment-retries', '10',
           '--socket-timeout', '60',
+          '--skip-unavailable-fragments',
+          '--ignore-errors',
         ];
         proc = await Process.start('yt-dlp', [...fallbackArgs, ytUrl], runInShell: true);
         proc.stderr.transform(SystemEncoding().decoder).transform(const LineSplitter()).listen((line) {
