@@ -114,13 +114,14 @@ def make_chunks(sentences: list[str], max_len: int = 600, overlap: int = 60) -> 
 
 
 def detect_meta(path: Path) -> dict:
-    """從檔名/路徑猜節目與日期"""
+    """從檔名/路徑猜節目、日期與來源類型"""
     parts = path.parts
     show = parts[-2] if len(parts) >= 2 else "unknown"
     name = path.stem
     m = re.search(r"(20\d{2})[_\-_](\d{1,2})[_\-_](\d{1,2})", name)
     date = f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}" if m else ""
-    return {"show": show, "file": name, "date": date}
+    source = "course" if re.search(r"夜工智|機械群|課程", str(path)) else "podcast"
+    return {"show": show, "file": name, "date": date, "source": source}
 
 
 def main() -> None:
